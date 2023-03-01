@@ -5,7 +5,8 @@
 [![Build Status](https://github.com/manuelbb-upb/Compromise.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/manuelbb-upb/Compromise.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/manuelbb-upb/Compromise.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/manuelbb-upb/Compromise.jl)
 
-## CoMPrOMISE — **Co**nstrained **M**ultiobjective **Pr**oblem **O**ptimizer with **M**odel **I**nformation to **S**ave **E**valuations
+## CoMPrOMISE
+**Co**nstrained **M**ultiobjective **Pr**oblem **O**ptimizer with **M**odel **I**nformation to **S**ave **E**valuations
 
 This package provides a flexible first-order solver for constrained and unconstrained nonlinear multiobjective problems.
 It uses a trust region approach and either exact derivatives or local surrogate models for a derivative-free descent.
