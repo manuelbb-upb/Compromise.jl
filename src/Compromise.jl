@@ -1,5 +1,6 @@
 module Compromise
 
-# Write your package code here.
+include("consts.jl")
 
+include("api.jl")
 end
