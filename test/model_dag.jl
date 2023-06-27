@@ -18,7 +18,7 @@ end
 
 tmp_y = ones(1)
 tmp_x = [π]
-eval_op!(tmp_y, Val(UInt64(1)), tmp_x)
+CE.eval_op!(tmp_y, Val(UInt64(1)), tmp_x)
 @test iszero(tmp_y[1])
 
 s = CE.add_operator!(model, 1, x, nothing; dim_out = 1)
@@ -39,24 +39,137 @@ op_node = only(CE.op_nodes(model))
 
 p = CE.add_parameter!(model, π)
 @test only(CE.param_nodes(model)) == p
-#%%
-func2 = (_x, _p) -> cos(@show(_x[1]) + @show(_p[1]))
-if length(CE.op_nodes(model))==1
-    CE.@operator(model, ξ[1]=func2(x, p))
-    @test ξ isa Vector{CE.StateNode}
-    @test length(ξ) == 1
-    @test length(CE.op_nodes(model)) == 2
-end
 
-if length(CE.op_nodes(model))==2
-    ξold = ξ
-    CE.@operator(model, ξ[1]=func2(x, p))
-    @test ξold != ξ
-    @test length(CE.op_nodes(model)) == 3
-end
+func2 = (_x, _p) -> cos(@show(_x[1]) + @show(_p[1]))
+CE.@operator(model, ξ[1]=func2(x, p))
+@test ξ isa Vector{CE.StateNode}
+@test length(ξ) == 1
+@test length(CE.op_nodes(model)) == 2
+
+ξold = ξ
+CE.@operator(model, ξ[1]=func2(x, p))
+@test ξold != ξ
+@test length(CE.op_nodes(model)) == 3
 
 opp_node = last(CE.op_nodes(model))
 tmp_y = ones(1)
 tmp_x = zeros(1)
 CE.eval_op!(tmp_y, Val(opp_node.dispatch_index), vcat(tmp_x, p.value))
 @test tmp_y[1] == cos(π)
+#%%
+dag = CE.initialize(model; check_cycles=true)
+
+for n in model.nodes
+    j = n.array_index
+    i = dag.dag_indices[j]
+    m = dag.nodes[i]
+    @test i == m.array_index
+    @test j == m.src_index
+end
+
+@test length(dag.primals) == 5  # 1 var + 3 states + 1 param (in that order)
+@test all(isnan.(dag.primals[1:end-1]))
+@test last(dag.primals) ≈ π
+
+x0 = [1.2,]
+CE.eval_node(dag, s[1], x0; prepare_grads=false)
+
+@test dag.primals[1] ≈ 1.2
+@test dag.primals[2] ≈ sin(1.2)
+@test dag.primals[5] ≈ π
+@test isnan(dag.primals[3])
+@test isnan(dag.primals[4])
+
+@test length(dag.x_hash) == 4 # 1 var + 3 states
+@test dag.x_hash[1] == dag.x_hash[2]
+@test dag.x_hash[1] != dag.x_hash[3]
+@test dag.x_hash[3] == dag.x_hash[4] == 0
+
+CE.eval_node(dag, ξold[1], x0; prepare_grads=false)
+@test dag.primals[1] ≈ 1.2
+@test dag.primals[2] ≈ sin(1.2)
+@test dag.primals[3] ≈ cos(1.2 + π)
+@test isnan(dag.primals[4])
+@test dag.primals[5] ≈ π
+
+@test dag.x_hash[1] == dag.x_hash[3]
+@test dag.x_hash[1] != dag.x_hash[4]
+
+CE.eval_node(dag, ξ[1], x0; prepare_grads=false)
+@test dag.primals[1] ≈ 1.2
+@test dag.primals[2] ≈ sin(1.2)
+@test dag.primals[3] ≈ cos(1.2 + π)
+@test dag.primals[4] ≈ dag.primals[3]
+@test dag.primals[5] ≈ π
+@test all(map(isequal(dag.x_hash[1]), dag.x_hash))
+
+dag.primals .= 0
+CE.eval_node(dag, ξ[1], x0; prepare_grads=false)
+@test all(iszero.(dag.primals))     # no values computed because of `dag.x_hash`
+dag.x_hash .= 0
+CE.eval_node(dag, ξ[1], x0; prepare_grads=false)
+@test dag.primals[4] ≈ cos(1.2)     # parameter was reset to 0 by `dag.primals .= 0`
+#%%
+dag.x_hash .= 0
+@test_throws Exception CE.eval_node(dag, ξ[1], x0)
+
+xdag = dag.nodes[dag.dag_indices[x.array_index]]
+ξdag = dag.nodes[dag.dag_indices[ξ[1].array_index]]
+opn = only(CE.predecessors(dag, ξdag))
+
+function CE.eval_grads!(Dy, ::Val{opn.special_index}, x_and_p)
+    @assert size(Dy) == (1, 1)
+    Dy[1] = -sin(x_and_p[1])
+    return nothing
+end
+
+dag.x_hash .= 0
+CE.eval_node(dag, ξ[1], x0)
+@test dag.partials[xdag.array_index, ξdag.array_index] ≈ -sin(x0[end])
+
+#%% example from wikipedia
+wikimod = CE.Model()
+w1 = CE.add_variable!(wikimod)
+w2 = CE.add_variable!(wikimod)
+
+function CE.eval_op!(y, ::Val{UInt64(3)}, x)
+    y[1] = prod(x)
+    return nothing
+end
+function CE.eval_grads!(Dy, ::Val{UInt64(3)}, x)
+    @assert size(Dy) == (2,1)
+    Dy[1] = x[2]
+    Dy[2] = x[1]
+    return nothing
+end
+w3 = only(CE.add_operator!(wikimod, 3, [w1, w2], nothing; dim_out = 1))
+
+function CE.eval_op!(y, ::Val{UInt64(4)}, x)
+    y[1] = sin(only(x))
+    return nothing
+end
+function CE.eval_grads!(Dy, ::Val{UInt64(4)}, x)
+    @assert size(Dy) == (1,1)
+    Dy[1] = cos(only(x))
+    return nothing
+end
+w4 = only(CE.add_operator!(wikimod, 4, w1, nothing; dim_out = 1))
+
+function CE.eval_op!(y, ::Val{UInt64(5)}, x)
+    y[1] = sum(x)
+    return nothing
+end
+function CE.eval_grads!(Dy, ::Val{UInt64(5)}, x)
+    @assert size(Dy) == (2,1)
+    Dy[:] .= 1
+    return nothing
+end
+w5 = only(CE.add_operator!(wikimod, 5, [w3,w4], nothing; dim_out = 1))
+
+wikidag = CE.initialize(wikimod)
+CE.eval_node(wikidag, w5, [1.5, 2.5])
+
+@test wikidag.primals[5] ≈ sin(1.5) + 1.5*2.5
+CE.pullback_node(wikidag, w5)
+@test wikidag.partials[1, 5] ≈ cos(1.5) + 2.5
+@test wikidag.partials[2, 5] ≈ 1.5
