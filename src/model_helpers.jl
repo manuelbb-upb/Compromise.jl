@@ -82,35 +82,23 @@ function add_operator!(model, dispatch_index, x, p; dim_out::Int)
 end
 
 function _eval_op_expr(mod, func_name, func_arg_x, func_arg_p)
-
     return quote
         dispatch_index = time_ns()
         num_x = length(ensure_vec($(esc(func_arg_x))))
         if isnothing($(esc(func_arg_p))) || length(ensure_vec($(esc(func_arg_p)))) == 0
-            Base.eval(
-                $(mod),
-                quote 
-                    function (::$($(typeof(eval_op!))))(y, v::Val{$(dispatch_index)}, x_and_p)
-                        y .= $($(esc(func_name)))(x_and_p)
-                        return nothing
-                    end
-                end
-            )
-        else
-            Base.eval(
-                $(mod),
-                quote 
-                    function split_x_and_p(x_and_p, ::Val{$(dispatch_index)})
-                        return @view(x_and_p[1:$(num_x)]), @view(x_and_p[$(num_x+1):end])
-                    end
-                    function (::$($(typeof(eval_op!))))(y, v::Val{$(dispatch_index)}, x_and_p)
-                        x, p = split_x_and_p(x_and_p, v)
-                        y .= $($(esc(func_name)))(x, p)
-                        return nothing
-                    end
-                end
-            )
+            arg_expr = (:x,)
+        else 
+            arg_expr = (:x, :p)
         end
+        Base.eval(
+            $(mod),
+            quote 
+                function (::$($(typeof(eval_op!))))(y, v::Val{$(dispatch_index)}, x, p)
+                    y .= $($(esc(func_name)))($(arg_expr...))
+                    return nothing
+                end
+            end
+        )
     end
 end
 

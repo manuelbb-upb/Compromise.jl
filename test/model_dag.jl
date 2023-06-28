@@ -11,14 +11,14 @@ x = CE.add_variable!(model)
 @test x.index == 1
 @test length(CE.var_nodes(model)) == 1
 
-function CE.eval_op!(y, ::Val{UInt64(1)}, x)
+function CE.eval_op!(y, ::Val{UInt64(1)}, x, p)
     y[1] = sin(x[1])
     return nothing
 end
 
 tmp_y = ones(1)
 tmp_x = [π]
-CE.eval_op!(tmp_y, Val(UInt64(1)), tmp_x)
+CE.eval_op!(tmp_y, Val(UInt64(1)), tmp_x, nothing)
 @test iszero(tmp_y[1])
 
 s = CE.add_operator!(model, 1, x, nothing; dim_out = 1)
@@ -54,7 +54,7 @@ CE.@operator(model, ξ[1]=func2(x, p))
 opp_node = last(CE.op_nodes(model))
 tmp_y = ones(1)
 tmp_x = zeros(1)
-CE.eval_op!(tmp_y, Val(opp_node.dispatch_index), vcat(tmp_x, p.value))
+CE.eval_op!(tmp_y, Val(opp_node.dispatch_index), tmp_x, p.value)
 @test tmp_y[1] == cos(π)
 #%%
 dag = CE.initialize(model; check_cycles=true)
@@ -117,9 +117,9 @@ xdag = dag.nodes[dag.dag_indices[x.array_index]]
 ξdag = dag.nodes[dag.dag_indices[ξ[1].array_index]]
 opn = only(CE.predecessors(dag, ξdag))
 
-function CE.eval_grads!(Dy, ::Val{opn.special_index}, x_and_p)
+function CE.eval_grads!(Dy, ::Val{opn.special_index}, x, p)
     @assert size(Dy) == (1, 1)
-    Dy[1] = -sin(x_and_p[1])
+    Dy[1] = -sin(x[1])
     return nothing
 end
 
@@ -132,11 +132,11 @@ wikimod = CE.Model()
 w1 = CE.add_variable!(wikimod)
 w2 = CE.add_variable!(wikimod)
 
-function CE.eval_op!(y, ::Val{UInt64(3)}, x)
+function CE.eval_op!(y, ::Val{UInt64(3)}, x, p)
     y[1] = prod(x)
     return nothing
 end
-function CE.eval_grads!(Dy, ::Val{UInt64(3)}, x)
+function CE.eval_grads!(Dy, ::Val{UInt64(3)}, x, p)
     @assert size(Dy) == (2,1)
     Dy[1] = x[2]
     Dy[2] = x[1]
@@ -144,22 +144,22 @@ function CE.eval_grads!(Dy, ::Val{UInt64(3)}, x)
 end
 w3 = only(CE.add_operator!(wikimod, 3, [w1, w2], nothing; dim_out = 1))
 
-function CE.eval_op!(y, ::Val{UInt64(4)}, x)
+function CE.eval_op!(y, ::Val{UInt64(4)}, x, p)
     y[1] = sin(only(x))
     return nothing
 end
-function CE.eval_grads!(Dy, ::Val{UInt64(4)}, x)
+function CE.eval_grads!(Dy, ::Val{UInt64(4)}, x, p)
     @assert size(Dy) == (1,1)
     Dy[1] = cos(only(x))
     return nothing
 end
 w4 = only(CE.add_operator!(wikimod, 4, w1, nothing; dim_out = 1))
 
-function CE.eval_op!(y, ::Val{UInt64(5)}, x)
+function CE.eval_op!(y, ::Val{UInt64(5)}, x, p)
     y[1] = sum(x)
     return nothing
 end
-function CE.eval_grads!(Dy, ::Val{UInt64(5)}, x)
+function CE.eval_grads!(Dy, ::Val{UInt64(5)}, x, p)
     @assert size(Dy) == (2,1)
     Dy[:] .= 1
     return nothing
@@ -181,31 +181,31 @@ x1 = CE.add_variable!(rosmod)
 x2 = CE.add_variable!(rosmod)
 
 # g1 = x1
-function CE.eval_op!(y, ::Val{UInt64(11)}, x)
+function CE.eval_op!(y, ::Val{UInt64(11)}, x, p)
     y[1] = x[1]
     return nothing
 end
-function CE.eval_grads!(Dy, ::Val{UInt64(11)}, x)
+function CE.eval_grads!(Dy, ::Val{UInt64(11)}, x, p)
     Dy[1,1] = 1
     return nothing
 end
-function CE.eval_hessians!(H, ::Val{UInt64(11)}, x)
+function CE.eval_hessians!(H, ::Val{UInt64(11)}, x, p)
     H[1,1,1] = 0
     return nothing
 end
 g1 = CE.add_operator!(rosmod, 11, x1, nothing; dim_out = 1)
 
 # g2 = x1^2 - x2
-function CE.eval_op!(y, ::Val{UInt64(12)}, x)
+function CE.eval_op!(y, ::Val{UInt64(12)}, x, p)
     y[1] = x[1]^2 - x[2]
     return nothing
 end
-function CE.eval_grads!(Dy, ::Val{UInt64(12)}, x)
+function CE.eval_grads!(Dy, ::Val{UInt64(12)}, x, p)
     Dy[1,1] = 2*x[1]
     Dy[2,1] = -1
     return nothing
 end
-function CE.eval_hessians!(H, ::Val{UInt64(12)}, x)
+function CE.eval_hessians!(H, ::Val{UInt64(12)}, x, p)
     H[1,1,1] = 2
     H[2,1,1] = 0
     return nothing
@@ -214,18 +214,21 @@ g2 = CE.add_operator!(rosmod, 12, [x1; x2], nothing; dim_out = 1)
 
 
 # f(g1, g2) = (1-g1)^2 + 100*g2^2
-function CE.eval_op!(y, ::Val{UInt64(13)}, g)
+function CE.eval_op!(y, ::Val{UInt64(13)}, g, p)
     y[1] = (1-g[1])^2 + 100*g[2]^2
     return nothing
 end
-function CE.eval_grads!(Dy, ::Val{UInt64(13)}, g)
+function CE.eval_grads!(Dy, ::Val{UInt64(13)}, g, p)
     Dy[1,1] = -2*(1-g[1])
     Dy[2,1] = 200*g[2]
     return nothing
 end
-function CE.eval_hessians!(H, ::Val{UInt64(13)}, g)
-    H[1,1,1] = 2
-    H[2,1,1] = 200
+function CE.eval_hessians!(H, ::Val{UInt64(13)}, g, p)
+    H[1,1,1] = 2        #∂y/∂1∂1
+    H[1,2,1] = 0        #∂y/∂1∂2
+    H[2,1,1] = 0        #∂y/∂1∂2
+    H[2,2,1] = 200      #∂y/∂2∂2
+
     return nothing
 end
 
@@ -249,3 +252,8 @@ dy2 = 200*(x0[2]-x0[1]^2)
 @test rosdag.partials[x2i, yi] ≈ dy2
 
 CE.forward_hessian(rosdag, y)
+Hy = [
+    800*x0[1]^2-400*(x0[2]-x0[1]^2)+2   -400*x0[1];
+    -400*x0[1]                          200
+]
+@test all(rosdag.partials2[[x1i, x2i], [x1i, x2i], yi] .≈ Hy)

@@ -174,37 +174,37 @@ Base.show(io::IO, node::ValueDispatchNode)=print(io, "Operator$(sub(node.n_in))$
 # Namely, for every operator in our model we wish the following to functions to be defined:
 
 """
-    eval_op!(y, ::Val{i}, x_and_p)
+    eval_op!(y, ::Val{i}, x, p)
 
 Evaluate the operator with special index `i::UInt64` at variable vector `x` with parameters `p`
 and mutate the target vector `y` to contain the result.
 """
-function eval_op!(y, ::Val{I}, x_and_p) where I
+function eval_op!(y, ::Val{I}, x, p) where I
     return error("No implementation of `eval_op!` for operator with special index $I.")
 end
 
 """
-    eval_grads!(Dy, ::Val{i}, x_and_p)
+    eval_grads!(Dy, ::Val{i}, x, p)
 
 Compute the gradients of the operator with special index `i` at variable vector `x` 
 with parameters `p` and mutate the target matrix `Dy` to contain the gradients w.r.t. `x`
 in its columns. That is, `Dy` is the transposed Jacobian at `x`.
 """
-function eval_grads!(Dy, ::Val{I}, x_and_p) where I
+function eval_grads!(Dy, ::Val{I}, x, p) where I
     return error("No implementation of `eval_grads!` for operator with special index $I.")
 end
 
 # The combined forward-function `eval_op_and_grads!` is derived from `eval_op!` and 
 # `eval_grads!`, but can be customized easily:
-function eval_op_and_grads!(y, Dy, val, x_and_p; do_grads=false)
-    eval_op!(y, val, x_and_p)
+function eval_op_and_grads!(y, Dy, val, x, p; do_grads=false)
+    eval_op!(y, val, x, p)
     if do_grads
-        eval_grads!(Dy, val, x_and_p)
+        eval_grads!(Dy, val, x, p)
     end
     return nothing
 end
 
-# If Hessian matrices are needed, implement `eval_hessians!(H, ::Val{I}, x_and_p)`
+# If Hessian matrices are needed, implement `eval_hessians!(H, ::Val{I}, x, p)`
 # for a operator dispatching on `I`.
 # Assume `H` to be a vector of matrices, each matrix corresponding to the hessian of 
 # some operator output.
@@ -214,14 +214,14 @@ end
 # correct order- `H[i,j,k]` should correspond to `∂yₖ/∂xᵢ∂xⱼ`:
 
 """
-    eval_hessians!(H, ::Val{i}, x_and_p)
+    eval_hessians!(H, ::Val{i}, x, p)
 
 Compute the Hessians of the operator with special index `i` at variable vector `x` 
 with parameters `p` and mutate the target array `H` to contain the Hessians 
 along its last index.
 That is, `H[:,:,i]` is the Hessian at `x` and `p` w.r.t. `x` of output `i`.
 """
-function eval_hessians!(H, ::Val{I}, x_and_p) where I
+function eval_hessians!(H, ::Val{I}, x, p) where I
     return error("No implementation of `eval_hessians!` for operator with special index $I.")
 end
 
@@ -230,9 +230,10 @@ end
 supports_partial_evaluation(val) = false
 supports_partial_jacobian(val) = false
 ## length(y)==length(outputs)
-eval_op!(y, ::Val{I}, x_and_p, outputs) where{I}=error("Partial evaluation not implemented.")
+eval_op!(y, ::Val{I}, x, p, outputs) where{I}=error("Partial evaluation not implemented.")
 ## size(Dy)==(length(x), length(outputs))
-eval_grads!(Dy, ::Val{I}, x_and_p, outputs) where{I}=error("Partial Jacobian not implemented.")
+eval_grads!(Dy, ::Val{I}, x, p, outputs) where{I}=error("Partial Jacobian not implemented.")
+#src TODO partial Hessians?
 
 # ### `Model` Type
 
@@ -285,6 +286,7 @@ struct MetaNode
 	array_index :: Int
     src_index :: Int
 	special_index :: UInt64
+    num_deps :: Int
 end
 
 ## helpers for construction:
@@ -347,8 +349,6 @@ Base.@kwdef struct DAG
     adj_pred :: SparseMatrixCSC{Int, Int}
     ## partial adjacency matrix, but with successor indices stored in columns
     adj_succ :: SparseMatrixCSC{Int, Int}
-
-    pred_is_dep :: BitMatrix
     ## NOTE
     ## previously, I used a single adjecency matrix, where 
     ## the predecessor indices of node with index j where stored as negative 
@@ -434,17 +434,17 @@ function initialize(model; sort_nodes=true, check_cycles=false)
     si = 0  # special_index == array_index
     for ni in model.var_indices
         si += 1
-        nodes[si] = MetaNode(META_NODE_VAR, si, ni, si)
+        nodes[si] = MetaNode(META_NODE_VAR, si, ni, si, 0)
         model_indices[si] = ni
     end
     for ni in model.state_indices
         si += 1
-        nodes[si] = MetaNode(META_NODE_STATE, si, ni, si)
+        nodes[si] = MetaNode(META_NODE_STATE, si, ni, si, 0)
         model_indices[si] = ni
     end
     for ni in model.param_indices
         si += 1
-        nodes[si] = MetaNode(META_NODE_PARAM, si, ni, si)
+        nodes[si] = MetaNode(META_NODE_PARAM, si, ni, si, 1)
         n = model.nodes[ni]
         primals[si] = n.value
         model_indices[si] = ni
@@ -455,13 +455,13 @@ function initialize(model; sort_nodes=true, check_cycles=false)
     for ni in model.op_indices
         si += 1
         n = model.nodes[ni]
-        nodes[si] = MetaNode(META_NODE_OP, si, ni, n.dispatch_index)
+        nodes[si] = MetaNode(META_NODE_OP, si, ni, n.dispatch_index, n.n_in)
         model_indices[si] = ni
     end
     for ni in model.model_indices
         si += 1
         n = model.nodes[ni]
-        nodes[si] = MetaNode(META_NODE_MODEL, si, ni, n.index)
+        nodes[si] = MetaNode(META_NODE_MODEL, si, ni, n.index, 0)   # TODO `num_deps`
         model_indices[si] = ni
     end
     dag_indices = sortperm(model_indices)
@@ -470,7 +470,6 @@ function initialize(model; sort_nodes=true, check_cycles=false)
     ## Kahn's Algorithm below
     adj_pred = spzeros(Int, nvals, nnodes)
     adj_succ = spzeros(Int, nvals, nnodes)
-    _pred_is_dep = zeros(Bool, nvals, nnodes)
     max_in = 0
     max_out = 0
     for meta_n in nodes
@@ -483,9 +482,6 @@ function initialize(model; sort_nodes=true, check_cycles=false)
             if pos >= max_in
                 max_in = pos
             end
-            if is_dep_node(m)
-                _pred_is_dep[pos, meta_ni] = true
-            end
         end
         for (pos, m) in enumerate(out_nodes(n))
             mi = m.array_index
@@ -496,7 +492,6 @@ function initialize(model; sort_nodes=true, check_cycles=false)
             end
         end
     end
-    pred_is_dep = _pred_is_dep[1:max_in, :]
 
     adj_in = copy(adj_pred)
     adj_out = copy(adj_succ)
@@ -555,8 +550,7 @@ function initialize(model; sort_nodes=true, check_cycles=false)
         sorting_indices,
 		adj_pred,
 		adj_succ,
-        pred_is_dep,
-		primals, 
+        primals, 
 		partials,
         partials2,
         p_hash,
@@ -645,7 +639,9 @@ ensure_int_vec(arr::AbstractVector{<:Integer}) = arr
 	
     ## compute output(s)   
 	dispatch_val = Val(node.special_index)  # value to dispatch `eval_op!` on
-    x_and_p = dag.primals[input_indices]    # input vector for `eval_op`
+    dep_indices = input_indices[1:node.num_deps]
+    param_indices = input_indices[node.num_deps+1:end]
+    x, p = dag.primals[dep_indices], dag.primals[param_indices]   # input vector for `eval_op`
     output_indices = succ_indices(dag, node)
     output_pos = nothing
     if supports_partial_evaluation(dispatch_val) && !isnothing(out_array_index)
@@ -653,23 +649,21 @@ ensure_int_vec(arr::AbstractVector{<:Integer}) = arr
         if !isnothing(output_pos)
             ## without `@views` wrapping this function, we would need `ensure_int_vec`
             ## to index dag.primals correctly here
-            eval_op!(dag.primals[output_indices[output_pos]], dispatch_val, x_and_p, output_pos)
+            eval_op!(dag.primals[output_indices[output_pos]], dispatch_val, x, p, output_pos)
         end
     end
     if isnothing(output_pos)
-	    eval_op!(dag.primals[output_indices], dispatch_val, x_and_p)
+	    eval_op!(dag.primals[output_indices], dispatch_val, x, p)
     end
     
     ## compute gradients
     if prepare_grads
-        nin = length(input_indices)
-        grad_inputs = input_indices[dag.pred_is_dep[1:nin, node.array_index]]
         if supports_partial_jacobian(dispatch_val) && !isnothing(output_pos)
-            jacT = dag.partials[grad_inputs, output_indices[output_pos]]
-	        eval_grads!(jacT, dispatch_val, x_and_p, output_pos)
+            jacT = dag.partials[dep_indices, output_indices[output_pos]]
+	        eval_grads!(jacT, dispatch_val, x, p, output_pos)
         else
-	        jacT = dag.partials[grad_inputs, output_indices]
-	        eval_grads!(jacT, dispatch_val, x_and_p)
+	        jacT = dag.partials[dep_indices, output_indices]
+	        eval_grads!(jacT, dispatch_val, x, p)
         end
     end
 
@@ -873,27 +867,37 @@ import LinearAlgebra as LA
 
     output_indices = succ_indices(dag, node)
     
-    x_and_p = dag.primals[input_indices]    # input vector for `eval_hess!`
+    dep_indices = input_indices[1:node.num_deps] 
+    param_indices = input_indices[node.num_deps:end]
+    x = dag.primals[dep_indices]
+    p = dag.primals[param_indices]    # input vector for `eval_hess!`
     dispatch_val = Val(node.special_index)  # value to dispatch `eval_hess!` on
 
-    nin = length(input_indices)
-    hess_inputs = input_indices[dag.pred_is_dep[1:nin, node.array_index]]
-	
-    H = dag.partials2[hess_inputs, hess_inputs, output_indices]
-    eval_hessians!(H, dispatch_val, x_and_p)
+    H = dag.partials2[dep_indices, dep_indices, output_indices]
+    eval_hessians!(H, dispatch_val, x, p)
 
-    _JgT = dag.partials[:, hess_inputs]
-    ij_indices = setdiff(unique(rowvals(_JgT)), hess_inputs)       # TODO store these indices in some array of `dag` during pullback...
+    #src _JgT = dag.partials[:, dep_indices]
+    #src ij_indices = setdiff(unique(rowvals(_JgT)), dep_indices)      
+    #src ij_indices = setdiff(1:(dag.nvars + dag.nstates), dep_indices, output_indices)
+    jac_rows = rowvals(dag.partials)
+    ij_indices = Vector{Int}()
+    for j in dep_indices 
+        union!(ij_indices, jac_rows[nzrange(dag.partials, j)])
+    end 
+    #src TODO store these indices in some array of `dag` during pullback...
     
-    for out_ind in output_indices
-        Hy = dag.partials2[ij_indices, ij_indices, out_ind]     # target array
-        Hy_u = dag.partials2[hess_inputs, hess_inputs, out_ind] # hessian of output `y` w.r.t. inputs u_1, …, u_k
-        JuT = dag.partials[ij_indices, hess_inputs]             # transposed Jacobian of inputs
-        Hy .= JuT * Hy_u * Ju'    # TODO can we do some in-place stuff here?
-        for k in hess_inputs
-            dy_uk = dag.partials[k, out_ind]
-            Huk = dag.partials2[ij_indices, ij_indices, k]
-            Hy += dy_uk .* Huk
+    if !isempty(ij_indices)
+        for out_ind in output_indices
+            Hy = dag.partials2[ij_indices, ij_indices, out_ind]     # target array
+            Hy_u = dag.partials2[dep_indices, dep_indices, out_ind] # hessian of output `y` w.r.t. inputs u_1, …, u_k
+            JuT = dag.partials[ij_indices, dep_indices]             # transposed Jacobian of inputs
+            Hy .= JuT * Hy_u * JuT'    # TODO can we do some in-place stuff here?
+            
+            for k in dep_indices
+                dy_uk = dag.partials[k, out_ind]
+                Huk = dag.partials2[ij_indices, ij_indices, k]
+                Hy .+= dy_uk .* Huk
+            end
         end
     end
 
