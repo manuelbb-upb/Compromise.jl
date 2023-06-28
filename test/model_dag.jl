@@ -173,3 +173,79 @@ CE.eval_node(wikidag, w5, [1.5, 2.5])
 CE.pullback_node(wikidag, w5)
 @test wikidag.partials[1, 5] ≈ cos(1.5) + 2.5
 @test wikidag.partials[2, 5] ≈ 1.5
+
+#%% Rosenbrock for Hessians
+
+rosmod = CE.Model()
+x1 = CE.add_variable!(rosmod)
+x2 = CE.add_variable!(rosmod)
+
+# g1 = x1
+function CE.eval_op!(y, ::Val{UInt64(11)}, x)
+    y[1] = x[1]
+    return nothing
+end
+function CE.eval_grads!(Dy, ::Val{UInt64(11)}, x)
+    Dy[1,1] = 1
+    return nothing
+end
+function CE.eval_hessians!(H, ::Val{UInt64(11)}, x)
+    H[1,1,1] = 0
+    return nothing
+end
+g1 = CE.add_operator!(rosmod, 11, x1, nothing; dim_out = 1)
+
+# g2 = x1^2 - x2
+function CE.eval_op!(y, ::Val{UInt64(12)}, x)
+    y[1] = x[1]^2 - x[2]
+    return nothing
+end
+function CE.eval_grads!(Dy, ::Val{UInt64(12)}, x)
+    Dy[1,1] = 2*x[1]
+    Dy[2,1] = -1
+    return nothing
+end
+function CE.eval_hessians!(H, ::Val{UInt64(12)}, x)
+    H[1,1,1] = 2
+    H[2,1,1] = 0
+    return nothing
+end
+g2 = CE.add_operator!(rosmod, 12, [x1; x2], nothing; dim_out = 1)
+
+
+# f(g1, g2) = (1-g1)^2 + 100*g2^2
+function CE.eval_op!(y, ::Val{UInt64(13)}, g)
+    y[1] = (1-g[1])^2 + 100*g[2]^2
+    return nothing
+end
+function CE.eval_grads!(Dy, ::Val{UInt64(13)}, g)
+    Dy[1,1] = -2*(1-g[1])
+    Dy[2,1] = 200*g[2]
+    return nothing
+end
+function CE.eval_hessians!(H, ::Val{UInt64(13)}, g)
+    H[1,1,1] = 2
+    H[2,1,1] = 200
+    return nothing
+end
+
+y = CE.add_operator!(rosmod, 13, [g1; g2], nothing; dim_out = 1)[end]
+
+rosdag = CE.initialize(rosmod)
+
+x0 = [ℯ, -π]
+CE.eval_node(rosdag, y, x0)
+
+x1i = rosdag.dag_indices[x1.array_index]
+x2i = rosdag.dag_indices[x2.array_index]
+yi = rosdag.dag_indices[y.array_index]
+
+@test rosdag.primals[yi] ≈ (1-x0[1])^2 + 100*(x0[1]^2 - x0[2])^2
+
+CE.pullback_node(rosdag, y)
+dy1 = -400*(x0[2]-x0[1]^2)*x0[1] -2*(1-x0[1])
+dy2 = 200*(x0[2]-x0[1]^2)
+@test rosdag.partials[x1i, yi] ≈ dy1 
+@test rosdag.partials[x2i, yi] ≈ dy2
+
+CE.forward_hessian(rosdag, y)

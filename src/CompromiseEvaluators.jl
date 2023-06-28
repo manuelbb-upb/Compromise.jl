@@ -174,7 +174,7 @@ Base.show(io::IO, node::ValueDispatchNode)=print(io, "Operator$(sub(node.n_in))$
 # Namely, for every operator in our model we wish the following to functions to be defined:
 
 """
-    eval_op!(y, ::Val{i}, x, p)
+    eval_op!(y, ::Val{i}, x_and_p)
 
 Evaluate the operator with special index `i::UInt64` at variable vector `x` with parameters `p`
 and mutate the target vector `y` to contain the result.
@@ -184,11 +184,11 @@ function eval_op!(y, ::Val{I}, x_and_p) where I
 end
 
 """
-    eval_grads!(Dy, ::Val{i}, x, p)
+    eval_grads!(Dy, ::Val{i}, x_and_p)
 
 Compute the gradients of the operator with special index `i` at variable vector `x` 
-with parameters `p` and mutate the target matrix `Dy` to contain the gradients in its 
-columns. That is, `Dy` is the transposed Jacobian at `x`.
+with parameters `p` and mutate the target matrix `Dy` to contain the gradients w.r.t. `x`
+in its columns. That is, `Dy` is the transposed Jacobian at `x`.
 """
 function eval_grads!(Dy, ::Val{I}, x_and_p) where I
     return error("No implementation of `eval_grads!` for operator with special index $I.")
@@ -202,6 +202,27 @@ function eval_op_and_grads!(y, Dy, val, x_and_p; do_grads=false)
         eval_grads!(Dy, val, x_and_p)
     end
     return nothing
+end
+
+# If Hessian matrices are needed, implement `eval_hessians!(H, ::Val{I}, x_and_p)`
+# for a operator dispatching on `I`.
+# Assume `H` to be a vector of matrices, each matrix corresponding to the hessian of 
+# some operator output.
+# That is, `H[:,:,1]` is a matrix containing second order partial derivatives of the first output,
+# `H[:,:,2]` has second order derivatives for the second output, and so forth...
+# Moreover, in contrast to `eval_grads!`, the Hessian information should be stored in 
+# correct order- `H[i,j,k]` should correspond to `∂yₖ/∂xᵢ∂xⱼ`:
+
+"""
+    eval_hessians!(H, ::Val{i}, x_and_p)
+
+Compute the Hessians of the operator with special index `i` at variable vector `x` 
+with parameters `p` and mutate the target array `H` to contain the Hessians 
+along its last index.
+That is, `H[:,:,i]` is the Hessian at `x` and `p` w.r.t. `x` of output `i`.
+"""
+function eval_hessians!(H, ::Val{I}, x_and_p) where I
+    return error("No implementation of `eval_hessians!` for operator with special index $I.")
 end
 
 # Some operators might support partial evaluation. 
@@ -307,6 +328,7 @@ import SparseArrays: SparseMatrixCSC, spzeros, dropstored!, nnz, nzrange, rowval
 # One for predecessors (or “input”) and one for successors (or “outputs”) in the graph.
 # Their array_indices are stored in order and column-wise.
 
+import SparseArrayKit as SAK
 Base.@kwdef struct DAG
     ## meta-data
     nvars :: Int
@@ -335,11 +357,13 @@ Base.@kwdef struct DAG
     
     primals :: Vector{Float64}
     partials :: SparseMatrixCSC{Float64, Int}
+    partials2 :: SAK.SparseArray{Float64, 3}
     
     p_hash :: Base.Ref{UInt64}
     x_hash :: Vector{UInt64}
     dx_hash :: SparseMatrixCSC{UInt64, Int}
-    
+    ddx_hash :: Vector{UInt64}
+
     models :: Vector{Any}
 end
 
@@ -517,10 +541,12 @@ function initialize(model; sort_nodes=true, check_cycles=false)
     ## column `j` contains the partial derivatives of scalar node `n` with `n.array_index==j`
     ## with respect to `m` with `m.array_index==i`:
 	partials = spzeros(Float64, ndeps, ndeps)
+    partials2 = SAK.SparseArray{Float64}(undef, ndeps, ndeps, ndeps)
 
     p_hash = Ref(zero(UInt64))
 	x_hash = fill(p_hash[], ndeps)
 	dx_hash = spzeros(UInt64, ndeps, ndeps)
+    ddx_hash = copy(x_hash)
 	
 	return DAG(;
 		nvars, nparams, nstates, nops, nmodels,
@@ -532,9 +558,11 @@ function initialize(model; sort_nodes=true, check_cycles=false)
         pred_is_dep,
 		primals, 
 		partials,
+        partials2,
         p_hash,
 		x_hash,
 		dx_hash,
+        ddx_hash,
         models = Any[]
 	)
 end
@@ -570,21 +598,27 @@ function eval_node(dag, node::MetaNode, x, x_hash; kwargs...)
 	    if x_hash == dag.x_hash[ni]
 		    return nothing
 	    end
-
-	    dag.x_hash[ni] = x_hash
+    else
+        ni = -1
     end
 	
 	if node.ntype == META_NODE_VAR
-		return eval_var_node(dag, node, x, x_hash; kwargs...)
+		eval_var_node(dag, node, x, x_hash; kwargs...)
 	elseif node.ntype == META_NODE_PARAM
-		return eval_param_node(dag, node, x, x_hash; kwargs...)
+		eval_param_node(dag, node, x, x_hash; kwargs...)
 	elseif node.ntype == META_NODE_STATE
-		return eval_state_node(dag, node, x, x_hash; kwargs...)
+		eval_state_node(dag, node, x, x_hash; kwargs...)
 	elseif node.ntype == META_NODE_OP
-		return eval_op_node(dag, node, x, x_hash; kwargs...)
+		eval_op_node(dag, node, x, x_hash; kwargs...)
 	elseif node.ntype == META_NODE_MODEL
-		return eval_model_node(dag, node, x, x_hash; kwargs...)
+		eval_model_node(dag, node, x, x_hash; kwargs...)
 	end
+
+    if ni > 0
+        dag.x_hash[ni] = x_hash
+    end
+
+    return nothing
 end
 
 function eval_param_node(args...; kwargs...) end
@@ -664,15 +698,7 @@ function pullback_node(dag, node, diff_index, x_hash)
 	    end
     end
 
-	#=
-	if dag.dx_hash[ni] == x_hash
-		return nothing
-	end
-
-	dag.dx_hash[ni] = x_hash
-	=#
-	
-	if node.ntype == META_NODE_VAR
+    if node.ntype == META_NODE_VAR
 		return pullback_var_node(dag, node, diff_index, x_hash)
     elseif node.ntype == META_NODE_PARAM
 		return pullback_param_node(dag, node, diff_index, x_hash)
@@ -705,7 +731,6 @@ end
 	ni == diff_index && return nothing
 	
 	dag.dx_hash[ni, diff_index] == x_hash && return nothing
-	dag.dx_hash[ni, diff_index] = x_hash
 
 	## let node with `diff_index` be `z`
 	## let current node be `n`
@@ -726,6 +751,8 @@ end
 		end
 	end
 	dag.partials[ni, diff_index] = dzdn
+
+    dag.dx_hash[ni, diff_index] = x_hash
 	return nothing
 end
 
@@ -741,6 +768,135 @@ end
 		pullback_node(dag, n, diff_index, x_hash)
 	end
 	
+	return nothing
+end
+
+#=
+To compute Hessian matrices, Wikipedia gives us 
+[Faà di Brunos formula](https://en.wikipedia.org/wiki/Chain_rule#Higher_derivatives_of_multivariable_functions):
+```math
+\frac{
+    ∂y
+}{
+    ∂x_i ∂x_j
+}
+= 
+\sum_k
+    \left(
+        \frac{
+            ∂y
+        }{
+            ∂u_k
+        }
+        \frac{
+            ∂^2 u_k
+        }{
+            ∂x_i ∂x_j
+        }
+    \right)
++
+\sum_{k,ℓ}
+    \left(
+        \frac{
+            ∂^2 y
+        }{
+            ∂u_k ∂u_ℓ
+        }
+        \frac{
+            ∂u_k
+        }{
+            ∂x_i
+        }
+        \frac{
+            ∂u_ℓ
+        }{
+            ∂x_j
+        }
+    \right).
+```
+This corresponds to the matrix formula found in [this article](https://arxiv.org/pdf/1911.13292.pdf):
+```math
+H(f∘g) = (∇g)ᵀ ⋅ Hf(g) ⋅ ∇g + ∑ₖ ∂ₖf Hgₖ
+```
+=#
+
+function forward_hessian(dag, node::AbstractNode)
+    meta_node = dag.nodes[dag.dag_indices[node.array_index]]
+    return forward_hessian(dag, meta_node)
+end
+
+function forward_hessian(dag, node::MetaNode)
+    @assert is_scalar_node(node) "Can only compute Hessian of scalar nodes."
+    diff_index = node.array_index
+    x_hash = dag.x_hash[diff_index]
+    return forward_hessian(dag, node, diff_index, x_hash)
+end
+
+function forward_hessian(dag, node, diff_index, x_hash)
+	if is_dep_node(node)
+        ni = node.array_index
+	
+	    if dag.x_hash[ni] != x_hash
+		    error("Fractured evaluation tree, gradients not valid. Perform forward pass up until node with array index $diff_index.")
+	    end
+        if dag.ddx_hash[ni] == x_hash
+            return nothing
+        end
+    else
+        ni = -1
+    end
+	
+	if node.ntype == META_NODE_STATE
+		forward_hessian_state(dag, node, diff_index, x_hash)
+	elseif node.ntype == META_NODE_OP
+		forward_hessian_op(dag, node, diff_index, x_hash)
+	end
+    if ni > 0
+        dag.ddx_hash[ni] = x_hash
+    end
+    return nothing
+end
+
+@views function forward_hessian_state(dag, node, diff_index, x_hash)
+    op_array_index = only(pred_indices(dag, node))
+    return forward_hessian_op(dag, dag.nodes[op_array_index], diff_index, x_hash)
+end
+
+import LinearAlgebra as LA
+@views function forward_hessian_op(dag, node, diff_index, x_hash)
+    input_indices = pred_indices(dag, node)
+
+    # set Hessians of inputs
+    for in_ind in input_indices
+        forward_hessian(dag, dag.nodes[in_ind], diff_index, x_hash)
+    end
+
+    output_indices = succ_indices(dag, node)
+    
+    x_and_p = dag.primals[input_indices]    # input vector for `eval_hess!`
+    dispatch_val = Val(node.special_index)  # value to dispatch `eval_hess!` on
+
+    nin = length(input_indices)
+    hess_inputs = input_indices[dag.pred_is_dep[1:nin, node.array_index]]
+	
+    H = dag.partials2[hess_inputs, hess_inputs, output_indices]
+    eval_hessians!(H, dispatch_val, x_and_p)
+
+    _JgT = dag.partials[:, hess_inputs]
+    ij_indices = setdiff(unique(rowvals(_JgT)), hess_inputs)       # TODO store these indices in some array of `dag` during pullback...
+    
+    for out_ind in output_indices
+        Hy = dag.partials2[ij_indices, ij_indices, out_ind]     # target array
+        Hy_u = dag.partials2[hess_inputs, hess_inputs, out_ind] # hessian of output `y` w.r.t. inputs u_1, …, u_k
+        JuT = dag.partials[ij_indices, hess_inputs]             # transposed Jacobian of inputs
+        Hy .= JuT * Hy_u * Ju'    # TODO can we do some in-place stuff here?
+        for k in hess_inputs
+            dy_uk = dag.partials[k, out_ind]
+            Huk = dag.partials2[ij_indices, ij_indices, k]
+            Hy += dy_uk .* Huk
+        end
+    end
+
 	return nothing
 end
 
