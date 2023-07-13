@@ -1,10 +1,26 @@
 module Compromise
 
-# import Parameters: @with_kw
-# import LinearAlgebra as LA
+import Parameters: @with_kw
 
-include("CompromiseEvaluators.jl")
-using .CompromiseEvaluators
+# include("CompromiseEvaluators/CompromiseEvaluators.jl")
+# import .CompromiseEvaluators as CE
+
+#=
+@with_kw mutable struct MOP
+    model :: CE.Model
+    dag :: Union{Nothing, CE.DAG} = nothing
+
+    A_eq :: Union{Nothing, Matrix{Float64}} = nothing
+    b_eq :: Union{Nothing, Vector{Float64}} = nothing
+
+    A_ineq :: Union{Nothing, Matrix{Float64}} = nothing
+    b_ineq :: Union{Nothing, Vector{Float64}} = nothing
+
+    objectives :: Dictionary{Int, Int} = Dictionary()
+    constraints_ineq :: Dictionary{Int, Int} = Dictionary()
+    constraints_eq :: Dictionary{Int, Int} = Dictionary()
+end
+=#
 
 #=
 const Vec = AbstractVector{<:Real}
@@ -268,33 +284,6 @@ function init_scaler(nvars, lb::Vec, ub::Vec)
 
     return AffineVarScalar(T, Tinv, b)
 end
-
-
-function optimize(ev::AbstractEvaluator, x0; algo_config :: AlgorithmConfig)
-    @assert !isempty(x0) "Starting point array `x0` is empty."
-    @assert dim_objectives(ev) > 0 "Objective Vector dimension of problem is zero."
-    T = precision(ev)
-
-    nvars = length(x0)
-    _lb = lower_var_bounds(ev)
-    _ub = upper_var_bounds(ev)
-    lb = isnothing(_lb) ? fill(T(-Inf), nvars) : T.(_lb)
-    ub = isnothing(_ub) ? fill(T(Inf), nvars) : T.(_ub)
-    @assert all( lb .<= ub ) "All lower bounds must be less than or equal to upper bounds."
-    var_scaler = init_scaler(nvars, _lb, _ub)
-
-    x = T.(x0)
-    fx = prealloc_fx(ev)
-    ex = prealloc_ex(ev)
-    ix = prealloc_ix(ev)
-
-    Dfx = prealloc_Dfx(ev, nvars)
-    Dex = prealloc_Dex(ev, nvars)
-    Dix = prealloc_Dix(ev, nvars)
-
-    d = similar(x)
-    n = similar(x)
-
-end
 =#
+
 end

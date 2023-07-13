@@ -1,4 +1,5 @@
 using Test
+using ForwardDiff
 import Compromise as C
 CE = C.CompromiseEvaluators
 

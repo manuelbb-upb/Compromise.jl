@@ -1,12 +1,8 @@
-function pushend!(arr, el)
-    push!(arr, el)
-    return lastindex(arr)
-end
-
 next_var_index(model) = length(model.var_indices) + 1
 next_state_index(model) = length(model.state_indices) + 1
 next_param_index(model) = length(model.param_indices) + 1
 next_op_index(model) = length(model.op_indices) + 1
+next_mod_index(model) = length(model.model_indices) + 1
 
 function add_scalar_node!(model, arr_name, node)
     i = pushend!(model.nodes, node)
@@ -35,13 +31,13 @@ ensure_vec(::Nothing)=AbstractNode[]
 ensure_vec(x) = [x,]
 ensure_vec(x::AbstractVector) = x
 
-function add_operator!(model, dispatch_index, _x, _p, _ξ)
+function add_operator!(model, operator::AbstractNonlinearOperator, _x, _p, _ξ)
     x = ensure_vec(_x)
     p = ensure_vec(_p)
     ξ = ensure_vec(_ξ)
     ## check if any state ξi in ξ is already the successor of some operator
     for ξi in ξ
-        if !isempty(ξi.in_nodes)
+        if !isempty(ξi.in_nodes) && any(isa.(ξi.in_nodes, NonlinearOperatorNode))
             @warn "State $(ξi) already is the successor of an operator node. Doing nothing."
             return nothing
         end
@@ -49,11 +45,8 @@ function add_operator!(model, dispatch_index, _x, _p, _ξ)
     
     ## setup the operator node
     index = next_op_index(model)
-	n_in = length(x)
-    n_pars = length(p)
-    n_out = length(ξ)
-	f = ValueDispatchNode(; 
-        index, dispatch_index, n_in, n_pars, n_out,
+	f = NonlinearOperatorNode(; 
+        index, operator,
         in_nodes = vcat(x, p),
         out_nodes = ξ,    
     )
@@ -75,12 +68,38 @@ function add_operator!(model, dispatch_index, _x, _p, _ξ)
     return ξ
 end
 
-function add_operator!(model, dispatch_index, x, p; dim_out::Int)
+function add_operator!(model, operator::AbstractNonlinearOperator, x, p; dim_out::Int)
     ## add dependent variables ...
 	ξ = [add_state!(model) for _=1:dim_out]
-    return add_operator!(model, dispatch_index, x, p, ξ)
+    return add_operator!(model, operator, x, p, ξ)
 end
 
+function add_surrogate!(model, surrogate::AbstractSurrogateModel, _x, _ξ)
+    x = ensure_vec(_x)
+    ξ = ensure_vec(_ξ)
+    
+    ## setup the operator node
+    index = next_mod_index(model)
+	f = SurrogateModelNode(; 
+        index, surrogate,
+        in_nodes = x,
+        out_nodes = ξ,    
+    )
+	i = pushend!(model.nodes, f)
+    push!(model.model_indices, i)
+    f.array_index = i
+    
+    ## modify edges of input and output nodes
+    for xi in x
+        push!(xi.out_nodes, f)
+    end
+    for ξi in ξ
+        push!(ξi.in_nodes, f)
+    end
+
+    return ξ
+end
+#=
 function _eval_op_expr(mod, func_name, func_arg_x, func_arg_p)
     return quote
         dispatch_index = time_ns()
@@ -200,3 +219,4 @@ macro operator(model_ex, exs...)
 
     return error("@operator macro cannot parse expression.")
 end
+=#
