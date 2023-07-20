@@ -5,11 +5,13 @@ version = "0.1.0"
 
 [deps]
 AbstractDifferentiation = "c29ec348-61ec-40c8-8164-b8c60e9d9f3d"
+COSMO = "1e616198-aa4e-51ec-90a2-23f7fbd31d8d"
 Dictionaries = "85a47980-9c8c-11e8-2b9f-f7ca1fa99fb4"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
 LazyArrays = "5078a376-72f3-5289-bfd5-ec5146d43c02"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+NLopt = "76087f3c-5699-56af-9a33-bf431cd00edd"
 Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 Requires = "ae029012-a4dd-5104-9daa-d747884805df"
 SparseArrayKit = "a9a3c162-d163-4c15-8926-b8794fbefed2"

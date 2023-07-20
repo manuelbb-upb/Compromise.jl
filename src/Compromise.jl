@@ -1,289 +1,392 @@
 module Compromise
 
-import Parameters: @with_kw
+import Parameters: @with_kw, @unpack
+import JuMP
+import COSMO
 
-# include("CompromiseEvaluators/CompromiseEvaluators.jl")
-# import .CompromiseEvaluators as CE
+import NLopt 
 
-#=
-@with_kw mutable struct MOP
-    model :: CE.Model
-    dag :: Union{Nothing, CE.DAG} = nothing
+const DEFAULT_QP_OPTIMIZER=COSMO.Optimizer
+const DEFAULT_PRECISION=Float32
 
-    A_eq :: Union{Nothing, Matrix{Float64}} = nothing
-    b_eq :: Union{Nothing, Vector{Float64}} = nothing
+include("CompromiseEvaluators/CompromiseEvaluators.jl")
+import .CompromiseEvaluators as CE
 
-    A_ineq :: Union{Nothing, Matrix{Float64}} = nothing
-    b_ineq :: Union{Nothing, Vector{Float64}} = nothing
+import LinearAlgebra as LA
+ 
+# However, files are allowed to depend on other files for function/method definitions.
+# For those, order is not relevant, but a note in the respective file would be nice.
+include("types.jl")
+include("utils.jl")
 
-    objectives :: Dictionary{Int, Int} = Dictionary()
-    constraints_ineq :: Dictionary{Int, Int} = Dictionary()
-    constraints_eq :: Dictionary{Int, Int} = Dictionary()
-end
-=#
+include("mop.jl")
 
-#=
-const Vec = AbstractVector{<:Real}
-const Mat = AbstractMatrix{<:Real}
+include("models.jl")
 
-@enum IT_STAT begin
-	RESTORATION = -3
-	FILTER_FAIL = -2
-	INACCEPTABLE = -1
-	INITIALIZATION = 0
-	FILTER_ADD = 1
-	ACCEPTABLE = 2
-	SUCCESSFUL = 3
-end
+include("affine_scalers.jl")
 
-# An `AbstractEvaluator` is a glorified wrapper around vector-vector functions.
-# First, it maps a variable vector to a state vector.
-abstract type AbstractEvaluator end
+include("filter.jl")
 
-precision(::AbstractEvaluator)::Type{<:AbstractFloat}=Float64
+include("descent.jl")
 
-dim_objectives(::AbstractEvaluator)::Int=0
-dim_nl_eq_constraints(::AbstractEvaluator)::Int=0
-dim_nl_ineq_constraints(::AbstractEvaluator)::Int=0
+include("restoration.jl")
 
-lower_var_bounds(::AbstractEvaluator)::Union{Nothing, Vec}=nothing
-upper_var_bounds(::AbstractEvaluator)::Union{Nothing, Vec}=nothing
+include("simple_mop.jl")
 
-eval_objectives!(::Vec, ::AbstractEvaluator, ::Vec)=nothing
-eval_nl_eq_constraints!(::Vec, ::AbstractEvaluator, ::Vec)=nothing
-eval_nl_ineq_constraints!(::Vec, ::AbstractEvaluator, ::Vec)=nothing
+var_bounds_valid(lb, ub)=true
+var_bounds_valid(lb::Nothing, ub::RVec)=!(any(isequal(-Inf), ub))
+var_bounds_valid(lb::RVec, ub::Nothing)=!(any(isequal(Inf), lb))
+var_bounds_valid(lb::RVec, ub::RVec)=all(lb .<= ub)
 
-jacT_objectives!(::Mat, ::AbstractEvaluator, ::Vec)=nothing
-jacT_nl_eq_constraints!(::Mat, ::AbstractEvaluator, ::Vec)=nothing
-jacT_nl_ineq_constraints!(::Mat, ::AbstractEvaluator, ::Vec)=nothing
-
-A_eq(::AbstractEvaluator)::Union{Mat, Nothing}=nothing
-A_ineq(::AbstractEvaluator)::Union{Mat, Nothing}=nothing
-b_eq(::AbstractEvaluator)::Union{Vec, Nothing}=nothing
-b_ineq(::AbstractEvaluator)::Union{Vec, Nothing}=nothing
-
-function dim_lin_eq_constraints(ev::AbstractEvaluator)
-    A = A_eq(ev)
-    isnothing(A) && return 0
-    return size(A, 1)
+function init_scaler(scaler_cfg::Symbol, mod_type, lin_cons)
+    return init_scaler(Val(scaler_cfg), mod_type, lin_cons)
 end
 
-function dim_lin_ineq_constraints(ev::AbstractEvaluator)
-    A = A_ineq(ev)
-    isnothing(A) && return 0
-    return size(A, 1)
+function init_scaler(::Val{:box}, mod_type, lin_cons)
+    if supports_scaling(mod_type) isa AbstractAffineScalingIndicator
+        @unpack lb, ub = lin_cons
+        return init_box_scaler(lb, ub)
+    end
+    @warn "Problem structure does not support scaling according to `scaler_cfg=:box`. Proceeding without."
+    return IdentityScaler()    
+end
+init_scaler(::Val{:none}, mod_type, lin_cons) = IdentityScaler()
+
+function init_lin_cons(mop)
+    lb = lower_var_bounds(mop)
+    ub = upper_var_bounds(mop)
+
+    if !var_bounds_valid(lb, ub)
+        error("Variable bounds unvalid.")
+    end
+
+    Ab = lin_eq_constraints(mop)
+    Ec = lin_ineq_constraints(mop)
+
+    return LinearConstraints(lb, ub, Ab, Ec)
 end
 
-function eval_lin_constraints!(y, x, A, b)
-    A, b = data
-    LA.mul!(y, A, x)
-    if !isnothing(b)
-        y .-= b
+function scale_lin_cons!(scaled_cons, scaler, lin_cons)
+    scale!(scaled_cons.lb, scaler, lin_cons.lb)
+    scale!(scaled_cons.ub, scaler, lin_cons.ub)
+    scale_eq!(scaled_cons.Ab, scaler, lin_cons.Ab)
+    scale_eq!(scaled_cons.Ec, scaler, lin_cons.Ec)
+    return nothing
+end
+
+reset_lin_cons!(_b::Nothing, b::Nothing)=nothing 
+function reset_lin_cons!(_b, b)
+    _b .= b
+    return nothing
+end
+function reset_lin_cons!((_A, _b)::Tuple, (A, b)::Tuple)
+    _A .= A
+    _b .= b
+    return nothing
+end
+function reset_lin_cons!(scaled_cons::LinearConstraints, lin_cons::LinearConstraints)
+    for fn in (:lb, :ub, :Ab, :Ec)
+        reset_lin_cons!(getfield(scaled_cons, fn), getfield(lin_cons, fn))
     end
     return nothing
 end
-function eval_lin_eq_constraints!(y::Vec, ev::AbstractEvaluator, x::Vec)
-    A = A_eq(ev)
-    isnothing(A) && return
-    b = b_eq(ev)
-    return eval_lin_constraints!(y, x, A, b)
-end
-function eval_lin_ineq_constraints!(y::Vec, ev::AbstractEvaluator, x::Vec)
-    A = A_ineq(ev)
-    isnothing(A) && return
-    b = b_ineq(ev)
-    return eval_lin_constraints!(y, x, A, b)
+function update_lin_cons!(scaled_cons, scaler, lin_cons)
+    reset_lin_cons!(scaled_cons, lin_cons)
+    scale_lin_cons!(scaled_cons, scaler, lin_cons)
+    return nothing
 end
 
-for func_type in (
-    :objectives!,
-    :nl_eq_constraints!, 
-    :nl_ineq_constraints!,
-    :lin_eq_constraints!,
-    :lin_ineq_constraints!,
+constraint_violation(::Nothing, type_val)=0
+constraint_violation(ex::RVec, ::Val{:eq})=maximum(abs.(ex))
+constraint_violation(ix::RVec, ::Val{:ineq})=maximum(ix)
+function constraint_violation(hx, gx, Ex, Ax)
+    return max(
+        constraint_violation(hx, Val(:eq)),
+        constraint_violation(Ex, Val(:eq)),
+        constraint_violation(gx, Val(:ineq)),
+        constraint_violation(Ax, Val(:ineq)),
+        0
+    )
+end
+
+function init_vals(mop, scaler, ξ0)
+    T = precision(mop)
+    
+    ## make unscaled variables have correct type
+    ξ = T.(ξ0)
+    
+    ## initialize scaled variables
+    x = similar(ξ)
+    scale!(x, scaler, ξ)
+
+    ## pre-allocate value arrays
+    fx = prealloc_objectives_vector(mop)
+    hx = prealloc_nl_eq_constraints_vector(mop)
+    gx = prealloc_nl_ineq_constraints_vector(mop)
+    Ex = prealloc_lin_eq_constraints_vector(mop)
+    Ax = prealloc_lin_ineq_constraints_vector(mop)
+
+    ## set values by evaluating all functions
+    θ, Φ = eval_mop!(fx, hx, gx, Ex, Ax, mop, ξ)
+
+    ## constraint violation and filter value
+    θ = Ref(T(θ))
+    Φ = Ref(T(Φ))
+
+    return ValueArrays(ξ, x, fx, hx, gx, Ex, Ax, θ, Φ)
+end
+
+function init_step_vals(vals)
+    return StepValueArrays(vals.x, vals.fx)
+end 
+
+function init_model_vals(mod, n_vars)
+    ## pre-allocate value arrays
+    fx = prealloc_objectives_vector(mod)
+    hx = prealloc_nl_eq_constraints_vector(mod)
+    gx = prealloc_nl_ineq_constraints_vector(mod)
+    Dfx = prealloc_objectives_grads(mod, n_vars)
+    Dhx = prealloc_nl_eq_constraints_grads(mod, n_vars)
+    Dgx = prealloc_nl_ineq_constraints_grads(mod, n_vars)
+    return SurrogateValueArrays(fx, hx, gx, Dfx, Dhx, Dgx)
+end
+
+function eval_mop!(fx, hx, gx, Ex, Ax, mop, ξ)
+    objectives!(fx, mop, ξ)
+    nl_eq_constraints!(hx, mop, ξ)
+    nl_ineq_constraints!(gx, mop, ξ)
+    lin_eq_constraints!(Ex, mop, ξ)
+    lin_ineq_constraints!(Ax, mop, ξ)
+
+    θ = constraint_violation(hx, gx, Ex, Ax)
+    Φ = maximum(fx) # TODO this depends on the type of filter, but atm there is only WeakFilter
+
+    return θ, Φ
+end
+
+function eval_mop!(vals, mop, scaler)
+    ## evaluate problem at unscaled site
+    @unpack ξ, x, fx, hx, gx, Ex, Ax = vals
+    
+    unscale!(ξ, scaler, x)
+    θ, Φ = eval_mop!(fx, hx, gx, Ex, Ax, mop, ξ)
+
+    vals.θ[] = θ
+    vals.Φ[] = Φ
+    return nothing
+end
+
+function compatibility_test_rhs(c_delta, c_mu, mu, Δ)
+    return c_delta * min(Δ, c_mu + Δ^(1+mu))
+end
+
+function compatibility_test(n, c_delta, c_mu, mu, Δ)
+    return LA.norm(n, Inf) <= compatibility_test_rhs(c_delta, c_mu, mu, Δ)
+end
+
+function compatibility_test(n, algo_opts, Δ)
+    @unpack c_delta, c_mu, mu = algo_opts
+    return compatibility_test(n, c_delta, c_mu, mu, Δ)
+end
+
+function accept_trial_point!(vals, vals_tmp)
+    for fn in (:x, :ξ, :fx, :hx, :gx, :Ex, :Ax)
+        src = getfield(vals_tmp, fn)
+        isnothing(src) && continue
+        copyto!(getfield(vals, fn), src)
+    end
+    return nothing
+end
+
+function optimize(
+    MOP::AbstractMOP, ξ0::RVec;
+    algo_opts :: AlgorithmOptions = AlgorithmOptions()
 )
-    eval_and_jacT_method_name = Symbol("eval_and_jacT_", func_type)
-    eval_method_name = Symbol("eval_", func_type)
-    jacT_method_name = Symbol("jacT_", func_type)
-    dim_method_name = Symbol("dim_$(func_type)"[1:end-1])
+    @assert !isempty(ξ0) "Starting point array `x0` is empty."
+    @assert dim_objectives(MOP) > 0 "Objective Vector dimension of problem is zero."
+    
+    ## INITIALIZATION (Iteration 0)
+    mop = initialize(MOP, ξ0)
+    T = precision(mop)
+    n_vars = length(ξ0)
 
-    @eval function $(eval_and_jacT_method_name)(y::Vec, jacT::Mat, ev::AbstractEvaluator, x::Vec)
-        $(eval_method_name)(y, ev, x)
-        $(jacT_method_name)(jacT, ev, x)
-        return nothing
+    ## struct holding constant linear constraint informaton (lb, ub, Ab, Ec)
+    ## set these first, because they are needed to initialize a scaler 
+    ## if `algo_opts.scaler_cfg==:box`:
+    lin_cons = init_lin_cons(mop)
+
+    ## initialize a scaler according to configuration
+    mod_type = model_type(mop)
+    scaler = init_scaler(algo_opts.scaler_cfg, mod_type, lin_cons)
+    ## whenever the scaler changes, we have to re-scale the linear constraints
+    scaled_cons = deepcopy(lin_cons)
+    update_lin_cons!(scaled_cons, scaler, lin_cons)
+
+    ## caches for working arrays x, fx, hx, gx, Ex, Ax, …
+    ## (perform 1 evaluation to set values already)
+    vals = init_vals(mop, scaler, ξ0)
+    vals_tmp = deepcopy(vals)
+ 
+    ## pre-allocate surrogates `mod`
+    ## (they are not trained yet)
+    mod = init_models(mop, n_vars, scaler)
+    
+    ## chaches for surrogate value vectors fx, hx, gx, Dfx, Dhx, Dgx
+    ## (values not set yet, only after training)
+    mod_vals = init_model_vals(mod, n_vars)
+ 
+    ## pre-allocate working arrays for normal and descent step calculation:
+    step_vals = init_step_vals(vals)
+    step_cache = init_step_cache(SteepestDescentConfig(), vals, mod_vals)
+
+    ## initialize empty filter
+    filter = WeakFilter{T}()
+
+    ## finally, compose information about the 0-th iteration for next_iterations:
+    Δ = T(algo_opts.delta_init)
+    it_index = 0
+    it_stat = INITIALIZATION
+    ret_code = CONTINUE
+    point_has_changed = true
+    radius_has_changed = true
+    for outer it_index=1:algo_opts.max_iter
+        ret_code != CONTINUE && break
+        it_stat, ret_code, point_has_changed, Δ_new = do_iteration(
+            it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
+            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
+            point_has_changed, radius_has_changed
+        )
+        radius_has_changed = Δ_new != Δ
+        Δ = Δ_new
+    end
+    if ret_code == CONTINUE
+        ret_code = BUDGET
+    end
+    return vals, it_index, ret_code
+end
+
+function do_iteration(
+    it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
+    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
+    point_has_changed, radius_has_changed
+)
+    ## assumptions at the start of an iteration:
+    ## * `it_res` classifies the last iteration
+    ## * `vals` holds valid values for the stored argument vector `x`.
+    ## * If the models `mod` are valid for `vals`, then `mod_vals` are valid, too.
+    
+    @info """
+    ITERATION $(it_index).
+    Δ = $(Δ)
+    θ = $(vals.θ)
+    x = $(vec2str(vals.ξ))
+    fx = $(vec2str(vals.fx))
+    """
+
+    ## The models are valid
+    ## - the last iteration was a successfull restoration iteration.
+    ## - if the point has not changed and the models do not depend on the radius or  
+    ##   radius has not changed neither.
+    models_valid = (
+        it_stat == RESTORATION || 
+        !point_has_changed && !(depends_on_trust_region(mod) && radius_has_changed)
+    )
+    @show models_valid
+
+    if !models_valid
+        update_models!(mod, mop, scaler, vals)
+        eval_and_diff_mod!(mod_vals, mod, vals.x)
+
+        compute_normal_step(
+            it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
+            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts
+        )
     end
 
-    eval_outputs_method_name = Symbol("eval_outputs_", func_type)
+    n = step_vals.n
+    n_is_compatible = compatibility_test(n, algo_opts, Δ)
+
+    if !n_is_compatible
+        ## Try to do a restoration
+        add_to_filter!(filter, vals.θ[], vals.Φ[])
+        return do_restoration(
+            it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
+            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
+        )
+    end
+
+    χ = compute_descent_step(
+        it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
+        vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts
+    )
+    @show χ
+    @unpack xs = step_vals
+    @show LA.norm(step_vals.d, 2)
+    _fxs = step_vals.fxs        # surrogate objective values at `xs`
+    #src # TODO stopping based on χ
+    copyto!(vals_tmp.x, xs)
+    eval_mop!(vals_tmp, mop, scaler)
+
+    trial_point_fits_filter = is_acceptable(
+        filter, vals_tmp.θ[], vals_tmp.Φ[], vals.θ[], vals.Φ[])
     
-    @eval begin
-        """
-            $($(eval_outputs_method_name))(y, evaluator, x, out_indices)
-            
-        Evaluate the outputs with indices `out_indices` of `evaluator` at input x and store 
-        the corresponding results in `y`.
-        """
-        function $(eval_outputs_method_name)(y::Vec, ev::AbstractEvaluator, x::Vec, out_indices)
-            _y = Vector{precision(ev)}(undef, $(dim_method_name)(ev))
-            $(eval_method_name)(_y, ev, x)
-            y .= _y[out_indices]
-            return nothing
+    if trial_point_fits_filter
+        @unpack strict_acceptance_test, kappa_theta, psi_theta, nu_accept = algo_opts
+        objf_decrease, model_decrease = if strict_acceptance_test
+            vals.fx .- vals_tmp.fx, mod_vals.fx .- _fxs     # TODO pre-allocate caches
+        else
+            maximum(vals.fx) - maximum(vals_tmp.fx), maximum(mod_vals.fx) - maximum(_fxs)
+        end
+        rho = minimum( objf_decrease ./ model_decrease )
+        model_decrease_condition = all(model_decrease .>= kappa_theta * vals.θ[]^psi_theta)
+        succifient_decrease_condition = rho >= nu_accept
+    end
+
+    this_it_stat = if !trial_point_fits_filter
+        FILTER_FAIL
+    else
+        if model_decrease_condition
+            if !succifient_decrease_condition
+                INACCEPTABLE
+            else
+                @unpack nu_success = algo_opts
+                if rho < nu_success
+                    ACCEPTABLE
+                else
+                    SUCCESSFUL
+                end
+            end
+        else
+            if !succifient_decrease_condition
+                FILTER_ADD_SHRINK
+            else
+                FILTER_ADD
+            end
         end
     end
-end
 
-dim_eq_constraints(ev) = dim_lin_eq_constraints(ev) + dim_nl_eq_constraints(ev)
-dim_ineq_constraints(ev) = dim_lin_ineq_constraints(ev) + dim_nl_ineq_constraints(ev)
-
-function prealloc_fx(ev::AbstractEvaluator)
-    T = precision(ev)
-    return Vector{T}(undef, dim_objectives(ev))
-end
-
-function prealloc_ex(ev::AbstractEvaluator)
-    T = precision(ev)
-    return Vector{T}(undef, dim_eq_constraints(ev))
-end
-
-function prealloc_ix(ev::AbstractEvaluator)
-    T = precision(ev)
-    return Vector{T}(undef, dim_ineq_constraints(ev))
-end
-
-function prealloc_Dfx(ev::AbstractEvaluator, nvars)
-    T = precision(ev)
-    return Matrix{T}(undef, nvars, dim_objectives(ev))
-end
-
-function prealloc_Dex(ev::AbstractEvaluator, nvars)
-    T = precision(ev)
-    return Matrix{T}(undef, nvars, dim_eq_constraints(ev))
-end
-
-function prealloc_Dix(ev::AbstractEvaluator, nvars)
-    T = precision(ev)
-    return Matrix{T}(undef, nvars, dim_ineq_constraints(ev))
-end
-
-Base.@kwdef mutable struct DevEvaluator! <: AbstractEvaluator
-    objectives! :: Union{Function, Nothing} = nothing
-    nl_eq_constraints! :: Union{Function, Nothing} = nothing
-    nl_ineq_constraints! :: Union{Function, Nothing} = nothing
-    
-    jacT_objectives! :: Union{Function, Nothing} = nothing
-    jacT_nl_eq_constraints! :: Union{Function, Nothing} = nothing
-    jacT_nl_ineq_constraints! :: Union{Function, Nothing} = nothing
-    
-    A_eq :: Union{Nothing, Mat} = nothing 
-    A_ineq :: Union{Nothing, Mat} = nothing
-    b_eq :: Union{Nothing, Vec} = nothing
-    b_ineq :: Union{Nothing, Vec} = nothing
-
-    dim_objectives :: Int = 0
-    dim_nl_eq_constraints :: Int = 0
-    dim_nl_ineq_constraints :: Int = 0
-    dim_lin_eq_constraints :: Int = isnothing(A_eq) ? 0 : size(A_eq, 1)
-    dim_lin_ineq_constraints :: Int = isnothing(A_eq) ? 0 : size(A_eq, 1)
-
-end
-
-for prop_name in (
-    :dim_objectives,
-    :dim_nl_eq_constraints,
-    :dim_nl_ineq_constraints,
-    :dim_lin_eq_constraints,
-    :dim_lin_ineq_constraints
-)
-    $(prop_name)(ev::DevEvaluator!) = getfield(ev, $(Meta.quot(prop_name)))
-end
-
-@with_kw struct AlgorithmConfig
-	# stopping criteria
-	max_iter = 100
-
-	"Stop if the trust region radius is reduced to below `stop_delta_min`."
-	stop_delta_min = eps(Float64)
-
-	"Stop if the trial point ``xₜ`` is accepted and ``‖xₜ - x‖≤ δ‖x‖``."
-	stop_xtol_rel = 1e-5
-	"Stop if the trial point ``xₜ`` is accepted and ``‖xₜ - x‖≤ ε``."
-	stop_xtol_abs = -Inf
-	"Stop if the trial point ``xₜ`` is accepted and ``‖f(xₜ) - f(x)‖≤ δ‖f(x)‖``."
-	stop_ftol_rel = 1e-5
-	"Stop if the trial point ``xₜ`` is accepted and ``‖f(xₜ) - f(x)‖≤ ε``."
-	stop_ftol_abs = -Inf
-
-	"Stop if for the approximate criticality it holds that ``χ̂(x) <= ε`` and for the feasibility that ``θ <= δ``."
-	stop_crit_tol_abs = eps(Float64)
-	"Stop if for the approximate criticality it holds that ``χ̂(x) <= ε`` and for the feasibility that ``θ <= δ``."
-	stop_theta_tol_abs = eps(Float64)
-	
-	"Stop after the criticality routine has looped `stop_max_crit_loops` times."
-	stop_max_crit_loops = 1
-
-	# criticality test thresholds
-	eps_crit = 0.1
-	eps_theta = 0.1
-	crit_B = 1000
-	crit_M = 3000
-	crit_alpha = 0.5
-	
-	# initialization
-	delta_init = 0.5
-	delta_max = 2^5 * delta_init
-
-	# trust region updates
-	gamma_shrink_much = 0.1 	# 0.1 is suggested by Fletcher et. al. 
-	gamma_shrink = 0.5 			# 0.5 is suggested by Fletcher et. al. 
-	gamma_grow = 2.0 			# 2.0 is suggested by Fletcher et. al. 
-
-	# acceptance test 
-	strict_acceptance_test = true
-	nu_accept = 0.01 			# 1e-2 is suggested by Fletcher et. al. 
-	nu_success = 0.9 			# 0.9 is suggested by Fletcher et. al. 
-	
-	# compatibilty parameters
-	c_delta = 0.7 				# 0.7 is suggested by Fletcher et. al. 
-	c_mu = 100.0 				# 100 is suggested by Fletcher et. al.
-	mu = 0.01 					# 0.01 is suggested by Fletcher et. al.
-
-	# model decrease / constraint violation test
-	kappa_theta = 1e-4 			# 1e-4 is suggested by Fletcher et. al. 
-	psi_theta = 2.0
-
-	nlopt_restoration_algo = :LN_COBYLA
-
-	# backtracking:
-	normalize_grads = false	
-	armijo_strict = strict_acceptance_test
-	armijo_min_stepsize = eps(Float64)
-	armijo_backtrack_factor = .75
-	armijo_rhs_factor = 1e-3
-end	
-
-# ξ = Tx + b
-# x = T⁻¹(ξ - b)
-struct AffineVarScaler{
-    bType, TType1<:AbstractMatrix, TType2<:AbstractMatrix
-}
-    T :: TType1
-    Tinv :: TType2 
-    b :: bType
-end
-
-init_scaler(nvars, lb, ub) = AffineVarScalar(LA.I(nvars), LA.I(nvars), 0)
-
-function init_scaler(nvars, lb::Vec, ub::Vec)
-    if any(isinf.(lb)) || any(isinf.(ub))
-        return init_scaler(nvars, nothing, nothing)
+    if this_it_stat == FILTER_ADD || this_it_stat == FILTER_ADD_SHRINK
+        add_to_filter!(filter, vals_tmp.θ[], vals_tmp.Φ[])
     end
-    w = ub .- lb
 
-    T = LA.Diagonal(1 ./ w)
-    Tinv = LA.Diagonal(w)
-    b = - lb ./ w
+    point_has_changed = Int(this_it_stat) > 0
+    if point_has_changed
+        ## accept trial point
+        accept_trial_point!(vals, vals_tmp)
+    end
 
-    return AffineVarScalar(T, Tinv, b)
+    @unpack gamma_grow, gamma_shrink, gamma_shrink_much, delta_max = algo_opts
+    _Δ = if this_it_stat == FILTER_ADD_SHRINK || this_it_stat == INACCEPTABLE
+        gamma_shrink_much * Δ
+    elseif this_it_stat == ACCEPTABLE
+        gamma_shrink * Δ
+    elseif this_it_stat == SUCCESSFUL
+        min(gamma_grow * Δ, delta_max)
+    else
+        Δ
+    end
+
+    return this_it_stat, CONTINUE, point_has_changed, _Δ
 end
-=#
 
 end

@@ -1,112 +1,120 @@
 import LinearAlgebra as LA
 
-struct TaylorPolynomial{
+struct TaylorPolynomial1{
     X <: AbstractVector{<:Real},
     F <: AbstractVector{<:Real},
     D <: AbstractMatrix{<:Real},
-    H <: Union{Nothing, AbstractArray{<:Real, 3}}
+#src    H <: Union{Nothing, AbstractArray{<:Real, 3}}
 } <: AbstractSurrogateModel
     x0 :: X
     Δx :: X
     fx :: F
-    Dfx :: D
+    Dfx :: D 
+end
+
+struct TaylorPolynomial2{X, TP1<:TaylorPolynomial1{X}, H}
+    tp :: TP1
     Hfx :: H
-
     xtmp :: X
-    #=
-    cache_results :: Bool
-    xhash :: Base.RefValue{UInt64}
-    y :: Union{F, Nothing}
-    Dy :: Union{D, Nothing}
-    =#
 end
 
-function TaylorPolynomial(n_vars::Int, n_out::Int, T=Float64; degree=2)
-    x0 = Vector{T}(undef, n_vars)
+function init_surrogate(::Type{<:TaylorPolynomial1}, op, dim_in, dim_out, params, T)
+    x0 = Vector{T}(undef, dim_in)
     Δx = similar(x0)
-    xtmp = similar(x0)
-    fx = Vector{T}(undef, n_out)
-    Dfx = Matrix{T}(undef, n_vars, n_out)
-    Hfx = degree <= 1 ? nothing : Array{T, 3}(undef, n_vars, n_vars, n_out)
-
-    return TaylorPolynomial(x0, Δx, fx, Dfx, Hfx, xtmp)
-    #=
-    xhash = Ref(hash(x0))
-    if cache_results
-        y = copy(fx)
-        Dy = copy(Dfx)
-    else
-        y = nothing
-        Dy = nothing
-    end
-    return TaylorPolynomial(x0, Δx, fx, Dfx, Hfx, cache_results, xhash, y, Dy)
-    =#
+    fx = Vector{T}(undef, dim_out)
+    Dfx = Matrix{T}(undef, dim_in, dim_out)
+    return TaylorPolynomial1(x0, Δx, fx, Dfx)
 end
 
-requires_grads(::TaylorPolynomial)=true
-requires_hessians(tp::TaylorPolynomial)=!isnothing(tp.Hfx)
+function init_surrogate(::Type{<:TaylorPolynomial2}, op, dim_in, dim_out, params, T)
+    tp1 = init_surrogate(TaylorPolynomial1, op, dim_in, dim_out, params, T) 
+    Hfx = Array{T, 3}(undef, dim_in, dim_in, dim_out)
+    xtmp = similar(x0)
 
-function model_op!(y, tp::TaylorPolynomial, x)
+    return TaylorPolynomial2(tp1, Hfx, xtmp)
+end
+
+const TaylorPoly = Union{TaylorPolynomial1, TaylorPolynomial2}
+depends_on_trust_region(::TaylorPoly)=false
+requires_grads(::Type{<:TaylorPoly})=true
+requires_hessians(tp::Type{TaylorPolynomial2})=true
+
+function model_op!(y, tp::TaylorPolynomial1, x)
     Δx = tp.Δx
-    Δx .= x
-    Δx .-= tp.x0
+    Δx .= x .- tp.x0
 
     ## `y = fx + Δx' Dfx`
     y .= tp.fx
     LA.mul!(y, tp.Dfx', Δx, 1, 1)
-    if !isnothing(tp.Hfx)
-        H = tp.Hfx
-        @views for i = axes(H, 3)
-            y[i] += 0.5 * only(Δx' * H[:, :, i] * Δx)
-        end
+    return nothing
+end
+function model_op!(y, tp::TaylorPolynomial2, x)
+    model_op!(y, tp.tp1, x)
+    Δx = tp.tp1.Δx
+    H = tp.Hfx
+    @views for i = axes(H, 3)
+        y[i] += 0.5 * only(Δx' * H[:, :, i] * Δx)
     end
     return nothing
 end
 
-function model_grads!(Dy, tp::TaylorPolynomial, x)
+function model_grads!(Dy, tp::TaylorPolynomial1, x)
     Dy .= tp.Dfx
-    if !isnothing(tp.Hfx)
-        Δx = tp.Δx
-        Δx .= x
-        Δx .-= tp.x0
-        
-        H = tp.Hfx
-        @views for i = axes(H, 3)
-            ## (assuming symmetric Hessians here)
-            Hi = H[:, :, i]
-            LA.mul!(Dy[:, i], Hi, Δx, 2, 1)   
-        end
+    return nothing
+end
+function model_grads!(Dy, tp::TaylorPolynomial2, x)
+    tp1 = tp.tp1
+    model_grads!(Dy, tp1, x)
+    Δx = tp1.Δx
+    Δx .= x .- tp1.x0
+    H = tp.Hfx
+    @views for i = axes(H, 3)
+        ## (assuming symmetric Hessians here)
+        Hi = H[:, :, i]
+        LA.mul!(Dy[:, i], Hi, Δx, 2, 1)   
     end
     return nothing
 end
 
-function model_op_and_grads!(y, Dy, tp::TaylorPolynomial, x)
+function model_op_and_grads!(y, Dy, tp::TaylorPolynomial1, x)
     Δx = tp.Δx
-    Δx .= x
-    Δx .-= tp.x0
+    Δx .= x .- tp.x0
 
-    ## 1a) Model values `y` without Hessians
     y .= tp.fx
     LA.mul!(y, tp.Dfx', Δx, 1, 1)
-    ## 2a) Model gradients `Dy` without Hessians
     Dy .= tp.Dfx
+    return nothing
+end
 
-    if !isnothing(tp.Hfx)
-        H = tp.Hfx
-        HΔx = tp.xtmp
-        @views for i = axes(H, 3)
-            Hi = H[:, :, i]
-            LA.mul!(HΔx, Hi, Δx, 0.5, 0)
+function model_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
+    tp1 = tp.tp1
+    model_op_and_grads!(y, Dy, tp1, x)
+    Δx = tp1.Δx
+    H = tp.Hfx
+    HΔx = tp.xtmp
+    @views for i = axes(H, 3)
+        Hi = H[:, :, i]
+        LA.mul!(HΔx, Hi, Δx, 0.5, 0)
 
-            ## 1b) add Hessian term to value `y[i]`
-            y[i] += Δx'HΔx
+        ## 1) add Hessian term to value `y[i]`
+        y[i] += Δx'HΔx
 
-            ## 2b) add Hessian terms to gradients `Dy[:, i]`
-            ## (assuming symmetric Hessians here)
-            HΔx .*= 4
-            Dy[:, i] .+= HΔx
-        end
+        ## 2) add Hessian terms to gradients `Dy[:, i]`
+        ## (assuming symmetric Hessians here)
+        HΔx .*= 4
+        Dy[:, i] .+= HΔx
     end
 
+    return nothing
+end
+
+function update!(tp::TaylorPolynomial1, op, x, fx)
+    copyto!(tp.x0, x)
+    eval_op_and_grads!(tp.fx, tp.Dfx, op, x)
+end
+function update!(surr::TaylorPolynomial2, op, x, fx)
+    tp1 = tp.tp1
+    copyto!(tp1.x0, x)
+    eval_op_and_grads_and_hessians!(tp1.fx.x, tp1.Dfx, tp.Hfx, op, x)
     return nothing
 end

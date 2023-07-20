@@ -30,7 +30,7 @@ Alternatively (or additionally), an `AbstractAutoDiffBackend` can be passed to
 compute the derivatives if the relevant field `isnothing`.
 """
 
-@with_kw struct WrappedFunction{F, G, H, FG, FGH, B} <: AbstractNonlinearOperator
+@with_kw struct WrappedFunction{F, G, H, FG, FGH, B} <: AbstractNonlinearOperatorWithParams
     func :: F
     grads :: G = nothing
     hessians :: H = nothing

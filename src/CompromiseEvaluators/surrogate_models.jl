@@ -1,7 +1,13 @@
 abstract type AbstractSurrogateModel end
 
-requires_grads(::AbstractSurrogateModel)=false
-requires_hessians(surr::AbstractSurrogateModel)=false
+depends_on_trust_region(::AbstractSurrogateModel)=true
+
+requires_grads(::Type{<:AbstractSurrogateModel})=false
+requires_hessians(::Type{<:AbstractSurrogateModel})=false
+requires_grads(::T) where T<:AbstractSurrogateModel=requires_grads(T)
+requires_hessians(::T) where T<:AbstractSurrogateModel=requires_hessians(T)
+
+init_surrogate(::Type{<:AbstractSurrogateModel}, op, dim_in, dim_out, params, T)::AbstractSurrogateModel=nothing
 
 function model_op!(y, surr::AbstractSurrogateModel, x)
     return nothing
@@ -35,7 +41,7 @@ function func_vals!(y, surr::AbstractSurrogateModel, x, p, outputs=nothing)
         if supports_partial_evaluation(surr)
             return model_op!(y, surr, x, outputs)
         ## else
-        ##     @warn "Partial evaluation not supported buy surrogate model."
+        ##     @warn "Partial evaluation not supported by surrogate model."
         end
     end
     return model_op!(y, surr, x)
@@ -45,7 +51,7 @@ function func_grads!(Dy, surr::AbstractSurrogateModel, x, p, outputs=nothing)
         if supports_partial_evaluation(surr)
             return model_grads!(Dy, surr, x, outputs)
         ## else
-        ##     @warn "Partial evaluation not supported buy surrogate model."
+        ##     @warn "Partial evaluation not supported by surrogate model."
         end
     end
     return model_grads!(Dy, surr, x)
@@ -55,10 +61,16 @@ function func_vals_and_grads!(y, Dy, surr::AbstractSurrogateModel, x, p, outputs
         if supports_partial_evaluation(surr)
             return model_op_and_grads!(y, Dy, surr, x, outputs)
         ## else
-        ##     @warn "Partial evaluation not supported buy surrogate model."
+        ##     @warn "Partial evaluation not supported by surrogate model."
         end
     end
     return model_op_and_grads!(y, Dy, surr, x)
 end
 
+function update!(surr::AbstractSurrogateModel, op, x, fx)
+    return nothing    
+end
+
 include("taylor_polynomials.jl")
+
+include("exact_model.jl")
