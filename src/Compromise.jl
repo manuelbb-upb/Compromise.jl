@@ -321,7 +321,6 @@ function do_iteration(
     )
     @show χ
     @unpack xs = step_vals
-    @show LA.norm(step_vals.d, 2)
     _fxs = step_vals.fxs        # surrogate objective values at `xs`
     #src # TODO stopping based on χ
     copyto!(vals_tmp.x, xs)

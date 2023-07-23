@@ -18,7 +18,13 @@ struct TaylorPolynomial2{X, TP1<:TaylorPolynomial1{X}, H}
     xtmp :: X
 end
 
-function init_surrogate(::Type{<:TaylorPolynomial1}, op, dim_in, dim_out, params, T)
+@with_kw struct TaylorPolynomialConfig
+    degree :: Int = 1
+    @assert 1 <= degree <= 2 "Taylor polynomial must have degree 1 or 2."
+end    
+
+
+function TaylorPolynomial1(dim_in, dim_out, T)
     x0 = Vector{T}(undef, dim_in)
     Δx = similar(x0)
     fx = Vector{T}(undef, dim_out)
@@ -26,12 +32,19 @@ function init_surrogate(::Type{<:TaylorPolynomial1}, op, dim_in, dim_out, params
     return TaylorPolynomial1(x0, Δx, fx, Dfx)
 end
 
-function init_surrogate(::Type{<:TaylorPolynomial2}, op, dim_in, dim_out, params, T)
-    tp1 = init_surrogate(TaylorPolynomial1, op, dim_in, dim_out, params, T) 
+function TaylorPolynomial2(dim_in, dim_out, T)
+    tp1 = TaylorPolynomial1(dim_in, dim_out, T)
     Hfx = Array{T, 3}(undef, dim_in, dim_in, dim_out)
-    xtmp = similar(x0)
-
+    xtmp = similar(tp1.x0)
     return TaylorPolynomial2(tp1, Hfx, xtmp)
+end
+
+function init_surrogate(tp_cfg::TaylorPolynomialConfig, op, dim_in, dim_out, params, T)
+    if tp_cfg.degree == 1
+        return TaylorPolynomial2(dim_in, dim_out, T)
+    else
+        return TaylorPolynomial2(dim_in, dim_out, T)
+    end
 end
 
 const TaylorPoly = Union{TaylorPolynomial1, TaylorPolynomial2}

@@ -308,7 +308,7 @@ function solve_steepest_descent_problem(
     _d = JuMP.value.(d)  # this allocation should be negligible
     #src @show d_norm = LA.norm(_d, descent_step_norm)
     # srcχ = iszero(d_norm) ? d_norm : @show(-JuMP.value(β))/d_norm
-    χ = -JuMP.value(β)
+    χ = abs(JuMP.value(β) * LA.norm(_d, descent_step_norm))
     return χ, _d
 end
 

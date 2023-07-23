@@ -1,10 +1,10 @@
 import .CompromiseEvaluators: NonlinearFunction, AbstractSurrogateModel, 
-    AbstractNonlinearOperator, AbstractNonlinearOperatorNoParams, ExactModel
+    AbstractSurrogateModelConfig, AbstractNonlinearOperator, AbstractNonlinearOperatorNoParams
 import .CompromiseEvaluators: requires_grads, provides_grads, requires_hessians, provides_hessians
 import .CompromiseEvaluators: eval_op!, eval_grads!, eval_op_and_grads!
 import .CompromiseEvaluators: model_op!, model_grads!, model_op_and_grads!
 import .CompromiseEvaluators: NoBackend
-import .CompromiseEvaluators: TaylorPolynomial1, TaylorPolynomial2
+import .CompromiseEvaluators: TaylorPolynomialConfig, ExactModelConfig
 import .CompromiseEvaluators: init_surrogate, update!
 
 struct ScaledOperator{O, S, XI, D, H} <: AbstractNonlinearOperatorNoParams
@@ -82,9 +82,9 @@ abstract type SimpleMOP <: AbstractMOP end
     dim_nl_eq_constraints :: Int = 0
     dim_nl_ineq_constraints :: Int = 0
 
-    mtype_objectives :: Type = ExactModel
-    mtype_nl_eq_constraints :: Type = ExactModel
-    mtype_nl_ineq_constraints :: Type = ExactModel
+    mcfg_objectives :: AbstractSurrogateModelConfig = ExactModelConfig()
+    mcfg_nl_eq_constraints :: AbstractSurrogateModelConfig = ExactModelConfig()
+    mcfg_nl_ineq_constraints :: AbstractSurrogateModelConfig = ExactModelConfig()
 
     lb :: Union{Nothing, Vector{Float64}} = nothing
     ub :: Union{Nothing, Vector{Float64}} = nothing
@@ -110,9 +110,9 @@ struct TypedMOP{
     dim_nl_eq_constraints :: Int
     dim_nl_ineq_constraints :: Int
 
-    mtype_objectives :: MTO
-    mtype_nl_eq_constraints :: MTNLEC
-    mtype_nl_ineq_constraints :: MTNLIC 
+    mcfg_objectives :: MTO
+    mcfg_nl_eq_constraints :: MTNLEC
+    mcfg_nl_ineq_constraints :: MTNLIC 
 
     lb :: LB
     ub :: UB
@@ -132,9 +132,9 @@ function initialize(mop::MutableMOP, ξ0::RVec)
         mop.dim_objectives,
         mop.dim_nl_eq_constraints,
         mop.dim_nl_ineq_constraints,
-        mop.mtype_objectives,
-        mop.mtype_nl_eq_constraints,
-        mop.mtype_nl_ineq_constraints,
+        mop.mcfg_objectives,
+        mop.mcfg_nl_eq_constraints,
+        mop.mcfg_nl_ineq_constraints,
         mop.lb,
         mop.ub,
         Ec,
@@ -144,29 +144,29 @@ end
 
 MutableMOP(num_vars::Int)=MutableMOP(;num_vars)
 
-parse_mtype(::Nothing)=parse_mtype(:exact)
-parse_mtype(mtype::Type{<:AbstractSurrogateModel})=mtype
-parse_mtype(mtype_symb::Symbol)=parse_mtype(Val(mtype_symb))
-parse_mtype(::Val{:exact})=ExactModel
-parse_mtype(::Val{:taylor1})=TaylorPolynomial1
-parse_mtype(::Val{:taylor2})=TaylorPolynomial2
+parse_mcfg(::Nothing)=parse_mcfg(:exact)
+parse_mcfg(mcfg::AbstractSurrogateModelConfig)=mcfg
+parse_mcfg(mcfg_symb::Symbol)=parse_mcfg(Val(mcfg_symb))
+parse_mcfg(::Val{:exact})=ExactModelConfig()
+parse_mcfg(::Val{:taylor1})=TaylorPolynomialConfig(;degree=1)
+parse_mcfg(::Val{:taylor2})=TaylorPolynomialConfig(;degree=2)
 
 function add_function!(
     func_field::Symbol, mop::MutableMOP, op::AbstractNonlinearOperator, 
-    model::Union{Type{<:AbstractSurrogateModel}, Nothing, Symbol}=nothing;
+    model::Union{AbstractSurrogateModelConfig, Nothing, Symbol}=nothing;
     dim_out::Int, backend=NoBackend()
 )
 
     setfield!(mop, func_field, op)
     setfield!(mop, Symbol("dim_", func_field), dim_out)
 
-    mod = parse_mtype(model)
-    setfield!(mop, Symbol("mtype_", func_field), mod)
+    mod = parse_mcfg(model)
+    setfield!(mop, Symbol("mcfg_", func_field), mod)
     return nothing
 end
 function add_function!(
     func_field::Symbol, mop::MutableMOP, func::Function,
-    model::Union{Type{<:AbstractSurrogateModel}, Nothing, Symbol}=nothing; 
+    model::Union{AbstractSurrogateModelConfig, Nothing, Symbol}=nothing; 
     dim_out::Int, backend=NoBackend(), func_iip::Bool=false
 )   
     op = NonlinearFunction(; func, func_iip, backend)
@@ -175,7 +175,7 @@ end
 
 function add_function!(
     func_field::Symbol, mop::MutableMOP, func::Function, grads::Function,
-    model::Union{Type{<:AbstractSurrogateModel}, Nothing, Symbol}=nothing;
+    model::Union{AbstractSurrogateModelConfig, Nothing, Symbol}=nothing;
     dim_out::Int, backend=NoBackend(), func_iip=false, grads_iip=false
 )
     op = NonlinearFunction(; func, grads, func_iip, grads_iip, backend)
@@ -185,7 +185,7 @@ end
 function add_function!(
     func_field::Symbol, mop::MutableMOP, func::Function, grads::Function,
     func_and_grads::Function,
-    model::Union{Type{<:AbstractSurrogateModel}, Nothing, Symbol}=nothing;
+    model::Union{AbstractSurrogateModelConfig, Nothing, Symbol}=nothing;
     dim_out::Int, backend=NoBackend(), func_iip=false, grads_iip=false, func_and_grads_iip=false
 )
     op = NonlinearFunction(; 
@@ -295,10 +295,10 @@ function eval_and_grads_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::SimpleMOPSu
     return model_op_and_grads!(y, Dy, mod.mod_nl_ineq_constraints, x)
 end
 
-scale_wrap_op(scaler::IdentityScaler, op, mtype, dim_in, dim_out, T)=op
-function scale_wrap_op(scaler, op, mtype, dim_in, dim_out, T)
+scale_wrap_op(scaler::IdentityScaler, op, mcfg, dim_in, dim_out, T)=op
+function scale_wrap_op(scaler, op, mcfg, dim_in, dim_out, T)
     ξ = zeros(T, dim_in)
-    Dy = if requires_grads(mtype)
+    Dy = if requires_grads(mcfg)
         zeros(T, dim_in, dim_out)
     else
         nothing
@@ -315,17 +315,17 @@ function init_models(mop::SimpleMOP, n_vars, scaler)
     d_nl_ineq = dim_nl_ineq_constraints(mop)
     d_in = mop.num_vars
     objf = scale_wrap_op(
-        scaler, mop.objectives, mop.mtype_objectives, d_in, d_objf, Float64)
+        scaler, mop.objectives, mop.mcfg_objectives, d_in, d_objf, Float64)
     nl_eq = scale_wrap_op(
-        scaler, mop.nl_eq_constraints, mop.mtype_nl_eq_constraints, d_in, d_nl_eq, Float64)
+        scaler, mop.nl_eq_constraints, mop.mcfg_nl_eq_constraints, d_in, d_nl_eq, Float64)
     nl_ineq = scale_wrap_op(
-        scaler, mop.nl_ineq_constraints, mop.mtype_nl_ineq_constraints, d_in, d_nl_ineq, Float64)
+        scaler, mop.nl_ineq_constraints, mop.mcfg_nl_ineq_constraints, d_in, d_nl_ineq, Float64)
     mobjf = init_surrogate(
-        mop.mtype_objectives, objf, d_in, d_objf, nothing, Float64)
+        mop.mcfg_objectives, objf, d_in, d_objf, nothing, Float64)
     mnl_eq = init_surrogate(
-        mop.mtype_nl_eq_constraints, nl_eq, d_in, d_nl_eq, nothing, Float64)
+        mop.mcfg_nl_eq_constraints, nl_eq, d_in, d_nl_eq, nothing, Float64)
     mnl_ineq = init_surrogate(
-        mop.mtype_nl_ineq_constraints, nl_ineq, d_in, d_nl_ineq, nothing, Float64)
+        mop.mcfg_nl_ineq_constraints, nl_ineq, d_in, d_nl_ineq, nothing, Float64)
 
     return SimpleMOPSurrogate(
         objf, nl_eq, nl_ineq, d_in, d_objf, d_nl_eq, d_nl_ineq, mobjf, mnl_eq, mnl_ineq)

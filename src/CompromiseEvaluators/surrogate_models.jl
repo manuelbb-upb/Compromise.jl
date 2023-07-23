@@ -1,13 +1,14 @@
 abstract type AbstractSurrogateModel end
+abstract type AbstractSurrogateModelConfig end
 
 depends_on_trust_region(::AbstractSurrogateModel)=true
 
-requires_grads(::Type{<:AbstractSurrogateModel})=false
-requires_hessians(::Type{<:AbstractSurrogateModel})=false
+requires_grads(::AbstractSurrogateModelConfig)=false
+requires_hessians(::AbstractSurrogateModelConfig)=false
 requires_grads(::T) where T<:AbstractSurrogateModel=requires_grads(T)
 requires_hessians(::T) where T<:AbstractSurrogateModel=requires_hessians(T)
 
-init_surrogate(::Type{<:AbstractSurrogateModel}, op, dim_in, dim_out, params, T)::AbstractSurrogateModel=nothing
+init_surrogate(::AbstractSurrogateModelConfig, op, dim_in, dim_out, params, T)::AbstractSurrogateModel=nothing
 
 function model_op!(y, surr::AbstractSurrogateModel, x)
     return nothing

@@ -3,11 +3,13 @@ Base.@kwdef struct ExactModel{O,P} <: AbstractSurrogateModel#{O<:AbstractNonline
     params :: P = nothing
 end
 
+struct ExactModelConfig <: AbstractSurrogateModelConfig end
+
 depends_on_trust_region(::ExactModel)=false
 requires_grads(::Type{<:ExactModel})=true
 requires_hessians(::Type{<:ExactModel})=false
 
-function init_surrogate(::Type{<:ExactModel}, op, dim_in, dim_out, params, T)
+function init_surrogate(::ExactModelConfig, op, dim_in, dim_out, params, T)
     return ExactModel(op, params)
 end
 

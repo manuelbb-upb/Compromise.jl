@@ -36,6 +36,8 @@ the function body, but not if they are merely passed through to other functions.
 
 # ## Medium-Priority ToDo's
 
+* Introduce `AbstractSurrogateModelConfig` to initialize `AbstractSurrogateModel` based
+  on custom configuration objects instead of their types.
 * Make `dim_in` or `num_vars` part of the `AbstractMOP` and `AbstractMOPSurrogate` interface.
 * Add dimension information to `AbstractNonlinearOperator` and `AbstractSurrogateModel`.  
   When this is done, some method signatures concerning initialization and updates can be  
