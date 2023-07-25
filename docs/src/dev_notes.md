@@ -1,6 +1,6 @@
-# # Developer Notes
+# Developer Notes
 
-# ## Function Signatures
+## Function Signatures
 
 For utility functions with few arguments, we try to keep to the Julia
 convention of appending an exclamation mark, if a method modifies some 
@@ -34,14 +34,14 @@ What arguments are modified, or even guaranteed or required to be modified, shou
 The compiler does only specialize on function arguments if they are used within in 
 the function body, but not if they are merely passed through to other functions.
 
-# ## Medium-Priority ToDo's
+## Medium-Priority To-Do's
 
 * Introduce `AbstractSurrogateModelConfig` to initialize `AbstractSurrogateModel` based
   on custom configuration objects instead of their types.
 * Make `dim_in` or `num_vars` part of the `AbstractMOP` and `AbstractMOPSurrogate` interface.
 * Add dimension information to `AbstractNonlinearOperator` and `AbstractSurrogateModel`.  
   When this is done, some method signatures concerning initialization and updates can be  
-  simplified. (`CTRL-F` for “dim_in”, “num_vars”, “num_out”, “dim_out” etc.)
+  simplified. (`CTRL-F` for `dim_in`, `num_vars`, `num_out`, `dim_out` etc.)
 * In the modelling and DAG framework, switch names and meaning of dependent variables and  
   states. 
 
