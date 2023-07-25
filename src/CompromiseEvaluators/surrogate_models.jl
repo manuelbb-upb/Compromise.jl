@@ -5,10 +5,14 @@ depends_on_trust_region(::AbstractSurrogateModel)=true
 
 requires_grads(::AbstractSurrogateModelConfig)=false
 requires_hessians(::AbstractSurrogateModelConfig)=false
-requires_grads(::T) where T<:AbstractSurrogateModel=requires_grads(T)
-requires_hessians(::T) where T<:AbstractSurrogateModel=requires_hessians(T)
 
 init_surrogate(::AbstractSurrogateModelConfig, op, dim_in, dim_out, params, T)::AbstractSurrogateModel=nothing
+
+function update!(
+    surr::AbstractSurrogateModel, op, Δ, x, fx, lb, ub; kwargs...
+)
+    return nothing    
+end
 
 function model_op!(y, surr::AbstractSurrogateModel, x)
     return nothing
@@ -68,10 +72,6 @@ function func_vals_and_grads!(y, Dy, surr::AbstractSurrogateModel, x, p, outputs
     return model_op_and_grads!(y, Dy, surr, x)
 end
 
-function update!(surr::AbstractSurrogateModel, op, x, fx)
-    return nothing    
-end
-
 include("taylor_polynomials.jl")
-
+include("rbf_models.jl")
 include("exact_model.jl")

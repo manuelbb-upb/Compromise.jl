@@ -48,7 +48,7 @@ abstract type AbstractOperatorNode <: AbstractNode end
 in_nodes(n::AbstractNode)=getfield(n, :in_nodes)
 out_nodes(n::AbstractNode)=getfield(n, :out_nodes)
 
-import Parameters: @with_kw_noshow, @with_kw
+import Parameters: @with_kw_noshow, @with_kw, @unpack
 
 @with_kw_noshow mutable struct VariableNode <: AbstractValueNode
 	index :: Int

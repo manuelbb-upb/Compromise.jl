@@ -12,13 +12,13 @@ struct TaylorPolynomial1{
     Dfx :: D 
 end
 
-struct TaylorPolynomial2{X, TP1<:TaylorPolynomial1{X}, H}
+struct TaylorPolynomial2{X, TP1<:TaylorPolynomial1{X}, H} <: AbstractSurrogateModel
     tp :: TP1
     Hfx :: H
     xtmp :: X
 end
 
-@with_kw struct TaylorPolynomialConfig
+@with_kw struct TaylorPolynomialConfig <: AbstractSurrogateModelConfig
     degree :: Int = 1
     @assert 1 <= degree <= 2 "Taylor polynomial must have degree 1 or 2."
 end    
@@ -62,8 +62,8 @@ function model_op!(y, tp::TaylorPolynomial1, x)
     return nothing
 end
 function model_op!(y, tp::TaylorPolynomial2, x)
-    model_op!(y, tp.tp1, x)
-    Δx = tp.tp1.Δx
+    model_op!(y, tp.tp, x)
+    Δx = tp.tp.Δx
     H = tp.Hfx
     @views for i = axes(H, 3)
         y[i] += 0.5 * only(Δx' * H[:, :, i] * Δx)
@@ -76,7 +76,7 @@ function model_grads!(Dy, tp::TaylorPolynomial1, x)
     return nothing
 end
 function model_grads!(Dy, tp::TaylorPolynomial2, x)
-    tp1 = tp.tp1
+    tp1 = tp.tp
     model_grads!(Dy, tp1, x)
     Δx = tp1.Δx
     Δx .= x .- tp1.x0
@@ -100,7 +100,7 @@ function model_op_and_grads!(y, Dy, tp::TaylorPolynomial1, x)
 end
 
 function model_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
-    tp1 = tp.tp1
+    tp1 = tp.tp
     model_op_and_grads!(y, Dy, tp1, x)
     Δx = tp1.Δx
     H = tp.Hfx
@@ -121,13 +121,14 @@ function model_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
     return nothing
 end
 
-function update!(tp::TaylorPolynomial1, op, x, fx)
+function update!(tp::TaylorPolynomial1, op, Δ, x, fx, lb, ub; kwargs...)
     copyto!(tp.x0, x)
     eval_op_and_grads!(tp.fx, tp.Dfx, op, x)
 end
-function update!(surr::TaylorPolynomial2, op, x, fx)
-    tp1 = tp.tp1
+
+function update!(tp::TaylorPolynomial2, op, Δ, x, fx, lb, ub; kwargs...)
+    tp1 = tp.tp
     copyto!(tp1.x0, x)
-    eval_op_and_grads_and_hessians!(tp1.fx.x, tp1.Dfx, tp.Hfx, op, x)
+    eval_op_and_grads_and_hessians!(tp1.fx, tp1.Dfx, tp.Hfx, op, x)
     return nothing
 end

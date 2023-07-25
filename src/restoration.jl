@@ -2,7 +2,7 @@ function do_restoration(
     it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
     vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts
 )
-
+    @info "Starting restoration."
 	(θ_opt, xr_opt, ret) = solve_restoration_problem(mop, scaled_cons, vals.x, algo_opts.nl_opt)
     if ret in (
         :SUCCESS, 
@@ -31,10 +31,10 @@ function restoration_objective(mop, scaled_cons)
 
         nl_eq_constraints!(hx, mop, xr)
         nl_ineq_constraints!(gx, mop, xr)
-        lin_eq_constraints!(Ex, scaled_cons.Ab, xr)
-        lin_ineq_constraints!(Ax, scaled_cons.Ec, xr)
+        lin_cons!(Ex, scaled_cons.Ab, xr)
+        lin_cons!(Ax, scaled_cons.Ec, xr)
         if !isempty(grad)
-            error("Restoration only supports derivative-free NLopt algorithms.")
+            @error "Restoration only supports derivative-free NLopt algorithms."
         end
         return constraint_violation(hx, gx, Ex, Ax)
     end
@@ -81,7 +81,7 @@ function postproccess_restoration(
     if is_acceptable(filter, vals.θ[], vals.Φ[])
         ## make models valid at `x + r` and set model values
         ## also compute normal step based on models
-        update_models!(mod, mop, scaler, vals)
+        update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts; point_has_changed=true)
         eval_and_diff_mod!(mod_vals, mod, vals.x)
 
         compute_normal_step(
@@ -110,7 +110,6 @@ function postproccess_restoration(
                 n_is_compatible = true
             end                
         end
-
         if n_is_compatible
             accept_trial_point!(vals, vals_tmp)
             return RESTORATION, CONTINUE, true, _Δ

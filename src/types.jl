@@ -31,7 +31,7 @@ abstract type AbstractStepConfig end
 abstract type AbstractStepCache end
 
 @with_kw struct AlgorithmOptions{QPOPT}
-    max_iter :: Int = 2
+    max_iter :: Int = 100
 
     "Stop if the trust region radius is reduced to below `stop_delta_min`."
 	stop_delta_min = eps(Float64)

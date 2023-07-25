@@ -278,7 +278,7 @@ function do_iteration(
     @info """
     ITERATION $(it_index).
     Δ = $(Δ)
-    θ = $(vals.θ)
+    θ = $(vals.θ[])
     x = $(vec2str(vals.ξ))
     fx = $(vec2str(vals.fx))
     """
@@ -291,16 +291,16 @@ function do_iteration(
         it_stat == RESTORATION || 
         !point_has_changed && !(depends_on_trust_region(mod) && radius_has_changed)
     )
-    @show models_valid
 
     if !models_valid
-        update_models!(mod, mop, scaler, vals)
+        update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts; point_has_changed)
         eval_and_diff_mod!(mod_vals, mod, vals.x)
 
         compute_normal_step(
             it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
             vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts
         )
+        @info "For θ=$(vals.θ[]), computed normal step of length $(LA.norm(step_vals.n))."
     end
 
     n = step_vals.n
@@ -319,7 +319,7 @@ function do_iteration(
         it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
         vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts
     )
-    @show χ
+    
     @unpack xs = step_vals
     _fxs = step_vals.fxs        # surrogate objective values at `xs`
     #src # TODO stopping based on χ
@@ -385,7 +385,11 @@ function do_iteration(
         Δ
     end
 
-    return this_it_stat, CONTINUE, point_has_changed, _Δ
+    rcode = CONTINUE
+    if χ <= algo_opts.stop_crit_tol_abs && vals.θ[] <= algo_opts.stop_theta_tol_abs
+        rcode = CRITICAL
+    end
+    return this_it_stat, rcode, point_has_changed, _Δ
 end
 
 end

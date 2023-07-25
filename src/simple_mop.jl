@@ -6,6 +6,7 @@ import .CompromiseEvaluators: model_op!, model_grads!, model_op_and_grads!
 import .CompromiseEvaluators: NoBackend
 import .CompromiseEvaluators: TaylorPolynomialConfig, ExactModelConfig
 import .CompromiseEvaluators: init_surrogate, update!
+import .CompromiseEvaluators: RBFConfig, RBFModel, CubicKernel, InverseMultiQuadricKernel, GaussianKernel
 
 struct ScaledOperator{O, S, XI, D, H} <: AbstractNonlinearOperatorNoParams
     op :: O
@@ -148,6 +149,7 @@ parse_mcfg(::Nothing)=parse_mcfg(:exact)
 parse_mcfg(mcfg::AbstractSurrogateModelConfig)=mcfg
 parse_mcfg(mcfg_symb::Symbol)=parse_mcfg(Val(mcfg_symb))
 parse_mcfg(::Val{:exact})=ExactModelConfig()
+parse_mcfg(::Val{:rbf})=RBFConfig()
 parse_mcfg(::Val{:taylor1})=TaylorPolynomialConfig(;degree=1)
 parse_mcfg(::Val{:taylor2})=TaylorPolynomialConfig(;degree=2)
 
@@ -303,7 +305,7 @@ function scale_wrap_op(scaler, op, mcfg, dim_in, dim_out, T)
     else
         nothing
     end
-    Hy = if requires_hessians(mtyp)
+    Hy = if requires_hessians(mcfg)
         zeros(T, dim_in, dim_in, dim_out)
     end
     return ScaledOperatorOrModel(op, scaler, ξ, Dy, Hy)
@@ -331,11 +333,16 @@ function init_models(mop::SimpleMOP, n_vars, scaler)
         objf, nl_eq, nl_ineq, d_in, d_objf, d_nl_eq, d_nl_ineq, mobjf, mnl_eq, mnl_ineq)
 end
 
-function update_models!(mod::SimpleMOPSurrogate, mop, scaler, vals)
+function update_models!(
+    mod::SimpleMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts; 
+    point_has_changed
+)
     @unpack x, fx, gx, hx = vals
+    @unpack lb, ub = scaled_cons
+    Δ_max = algo_opts.delta_max
 
-    update!(mod.mod_objectives, mod.objectives, x, fx)
-    update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, x, hx)
-    update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, x, gx)
+    update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; point_has_changed, Δ_max)
+    update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; point_has_changed, Δ_max)
+    update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; point_has_changed, Δ_max)
     return nothing
 end

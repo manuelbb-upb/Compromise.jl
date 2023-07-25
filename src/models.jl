@@ -23,7 +23,11 @@ supports_scaling(T::Type{<:AbstractMOPSurrogate})=NoScaling()
 # The model does not yet have to be trained.
 init_models(mop::AbstractMOP, n_vars, scaler)::AbstractMOPSurrogate=nothing
 # It is trained with the update method.
-update_models!(mod::AbstractMOPSurrogate, mop, scaler, vals)=nothing
+function update_models!(
+    mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts; point_has_changed
+)
+    return nothing
+end
 
 # ## Evaluation
 # Evaluation of nonlinear objective models requires the following method.

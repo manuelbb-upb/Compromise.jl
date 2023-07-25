@@ -1,3 +1,5 @@
+const MOI = JuMP.MOI
+
 """
     compute_normal_step(
         it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
@@ -186,7 +188,8 @@ function solve_normal_step_problem(
     Ex, Ax, Ab, 
     Ec, En, An, 
     hx, Dhx, Hn, 
-    gx, Dgx, Gn
+    gx, Dgx, Gn;
+    step_norm = 2
 )
     n_vars = length(x)
         
@@ -195,9 +198,9 @@ function solve_normal_step_problem(
     #src JuMP.set_optimizer_attribute(itrn, "polish", true)
 
     JuMP.@variable(opt, n[1:n_vars])
-    if normal_cache.normal_step_norm == 2
+    if step_norm == 2
         JuMP.@objective(opt, Min, sum(n.^2))
-    elseif normal_cache.normal_step_norm == Inf
+    elseif step_norm == Inf
         JuMP.@variable(opt, norm_n)
         JuMP.@objective(opt, Min, norm_n)
         JuMP.@constraint(opt, -norm_n .<= n)
@@ -222,6 +225,10 @@ function solve_normal_step_problem(
     Gn_ex = set_linear_constraints!(opt, gx, n, Dgx, 0, :ineq)
 
     JuMP.optimize!(opt)
+
+    if MOI.get(opt, MOI.TerminationStatus()) == MOI.INFEASIBLE
+        return fill(eltype(x)(NaN), length(n))
+    end
 
     ## read values from inner problem expressions
     read_linear_constraint_expression!(En, En_ex)

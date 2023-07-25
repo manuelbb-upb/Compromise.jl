@@ -42,7 +42,7 @@ apply_kernel(kernel::InverseMultiQuadricKernel, r, ε)=1/sqrt(1+(ε*r)^2)
 apply_kernel_derivative(kernel::GaussianKernel, r, ε) = let εsq = ε^2; -2*εsq*r*exp(-esq*r^2) end
 apply_kernel_derivative(kernel::InverseMultiQuadricKernel, r, ε) = let esq=ε^2; -esq*r/(esq*r^2 + 1)^(3//2) end
 
-@with_kw mutable struct RBFConfig # <: AbstractSurrogateModelConfig
+@with_kw mutable struct RBFConfig <: AbstractSurrogateModelConfig
     kernel :: AbstractRBFKernel = CubicKernel()
     max_points :: Union{Int, Nothing} = nothing
     database_size :: Union{Int, Nothing} = nothing
@@ -95,7 +95,7 @@ function append_zeros!(flag_vec, chunk_size)
     append!(flag_vec, zeros(Bool, chunk_size))
 end
 
-struct RBFModel{K, T} # <: AbstractSurrogateModel
+struct RBFModel{K, T} <: AbstractSurrogateModel
     kernel :: K
 
     shape_param :: Base.RefValue{T}
@@ -177,50 +177,6 @@ function RBFDatabase(cfg::RBFConfig, dim_in, dim_out, T)
         database_flags_y, point_flags, round1_flags, x_index)
 end
 
-function init_surrogate(cfg::RBFConfig, op, dim_in, dim_out, params, T)
-    @unpack kernel, search_factor, max_search_factor, th_qr, th_cholesky = cfg
-    
-    shape_param = Ref(zero(T))
-
-    database = RBFDatabase(cfg, dim_in, dim_out, T)
-    point_indices = Int[]
-    
-    min_points = dim_in + 1
-    max_points = if isnothing(cfg.max_points)
-        min(database.max_database_size, min_points*10, Int(min_points*(dim_in+2)/2))
-    else
-        max(min_points, cfg.max_points)
-    end
-
-    x0 = zeros(T, dim_in)
-    s = zeros(T, min_points)
-
-    ## RBF Basis Matrix
-    Φ = Matrix{T}(undef, max_points, max_points)
-
-    ## Polynomial matrix, columns correspond to shifted (and possibly scaled) sites
-    Y = zeros(T, min_points, max_points)
-    dists = zeros(T, min_points, min_points)
-    Z = Matrix{T}(LA.I(dim_in))
-    Pr = copy(Z)
-    Pr_xi = zeros(T, dim_in)
-
-    lb = zeros(T, dim_in)
-    ub = zeros(T, dim_in)
-    lb_max = zeros(T, dim_in)
-    ub_max = zeros(T, dim_in)
-
-    LHS = zeros(T, max_points + min_points, max_points + min_points)
-    RHS = zeros(T, max_points + min_points, dim_out)
-    coeff = copy(RHS)
-
-    return RBFModel(
-        kernel, shape_param, database, point_indices, 
-        cfg.allow_nonlinear, max_points, 
-        T(search_factor), T(max_search_factor), T(th_qr), T(th_cholesky), 
-        x0, s, Φ, lb, ub, lb_max, ub_max, Y, dists, Z, Pr, Pr_xi, LHS, RHS, coeff)
-end
-
 function trust_region_bounds!(lb, ub, x, Δ)
     lb .= x .- Δ 
     ub .= x .+ Δ
@@ -249,7 +205,7 @@ end
 pow2(x)=x^2
 norm_squared(v) = sum(pow2, v; init=0)
 
-function intersect_bound(xi::X, zi::Z, bi::B, T=Base.promote_type(DEFAULT_PRECISION, X, Z, B)) where {X, Z, B}
+function intersect_bound(xi::X, zi::Z, bi::B, T=Base.promote_type(X, Z, B)) where {X, Z, B}
     ## xi + σ * zi <= bi ⇔ σ * zi <= bi - xi == ri
     ri = bi - xi
     if iszero(zi)
@@ -277,7 +233,7 @@ function intersect_intervals(l1, r1, l2, r2, T=typeof(l1))
 end
 
 function intersect_box(x::X, z::Z, lb::L, ub::U) where {X, Z, L, U}
-    T = Base.promote_eltype(DEFAULT_PRECISION, X, Z, L, U)
+    T = Base.promote_eltype(X, Z, L, U)
     σ_min, σ_max = T(-Inf), T(Inf)
     for (xi, zi, lbi, ubi) = zip(x, z, lb, ub)    
         ## x + σ * z <= ub
@@ -425,7 +381,10 @@ end
 
 reset_flags!(flag_vec::Nothing)=nothing
 reset_flags!(flag_vec)=fill!(flag_vec, false)
-function update_rbf_model!(rbf, Δ, x, fx, global_lb=nothing, global_ub=nothing, Δ_max=Δ; x_is_new=true, norm_p=Inf)
+function update_rbf_model!(
+    rbf, op, Δ, x, fx, global_lb=nothing, global_ub=nothing; 
+    Δ_max=Δ, x_is_new=true, norm_p=Inf
+)
     dim_in = length(x)
 
     ## set shape parameter for current model
@@ -522,59 +481,6 @@ function compute_coefficients!(rbf)
     B[1:npoints, :] .= transpose(@view(database_y[:, point_indices]))
     coeff[1:npoints+dim_p, :] .= A\B
 
-    return nothing
-end
-
-@views function model_op!(y, rbf::RBFModel, x)
-    @unpack s, x0, point_indices, database, coeff, Φ, Y = rbf
-    @unpack database_x, dim_x = database
-    
-    dim_p = dim_x + 1
-    npoints = length(point_indices)
-
-    Φ_coeff = transpose(coeff[1:npoints, :])                # transpose `coeff` before
-    Π_coeff = transpose(coeff[npoints+1:npoints+dim_p, :])
-    s[1:end-1] .= x .- x0
-    s[end] = 1
-
-    LA.mul!(y, Π_coeff, s)
-
-    φ = kernel_func(rbf)
-    _Φ = Φ[1:npoints, 1]
-    for (_j,j) = enumerate(point_indices)
-        #src map!(dist, _Φ, eachcol(database_x[:, point_indices]))
-        _Φ[_j] = LA.norm(x .- database_x[:, j])
-    end
-    map!(φ, _Φ, _Φ)
-
-    LA.mul!(y, Φ_coeff, _Φ, 1, 1)
-    return nothing
-end
-
-function model_grads!(Dy, rbf::RBFModel, x)
-    ## size(Dy) = dim_x * dim_y
-    @unpack s, x0, point_indices, database, coeff, Φ, Y, Pr_xi = rbf
-    @unpack database_x, dim_x = database
-    
-    npoints = length(point_indices)
-    dφ = kernel_diff(rbf)        
-
-    Dy .= coeff[npoints+1:npoints+dim_x, :] # no coefficients for constant term
-
-    for (_i, i) = enumerate(point_indices)
-        ## rbf gradients
-        ## φ(‖x‖), φ'(0) = 0 ⇒ ∇φ(x) = ∑ᵢ λᵢ φ'(rᵢ)/rᵢ (x - xᵢ)
-        Pr_xi .= x .- database_x[:, i]
-        r = LA.norm(Pr_xi)
-        if iszero(r)
-            continue
-        end
-        φdr = dφ(r)
-        for j=axes(Dy, 2)
-            c = coeff[_i, j] * φdr / r
-            @views Dy[:, j] .+= c .* Pr_xi
-        end 
-    end
     return nothing
 end
 
@@ -754,3 +660,116 @@ end
     copyto!(Φ, Φsym)
     return φ
 end
+
+# ## Interface Implementation
+depends_on_trust_region(::RBFModel)=true
+requires_grads(::RBFConfig)=false
+requires_hessians(::RBFConfig)=false
+
+function init_surrogate(cfg::RBFConfig, op, dim_in, dim_out, params, T)
+    @unpack kernel, search_factor, max_search_factor, th_qr, th_cholesky = cfg
+    
+    shape_param = Ref(zero(T))
+
+    database = RBFDatabase(cfg, dim_in, dim_out, T)
+    point_indices = Int[]
+    
+    min_points = dim_in + 1
+    max_points = if isnothing(cfg.max_points)
+        min(database.max_database_size, min_points*10, Int(min_points*(dim_in+2)/2))
+    else
+        max(min_points, cfg.max_points)
+    end
+
+    x0 = zeros(T, dim_in)
+    s = zeros(T, min_points)
+
+    ## RBF Basis Matrix
+    Φ = Matrix{T}(undef, max_points, max_points)
+
+    ## Polynomial matrix, columns correspond to shifted (and possibly scaled) sites
+    Y = zeros(T, min_points, max_points)
+    dists = zeros(T, min_points, min_points)
+    Z = Matrix{T}(LA.I(dim_in))
+    Pr = copy(Z)
+    Pr_xi = zeros(T, dim_in)
+
+    lb = zeros(T, dim_in)
+    ub = zeros(T, dim_in)
+    lb_max = zeros(T, dim_in)
+    ub_max = zeros(T, dim_in)
+
+    LHS = zeros(T, max_points + min_points, max_points + min_points)
+    RHS = zeros(T, max_points + min_points, dim_out)
+    coeff = copy(RHS)
+
+    return RBFModel(
+        kernel, shape_param, database, point_indices, 
+        cfg.allow_nonlinear, max_points, 
+        T(search_factor), T(max_search_factor), T(th_qr), T(th_cholesky), 
+        x0, s, Φ, lb, ub, lb_max, ub_max, Y, dists, Z, Pr, Pr_xi, LHS, RHS, coeff)
+end
+
+
+@views function model_op!(y, rbf::RBFModel, x)
+    @unpack s, x0, point_indices, database, coeff, Φ, Y = rbf
+    @unpack database_x, dim_x = database
+    
+    dim_p = dim_x + 1
+    npoints = length(point_indices)
+
+    Φ_coeff = transpose(coeff[1:npoints, :])                # transpose `coeff` before
+    Π_coeff = transpose(coeff[npoints+1:npoints+dim_p, :])
+    s[1:end-1] .= x .- x0
+    s[end] = 1
+
+    LA.mul!(y, Π_coeff, s)
+
+    φ = kernel_func(rbf)
+    _Φ = Φ[1:npoints, 1]
+    for (_j,j) = enumerate(point_indices)
+        #src map!(dist, _Φ, eachcol(database_x[:, point_indices]))
+        _Φ[_j] = LA.norm(x .- database_x[:, j])
+    end
+    map!(φ, _Φ, _Φ)
+
+    LA.mul!(y, Φ_coeff, _Φ, 1, 1)
+    return nothing
+end
+
+function model_grads!(Dy, rbf::RBFModel, x)
+    ## size(Dy) = dim_x * dim_y
+    @unpack s, x0, point_indices, database, coeff, Φ, Y, Pr_xi = rbf
+    @unpack database_x, dim_x = database
+    
+    npoints = length(point_indices)
+    dφ = kernel_diff(rbf)        
+
+    Dy .= coeff[npoints+1:npoints+dim_x, :] # no coefficients for constant term
+
+    for (_i, i) = enumerate(point_indices)
+        ## rbf gradients
+        ## φ(‖x‖), φ'(0) = 0 ⇒ ∇φ(x) = ∑ᵢ λᵢ φ'(rᵢ)/rᵢ (x - xᵢ)
+        Pr_xi .= x .- database_x[:, i]
+        r = LA.norm(Pr_xi)
+        if iszero(r)
+            continue
+        end
+        φdr = dφ(r)
+        for j=axes(Dy, 2)
+            c = coeff[_i, j] * φdr / r
+            @views Dy[:, j] .+= c .* Pr_xi
+        end 
+    end
+    return nothing
+end
+
+function update!(
+    rbf::RBFModel, op, Δ, x, fx, lb, ub; 
+    point_has_changed, Δ_max, kwargs...
+)
+    update_rbf_model!(rbf, op, Δ, x, fx, lb, ub; Δ_max, x_is_new=point_has_changed, norm_p=Inf)
+end
+
+#src function model_op_and_grads! end # TODO
+# TODO partial evaluation
