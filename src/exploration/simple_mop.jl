@@ -18,10 +18,9 @@ function objective_function(x)
     ]
 end
 
-# Contrain the problem to ℝ² without unit ball:
-function nl_ineq_function(x)
-    return 1 - sum(x.^2)
-end
+# Contrain the problem to ℝ² without unit ball.
+# For demonstration purposes, use an in-place function.
+nl_ineq_function!(y, x) = y[1] = 1 - sum(x.^2)
 
 # Add functions to `MOP`.
 # The objectives are meant to be modelled with an `RBFModel`,
@@ -30,8 +29,8 @@ C.add_objectives!(MOP, objective_function, :rbf; func_iip=false, dim_out=2)
 
 # The constraint is modelled with a Taylor Polynomial,
 # so we need a backend (or compute the derivatives by hand...)
-C.add_nl_ineq_constraints!(MOP, nl_ineq_function, :taylor1; 
-    func_iip=false, dim_out=1, backend=C.CE.ForwardDiffBackend()
+C.add_nl_ineq_constraints!(MOP, nl_ineq_function!, :taylor1; 
+    func_iip=true, dim_out=1, backend=C.CE.ForwardDiffBackend()
 )
 
 # The `MutableMOP` is turned into a `SimpleMOP` during initialization.
