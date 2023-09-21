@@ -89,7 +89,7 @@ Base.@kwdef struct SteepestDescentCache{T, DN, NN, EN, AN, HN, GN} <: AbstractSt
     ## caches for intermediate values
     fxn :: Vector{T}
 
-    ## caches for constraint jacobians times normal step
+    ## caches for product of constraint jacobians and normal step
     En :: EN        # E*n
     An :: AN        # A*n
     Hn :: HN        # ∇h(x)*n
@@ -117,13 +117,9 @@ function init_step_cache(
         normal_step_norm = cfg
 
     fxn = undef_or_nothing(vals.fx, T)
-
     En = undef_or_nothing(vals.Ex, T)
-
     An = undef_or_nothing(vals.Ax, T)
-
-    Hn = undef_or_nothing(mod_vals.hx, T)
-    
+    Hn = undef_or_nothing(mod_vals.hx, T)    
     Gn = undef_or_nothing(mod_vals.gx, T)
 
     return SteepestDescentCache(;
@@ -304,8 +300,8 @@ function solve_steepest_descent_problem(
 
     ## A(x + n + d) ≤ b ⇔ A(x+n) + A*d <= b
     ## ⇒ c = A(x+n)
-    set_linear_constraints!(opt, Exn, d, Ab, :eq)
-    set_linear_constraints!(opt, Axn, d, Ec, :ineq)
+    set_linear_constraints!(opt, Exn, d, Ec, :eq)
+    set_linear_constraints!(opt, Axn, d, Ab, :ineq)
 
     ## hx + H(n + d) = 0 ⇔ (hx + Hn) + Hd = 0
     set_linear_constraints!(opt, Hxn, d, Dhx, 0, :eq)

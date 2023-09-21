@@ -96,17 +96,27 @@ nl_ineq_constraints!(y::Nothing, mop::AbstractMOP, x::RVec)=nothing
 nl_eq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)=eval_nl_eq_constraints!(y, mop, x)
 nl_ineq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)=eval_nl_ineq_constraints!(y, mop, x)
 
-# Similar methods can be defined for linear constraints:
-lin_cons!(y::Nothing, cons::Nothing, x::RVec) = nothing
-function lin_cons!(y::RVec, (A, b)::Tuple, x::RVec)
-    LA.mul!(y, A, x)
-    y .-= b
+# Similar methods can be defined for linear constraints.
+"""
+    lin_cons!(residual_vector, prod_cache, constraint_data, x)
+
+Given a linear constraint `A*x .<= b` or `A*x .== b`, compute the product `A*x` and store 
+the result in `prod_cache`, and also compute `A*x .- b` and store the result in 
+`residual_vector`.
+`constraint_data` should either be the tuple `(A,b)::Tuple{RMat,RVec}` or `nothing`.
+"""
+lin_cons!(residual_vector, prod_cache, constraint_data, x)=nothing
+lin_cons!(res::Nothing, mat_vec::Nothing, cons::Nothing, x::RVec) = nothing
+function lin_cons!(res::RVec, mat_vec::RVec, (A, b)::Tuple, x::RVec)
+    LA.mul!(mat_vec, A, x)
+    @. res = mat_vec - b
     return nothing
 end
-lin_eq_constraints!(y::Nothing, mop::AbstractMOP, x::RVec)=nothing
-lin_ineq_constraints!(y::Nothing, mop::AbstractMOP, x::RVec)=nothing
-lin_eq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)=lin_cons!(y, lin_eq_constraints(mop), x)
-lin_ineq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)=lin_cons!(y, lin_ineq_constraints(mop), x)
+# More specific methods with descriptive names applicable to an `AbstractMOP`:
+lin_eq_constraints!(res::Nothing, mat_vec::Nothing, mop::AbstractMOP, x::RVec)=nothing
+lin_ineq_constraints!(res::Nothing, mat_vec::Nothing, mop::AbstractMOP, x::RVec)=nothing
+lin_eq_constraints!(res::RVec, mat_vec::Nothing, mop::AbstractMOP, x::RVec)=lin_cons!(res, mat_vec, lin_eq_constraints(mop), x)
+lin_ineq_constraints!(res::RVec, mat_vec::Nothing, mop::AbstractMOP, x::RVec)=lin_cons!(res, mat_vec, lin_ineq_constraints(mop), x)
 
 # ## Pre-Allocation
 # Why do we also allow `nothing` as the target for constraints?
