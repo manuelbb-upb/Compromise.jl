@@ -36,16 +36,24 @@ end</code></pre><p>To ensure, they only get called if needed, we wrap them and a
 nl_eq_constraints!(y::Nothing, mop::AbstractMOP, x::RVec)=nothing
 nl_ineq_constraints!(y::Nothing, mop::AbstractMOP, x::RVec)=nothing
 nl_eq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)=eval_nl_eq_constraints!(y, mop, x)
-nl_ineq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)=eval_nl_ineq_constraints!(y, mop, x)</code></pre><p>Similar methods can be defined for linear constraints:</p><pre><code class="language-julia hljs">lin_cons!(y::Nothing, cons::Nothing, x::RVec) = nothing
-function lin_cons!(y::RVec, (A, b)::Tuple, x::RVec)
-    LA.mul!(y, A, x)
-    y .-= b
+nl_ineq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)=eval_nl_ineq_constraints!(y, mop, x)</code></pre><p>Similar methods can be defined for linear constraints.</p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    lin_cons!(residual_vector, prod_cache, constraint_data, x)
+
+Given a linear constraint `A*x .&lt;= b` or `A*x .== b`, compute the product `A*x` and store
+the result in `prod_cache`, and also compute `A*x .- b` and store the result in
+`residual_vector`.
+`constraint_data` should either be the tuple `(A,b)::Tuple{RMat,RVec}` or `nothing`.
+&quot;&quot;&quot;
+lin_cons!(residual_vector, prod_cache, constraint_data, x)=nothing
+lin_cons!(res::Nothing, mat_vec::Nothing, cons::Nothing, x::RVec) = nothing
+function lin_cons!(res::RVec, mat_vec::RVec, (A, b)::Tuple, x::RVec)
+    LA.mul!(mat_vec, A, x)
+    @. res = mat_vec - b
     return nothing
-end
-lin_eq_constraints!(y::Nothing, mop::AbstractMOP, x::RVec)=nothing
-lin_ineq_constraints!(y::Nothing, mop::AbstractMOP, x::RVec)=nothing
-lin_eq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)=lin_cons!(y, lin_eq_constraints(mop), x)
-lin_ineq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)=lin_cons!(y, lin_ineq_constraints(mop), x)</code></pre><h2 id="Pre-Allocation"><a class="docs-heading-anchor" href="#Pre-Allocation">Pre-Allocation</a><a id="Pre-Allocation-1"></a><a class="docs-heading-anchor-permalink" href="#Pre-Allocation" title="Permalink"></a></h2><p>Why do we also allow <code>nothing</code> as the target for constraints? Because that is the default cache returned if there are none:</p><pre><code class="language-julia hljs">function prealloc_objectives_vector(mop::AbstractMOP)
+end</code></pre><p>More specific methods with descriptive names applicable to an <code>AbstractMOP</code>:</p><pre><code class="language-julia hljs">lin_eq_constraints!(res::Nothing, mat_vec::Nothing, mop::AbstractMOP, x::RVec)=nothing
+lin_ineq_constraints!(res::Nothing, mat_vec::Nothing, mop::AbstractMOP, x::RVec)=nothing
+lin_eq_constraints!(res::RVec, mat_vec::Nothing, mop::AbstractMOP, x::RVec)=lin_cons!(res, mat_vec, lin_eq_constraints(mop), x)
+lin_ineq_constraints!(res::RVec, mat_vec::Nothing, mop::AbstractMOP, x::RVec)=lin_cons!(res, mat_vec, lin_ineq_constraints(mop), x)</code></pre><h2 id="Pre-Allocation"><a class="docs-heading-anchor" href="#Pre-Allocation">Pre-Allocation</a><a id="Pre-Allocation-1"></a><a class="docs-heading-anchor-permalink" href="#Pre-Allocation" title="Permalink"></a></h2><p>Why do we also allow <code>nothing</code> as the target for constraints? Because that is the default cache returned if there are none:</p><pre><code class="language-julia hljs">function prealloc_objectives_vector(mop::AbstractMOP)
     T = precision(mop)
     return Vector{T}(undef, dim_objectives(mop))
 end
@@ -73,4 +81,4 @@ for (dim_func, prealloc_func) in (
             return nothing
         end
     end
-end</code></pre><hr/><p><em>This page was generated using <a href="https://github.com/fredrikekre/Literate.jl">Literate.jl</a>.</em></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../dev_notes/">« (Dev) Notes</a><a class="docs-footer-nextpage" href="../models/">AbstractMOPSurrogate Interface »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.24 on <span class="colophon-date" title="Thursday 27 July 2023 15:32">Thursday 27 July 2023</span>. Using Julia version 1.9.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+end</code></pre><hr/><p><em>This page was generated using <a href="https://github.com/fredrikekre/Literate.jl">Literate.jl</a>.</em></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../dev_notes/">« (Dev) Notes</a><a class="docs-footer-nextpage" href="../models/">AbstractMOPSurrogate Interface »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.24 on <span class="colophon-date" title="Thursday 21 September 2023 07:45">Thursday 21 September 2023</span>. Using Julia version 1.9.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
