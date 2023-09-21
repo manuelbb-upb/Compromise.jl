@@ -4,6 +4,7 @@ function do_restoration(
 )
     @info "Starting restoration."
 	(θ_opt, xr_opt, ret) = solve_restoration_problem(mop, scaled_cons, vals.x, algo_opts.nl_opt)
+    @show xr_opt, ret
     if ret in (
         :SUCCESS, 
         :STOPVAL_REACHED, 
@@ -24,19 +25,23 @@ end
 
 function restoration_objective(mop, scaled_cons)
     function objf(xr::Vector, grad::Vector)
-        hx = prealloc_nl_eq_constraints_vector(mop)
-        gx = prealloc_nl_ineq_constraints_vector(mop)
-        Ex = prealloc_lin_eq_constraints_vector(mop)
-        Ax = prealloc_lin_ineq_constraints_vector(mop)
-
-        nl_eq_constraints!(hx, mop, xr)
-        nl_ineq_constraints!(gx, mop, xr)
-        lin_cons!(Ex, scaled_cons.Ab, xr)
-        lin_cons!(Ax, scaled_cons.Ec, xr)
         if !isempty(grad)
             @error "Restoration only supports derivative-free NLopt algorithms."
         end
-        return constraint_violation(hx, gx, Ex, Ax)
+
+        hx = prealloc_nl_eq_constraints_vector(mop)
+        gx = prealloc_nl_ineq_constraints_vector(mop)
+        Eres = prealloc_lin_eq_constraints_vector(mop)
+        Ares = prealloc_lin_ineq_constraints_vector(mop)
+        Ex = deepcopy(Eres)
+        Ax = deepcopy(Ares)
+        
+        nl_eq_constraints!(hx, mop, xr)
+        nl_ineq_constraints!(gx, mop, xr)
+        lin_cons!(Eres, Ex, scaled_cons.Ab, xr)
+        lin_cons!(Ares, Ax, scaled_cons.Ec, xr)
+        
+        return constraint_violation(hx, gx, Eres, Ares)
     end
     return objf
 end

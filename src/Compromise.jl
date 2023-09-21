@@ -99,12 +99,12 @@ end
 constraint_violation(::Nothing, type_val)=0
 constraint_violation(ex::RVec, ::Val{:eq})=maximum(abs.(ex))
 constraint_violation(ix::RVec, ::Val{:ineq})=maximum(ix)
-function constraint_violation(hx, gx, Ex, Ax)
+function constraint_violation(hx, gx, Eres, Ares)
     return max(
         constraint_violation(hx, Val(:eq)),
-        constraint_violation(Ex, Val(:eq)),
+        constraint_violation(Eres, Val(:eq)),
         constraint_violation(gx, Val(:ineq)),
-        constraint_violation(Ax, Val(:ineq)),
+        constraint_violation(Ares, Val(:ineq)),
         0
     )
 end
@@ -125,15 +125,17 @@ function init_vals(mop, scaler, ξ0)
     gx = prealloc_nl_ineq_constraints_vector(mop)
     Ex = prealloc_lin_eq_constraints_vector(mop)
     Ax = prealloc_lin_ineq_constraints_vector(mop)
+    Eres = deepcopy(Ex)
+    Ares = deepcopy(Ax)
 
     ## set values by evaluating all functions
-    θ, Φ = eval_mop!(fx, hx, gx, Ex, Ax, mop, ξ)
+    θ, Φ = eval_mop!(fx, hx, gx, Eres, Ex, Ares, Ax, mop, ξ)
 
     ## constraint violation and filter value
     θ = Ref(T(θ))
     Φ = Ref(T(Φ))
 
-    return ValueArrays(ξ, x, fx, hx, gx, Ex, Ax, θ, Φ)
+    return ValueArrays(ξ, x, fx, hx, gx, Eres, Ex, Ares, Ax, θ, Φ)
 end
 
 function init_step_vals(vals)
@@ -151,14 +153,14 @@ function init_model_vals(mod, n_vars)
     return SurrogateValueArrays(fx, hx, gx, Dfx, Dhx, Dgx)
 end
 
-function eval_mop!(fx, hx, gx, Ex, Ax, mop, ξ)
+function eval_mop!(fx, hx, gx, Eres, Ex, Ares, Ax, mop, ξ)
     objectives!(fx, mop, ξ)
     nl_eq_constraints!(hx, mop, ξ)
     nl_ineq_constraints!(gx, mop, ξ)
-    lin_eq_constraints!(Ex, mop, ξ)
-    lin_ineq_constraints!(Ax, mop, ξ)
+    lin_eq_constraints!(Eres, Ex, mop, ξ)
+    lin_ineq_constraints!(Ares, Ax, mop, ξ)
 
-    θ = constraint_violation(hx, gx, Ex, Ax)
+    θ = constraint_violation(hx, gx, Eres, Ares)
     Φ = maximum(fx) # TODO this depends on the type of filter, but atm there is only WeakFilter
 
     return θ, Φ
@@ -166,10 +168,10 @@ end
 
 function eval_mop!(vals, mop, scaler)
     ## evaluate problem at unscaled site
-    @unpack ξ, x, fx, hx, gx, Ex, Ax = vals
+    @unpack ξ, x, fx, hx, gx, Eres, Ex, Ax, Ares = vals
     
     unscale!(ξ, scaler, x)
-    θ, Φ = eval_mop!(fx, hx, gx, Ex, Ax, mop, ξ)
+    θ, Φ = eval_mop!(fx, hx, gx, Eres, Ex, Ares, Ax, mop, ξ)
 
     vals.θ[] = θ
     vals.Φ[] = Φ

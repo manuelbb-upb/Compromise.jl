@@ -1,7 +1,9 @@
-# In this file, we define **all** abstract types and some concrete types.
+# # Constants and Types
+# In this file ("src/types.jl"), we define **all** abstract types and some concrete types.
 # Every concrete type that is not defined here should only depend on types declared within
 # this file.
 
+# ## Shorthands for Real Arrays
 # Our algorithm operates on real-valued vectors and matrices, these are shorthands:
 const RVec = AbstractVector{<:Real}
 const RMat = AbstractMatrix{<:Real}
@@ -9,10 +11,18 @@ const RVecOrMat = Union{RVec, RMat}
 const RVecOrNothing = Union{RVec, Nothing}
 const RMatOrNothing = Union{RMat, Nothing}
 
+# ## Multi-Objective Problems
+# The algorithm operates on `AbstractMOP`s, where MOP stands for multi-objective optimization
+# problem. It's interface is defined in "src/mop.jl".
+# An MOP is surrogated by an `AbstractMOPSurrogate`. The interface is defined in "src/model.jl".
 abstract type AbstractMOP end
 abstract type AbstractMOPSurrogate end
 
-# Supertypes for objects that scale variables:
+# ## Scaling
+# Supertypes for objects that scale variables.
+# At the moment, we only use constant scaling, and I am unsure If we should distinguish between
+# constant and variable scaling.
+# Current scalers are defined in "src/affine_scalers.jl"
 abstract type AbstractAffineScaler end
 abstract type AbstractConstantAffineScaler <: AbstractAffineScaler end
 abstract type AbstractDynamicAffineScaler <: AbstractAffineScaler end
@@ -26,10 +36,15 @@ struct NoScaling <: AbstractScalingIndicator end
 struct ConstantAffineScaling <: AbstractAffineScalingIndicator end
 struct DynamicAffineScaling <: AbstractAffineScalingIndicator end
 
-# Supertypes to configure and cache descent step computation:
+# ## Step Computation
+# Supertypes to configure and cache descent step computation.
+# A config is meant to be provided by the user, and the cache is passed internally.
+# At the moment, there is only steepest descent with standard Armijo line-search, which
+# is implmented in "descent.jl"
 abstract type AbstractStepConfig end
 abstract type AbstractStepCache end
 
+# ## AlgorithmOptions
 @with_kw struct AlgorithmOptions{QPOPT}
     max_iter :: Int = 100
 
@@ -95,20 +110,31 @@ abstract type AbstractStepCache end
     @assert string(nl_opt)[2] == 'N' "Restoration algorithm must be derivative free."
 end
 
+# ## General Array Containers 
+
+"A struct holding values computed for or derived from an `AbstractMOP`."
 struct ValueArrays{X, FX, HX, GX, EX, AX, THETA, PHI}
+	"Internal (scaled) variable vector."
     ξ :: X
+	"Unscaled variable vector used for evaluation."
     x :: X
+	"Objective value vector."
     fx :: FX
+	"Nonlinear equality constraints value vector."
     hx :: HX
+	"Nonlinear inequality constraints value vector."
     gx :: GX
+	"Linear equality constraints residual."
+    Eres :: EX
     Ex :: EX
+	"Linear inequality constraints residual."
+    Ares :: AX
     Ax :: AX
+	"Reference to maximum constraint violation."
     θ :: THETA
+	"Reference to maximum function value."
     Φ :: PHI
 end
-
-promote_modulo_nothing(T1, ::Type{Nothing})=T1
-promote_modulo_nothing(T1, T2)=Base.promote_type(T1, eltype(T2))
 
 function Base.eltype(
     ::ValueArrays{X, FX, HX, GX, EX, AX, THETA, PHI}

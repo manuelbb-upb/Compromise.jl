@@ -10,3 +10,6 @@ function vec2str(x, max_entries=typemax(Int), digits=10)
 	x_str *= "]"
 	return x_str
 end
+
+promote_modulo_nothing(T1, ::Type{Nothing})=T1
+promote_modulo_nothing(T1, T2)=Base.promote_type(T1, eltype(T2))
