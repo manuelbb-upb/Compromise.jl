@@ -11,7 +11,7 @@ x = CE.add_variable!(model)
 @test x.index == 1
 @test length(CE.var_nodes(model)) == 1
 
-op1 = CE.WrappedFunction(; func = (y, x, p) -> y[1] = sin(x[1]), func_iip=true)
+op1 = CE.NonlinearParametricFunction(; func = (y, x, p) -> y[1] = sin(x[1]), func_iip=true)
 
 tmp_y = ones(1)
 tmp_x = [π]
@@ -37,7 +37,7 @@ p = CE.add_parameter!(model, π)
 @test only(CE.param_nodes(model)) == p
 
 func2 = (_x, _p) -> cos(@show(_x[1]) + @show(_p[1]))
-op2 = CE.WrappedFunction(;func=func2, func_iip=false)
+op2 = CE.NonlinearParametricFunction(;func=func2, func_iip=false)
 ξ = CE.add_state!(model)
 CE.add_operator!(model, op2, x, p, ξ)
 @test ξ isa CE.StateNode
@@ -125,7 +125,7 @@ wikimod = CE.Model()
 w1 = CE.add_variable!(wikimod)
 w2 = CE.add_variable!(wikimod)
 
-w3_op = CE.WrappedFunction(; func=(x,p) -> prod(x), func_iip=false, backend=CE.ForwardDiffBackend())
+w3_op = CE.NonlinearParametricFunction(; func=(x,p) -> prod(x), func_iip=false, backend=CE.ForwardDiffBackend())
 
 w3_y = zeros(1)
 CE.eval_op!(w3_y, w3_op, [1, 2], [])
@@ -142,7 +142,7 @@ CE.eval_op_and_grads_and_hessians!(w3_y, w3_Dy, w3_H, w3_op, [2, 3], Float64[])
 
 w3 = only(CE.add_operator!(wikimod, w3_op, [w1, w2], nothing; dim_out = 1))
 
-w4_op = CE.WrappedFunction(; func = (y, x, p) -> y[1] = sin(only(x)), func_iip=true, backend=CE.ForwardDiffBackend())
+w4_op = CE.NonlinearParametricFunction(; func = (y, x, p) -> y[1] = sin(only(x)), func_iip=true, backend=CE.ForwardDiffBackend())
 
 w4_y = zeros(1)
 CE.eval_op!(w4_y, w4_op, [1], [])
@@ -156,7 +156,7 @@ CE.eval_op_and_grads_and_hessians!(w4_y, w4_Dy, w4_Hy, w4_op, [1], [])
 
 w4 = only(CE.add_operator!(wikimod, w4_op, [w1], nothing; dim_out = 1))
 
-w5_op = CE.WrappedFunction(; func=(x, p) -> sum(x), func_iip=false, backend=CE.ForwardDiffBackend())
+w5_op = CE.NonlinearParametricFunction(; func=(x, p) -> sum(x), func_iip=false, backend=CE.ForwardDiffBackend())
 w5 = only(CE.add_operator!(wikimod, w5_op, [w3, w4], nothing; dim_out = 1))
 #%%
 wikidag = CE.initialize(wikimod)

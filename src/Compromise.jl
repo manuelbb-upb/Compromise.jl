@@ -9,9 +9,47 @@ import NLopt
 const DEFAULT_QP_OPTIMIZER=COSMO.Optimizer
 const DEFAULT_PRECISION=Float32
 
-include("CompromiseEvaluators/CompromiseEvaluators.jl")
-import .CompromiseEvaluators as CE
+#include("CompromiseEvaluators/CompromiseEvaluators.jl")
+#import .CompromiseEvaluators as CE
+include("CompromiseEvaluators.jl")
+import .CompromiseEvaluators
+const CE = CompromiseEvaluators
+export CompromiseEvaluators
 
+include("evaluators/NonlinearFunctions.jl")
+using .NonlinearFunctions
+
+if !isdefined(Base, :get_extension)
+    using Requires
+end
+
+@static if !isdefined(Base, :get_extension)
+    function __init__()
+        @require ForwardDiff="f6369f11-7733-5829-9624-2563aa707210" begin
+            include("../ext/ForwardDiffBackendExt/ForwardDiffBackendExt.jl")
+            import .ForwardDiffBackendExt
+        end
+    end
+end
+
+function ForwardDiffBackend()
+    if !isdefined(Base, :get_extension)
+        if isdefined(@__MODULE__, :ForwardDiffBackendExt)
+            return ForwardDiffBackendExt.ForwardDiffBackend()
+        end
+            return nothing
+    else
+        m = Base.get_extension(@__MODULE__, :ForwardDiffBackendExt)
+        return isnothing(m) ? m : m.ForwardDiffBackend()
+    end
+end
+export ForwardDiffBackend
+
+include("evaluators/RBFModels.jl")
+using .RBFModels
+
+
+#=
 import LinearAlgebra as LA
  
 # However, files are allowed to depend on other files for function/method definitions.
@@ -393,5 +431,5 @@ function do_iteration(
     end
     return this_it_stat, rcode, point_has_changed, _Δ
 end
-
+=#
 end

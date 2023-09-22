@@ -29,7 +29,7 @@ C.add_objectives!(MOP, objective_function, :rbf; func_iip=false, dim_out=2)
 
 # The constraint is modelled with a Taylor Polynomial,
 # so we need a backend (or compute the derivatives by hand...)
-C.add_nl_ineq_constraints!(MOP, nl_ineq_function!, :taylor1; 
+C.add_nl_ineq_constraints!(MOP, nl_ineq_function!, taylor1; 
     func_iip=true, dim_out=1, backend=C.CE.ForwardDiffBackend()
 )
 

@@ -9,7 +9,7 @@ x = CE.add_variable!(mod)
 
 opA_primal_counter = 0
 opA_grads_counter = 0
-opA = CE.WrappedFunction(;
+opA = CE.NonlinearParametricFunction(;
     func= (x,p) -> begin global opA_primal_counter += 1; only(x)^2 end, func_iip=false, 
     grads=(x,p) -> begin global opA_grads_counter += 1; [2*x;;] end, grads_iip=false
 )
@@ -21,7 +21,7 @@ CE.eval_op_and_grads!(yA, DyA, opA, [0.5,], [])
 @test opA_primal_counter == opA_grads_counter == 1
 
 y = CE.add_operator!(mod, opA, x, nothing; dim_out=1) |> only
-opB = CE.WrappedFunction(;
+opB = CE.NonlinearParametricFunction(;
     func=(x,p) -> sum(x), grads=(x, p) -> fill(1, length(x), 1), func_iip=false, grads_iip=false)
 
 z = CE.add_operator!(mod, opB, [x,y], nothing; dim_out=1) |> only
