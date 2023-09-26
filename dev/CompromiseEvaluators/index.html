@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Module CompromiseEvaluators · Compromise.jl</title><script data-outdated-warner src="../assets/warner.js"></script><link rel="canonical" href="https://manuelbb-upb.github.io/Compromise.jl/CompromiseEvaluators/"/><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.045/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.13.24/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">Compromise.jl</a></span></div><form class="docs-search" action="../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><span class="tocitem">Examples</span><ul><li><a class="tocitem" href="../README/">README</a></li></ul></li><li><a class="tocitem" href="../dev_notes/">(Dev) Notes</a></li><li><span class="tocitem">Interfaces</span><ul><li class="is-active"><a class="tocitem" href>Module <code>CompromiseEvaluators</code></a><ul class="internal"><li><a class="tocitem" href="#AbstractNonlinearOperator-Interface"><span><code>AbstractNonlinearOperator</code> Interface</span></a></li><li><a class="tocitem" href="#Types-and-Methods-for-Surrogate-Models"><span>Types and Methods for Surrogate Models</span></a></li><li><a class="tocitem" href="#Module-Exports"><span>Module Exports</span></a></li></ul></li><li><a class="tocitem" href="../mop/">AbstractMOP Interface</a></li><li><a class="tocitem" href="../models/">AbstractMOPSurrogate Interface</a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li><a class="is-disabled">Interfaces</a></li><li class="is-active"><a href>Module <code>CompromiseEvaluators</code></a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Module <code>CompromiseEvaluators</code></a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/manuelbb-upb/Compromise.jl/blob/main/docs/src/CompromiseEvaluators.md#" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="Module-CompromiseEvaluators"><a class="docs-heading-anchor" href="#Module-CompromiseEvaluators">Module <code>CompromiseEvaluators</code></a><a id="Module-CompromiseEvaluators-1"></a><a class="docs-heading-anchor-permalink" href="#Module-CompromiseEvaluators" title="Permalink"></a></h1><p>This file provides a submodule defining abstract types and interfaces for evaluation of vector-vector-functions and surrogate models.</p><h2 id="AbstractNonlinearOperator-Interface"><a class="docs-heading-anchor" href="#AbstractNonlinearOperator-Interface"><code>AbstractNonlinearOperator</code> Interface</a><a id="AbstractNonlinearOperator-Interface-1"></a><a class="docs-heading-anchor-permalink" href="#AbstractNonlinearOperator-Interface" title="Permalink"></a></h2><p>An object subtyping <code>AbstractNonlinearOperator</code> represents a function mapping real-valued vectors to real-valued vectors. The interface defines methods to evaluate such a function. These methods are used internally by Compromise, and we made the decision to assume in-place functions. If the user has out-of-place functions, they have to transform them accordingly. Alternatively, this functionality can be provided by utility types implementing the interface.</p><pre><code class="language-julia hljs">abstract type AbstractNonlinearOperator end</code></pre><p>A function can have parameters that are constant in a single optimization run, and the type structure reflects this distinction:</p><pre><code class="language-julia hljs">abstract type AbstractNonlinearOperatorWithParams &lt;: AbstractNonlinearOperator end
+abstract type AbstractNonlinearOperatorNoParams &lt;: AbstractNonlinearOperator end</code></pre><h3 id="Common-Methods"><a class="docs-heading-anchor" href="#Common-Methods">Common Methods</a><a id="Common-Methods-1"></a><a class="docs-heading-anchor-permalink" href="#Common-Methods" title="Permalink"></a></h3><p>Both, <code>AbstractNonlinearOperatorWithParams</code> and <code>AbstractNonlinearOperatorNoParams</code> have methods like <code>eval_op!</code>. The signatures look different, though. That is why there is a separate section for both types. The below methods have the same signature for both operator supertypes:</p><p>Evaluation of derivatives is optional if evaluation-based models are used. We have functions to indicate if an operator implements <code>eval_grads!</code>, <code>eval_hessians!</code>:</p><pre><code class="language-julia hljs">provides_grads(op::AbstractNonlinearOperator)=false
+provides_hessians(op::AbstractNonlinearOperator)=false</code></pre><p>In certain situations (nonlinear subproblems relying on minimization of scalar-valued objective or constraint compoments) it might be beneficial if only certain outputs of a vector-function could be evaluated. The method <code>supports_partial_evaluation</code> signals this feature. If it returns <code>true</code>, the feature is assumed to be available for derivatives as well. In this situation, the type should implment methods starting with <code>partial_</code>, see below for details.</p><pre><code class="language-julia hljs">supports_partial_evaluation(op::AbstractNonlinearOperator) = false</code></pre><h3 id="Methods-for-AbstractNonlinearOperatorWithParams"><a class="docs-heading-anchor" href="#Methods-for-AbstractNonlinearOperatorWithParams">Methods for <code>AbstractNonlinearOperatorWithParams</code></a><a id="Methods-for-AbstractNonlinearOperatorWithParams-1"></a><a class="docs-heading-anchor-permalink" href="#Methods-for-AbstractNonlinearOperatorWithParams" title="Permalink"></a></h3><p>The methods below should be implemented to evaluate parameter dependent operators:</p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    eval_op!(y, op, x, p)
+
+Evaluate the operator `op` at variable vector `x` with parameters `p`
+and mutate the target vector `y` to contain the result.
+&quot;&quot;&quot;
+function eval_op!(y, op::AbstractNonlinearOperatorWithParams, x, p)
+    return error(&quot;No implementation of `eval_op!` for operator $op.&quot;)
+end
+
+&quot;&quot;&quot;
+    eval_grads!(Dy, op, x, p)
+
+Compute the gradients of the operator `op` at variable vector `x` with parameters `p`
+and mutate the target matrix `Dy` to contain the gradients w.r.t. `x` in its columns.
+That is, `Dy` is the transposed Jacobian at `x`.
+&quot;&quot;&quot;
+function eval_grads!(Dy, op::AbstractNonlinearOperatorWithParams, x, p)
+    return error(&quot;No implementation of `eval_grads!` for operator $op.&quot;)
+end</code></pre><p>The combined forward-function <code>eval_op_and_grads!</code> is derived from <code>eval_op!</code> and <code>eval_grads!</code>, but can be customized easily:</p><pre><code class="language-julia hljs">function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x, p)
+    eval_op!(y, val, x, p)
+    eval_grads!(Dy, val, x, p)
+    return nothing
+end</code></pre><p>If Hessian matrices are needed, implement <code>eval_hessians!(H, op, x, p)</code>. Assume <code>H</code> to be a 3D array, where the last index iterates over the function outputs. That is, <code>H[:,:,1]</code> is a matrix containing second order partial derivatives of the first output, <code>H[:,:,2]</code> has second order derivatives for the second output, and so forth... Moreover, in unlike with <code>eval_grads!</code>, the Hessian information should be stored in correct order - <code>H[i,j,k]</code> should correspond to <code>∂yₖ/∂xᵢ∂xⱼ</code>. After <code>eval_grads!(D, op, x, p)</code>, the column <code>D[:,k]</code> contains partial derivatives <code>∂₁yₖ, ∂₂yₖ, …, ∂ₘyₖ</code>, the gradient of <code>y[k]</code>. After <code>eval_hessians!(H, op, x, p)</code>, the “column” <code>H[:, j, k]</code> contains <code>∂₁(∂ⱼyₖ), ∂₂(∂ⱼyₖ), …, ∂ₘ(∂ⱼyₖ)</code>, the gradient of <code>Dy[j, k]</code>.</p><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    eval_hessians!(H, op, x, p)
+
+Compute the Hessians of the operator `op` at variable vector `x` with parameters `p`
+and mutate the target array `H` to contain the Hessians along its last index.
+That is, `H[:,:,i]` is the Hessian at `x` and `p` w.r.t. `x` of output `i`.
+&quot;&quot;&quot;
+function eval_hessians!(H, op::AbstractNonlinearOperatorWithParams, x, p)
+    return error(&quot;No implementation of `eval_hessians!` for operator $op.&quot;)
+end</code></pre><p>The combined forward-function <code>eval_op_and_grads_and_hessians!</code> is derived from <code>eval_op_and_grads!</code> and <code>eval_hessians!</code>, but can be customized easily:</p><pre><code class="language-julia hljs">function eval_op_and_grads!(y, Dy, H, op::AbstractNonlinearOperatorWithParams, x, p)
+    eval_op_and_grads!(Dy, y, op, x, p)
+    eval_hessians!(H, val, x, p)
+    return nothing
+end</code></pre><p>Some operators might support partial evaluation. They should implement these methods, if <code>supports_partial_evaluation</code> returns <code>true</code>. The argument <code>outputs</code> is an iterable of output indices, assuming <code>1</code> to be the first output. <code>y</code> is the full length vector, and <code>partial_op!</code> should set <code>y[outputs]</code>.</p><pre><code class="language-julia hljs">function partial_op!(y, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
+    # length(y)==length(outputs)
+    return error(&quot;Partial evaluation not implemented.&quot;)
+end
+function partial_grads!(Dy, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
+    # size(Dy)==(length(x), length(outputs))
+    return error(&quot;Partial Jacobian not implemented.&quot;)
+end
+function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
+    partial_op!(y, op, x, p, outputs)
+    partial_grads!(Dy, op, x, p, outputs)
+    return nothing
+end
+function partial_hessians!(H, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
+    return error(&quot;Partial Hessians not implemented.&quot;)
+end
+function partial_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
+    partial_op_and_grads!(y, Dy, op, x, p, outputs)
+    partial_hessians!(H, op, x, p, outputs)
+    return nothing
+end</code></pre><p>From the above, we derive safe-guarded functions, that can be used to pass <code>outputs</code> whenever convenient. Note, that these are defined for <code>AbstractNonlinearOperator</code>. By implementing the parametric-interface for <code>AbstractNonlinearOperatorNoParams</code>, they work out-of-the box for non-paremetric operators, too:</p><pre><code class="language-julia hljs">function func_vals!(y, op::AbstractNonlinearOperator, x, p, outputs=nothing)
+    if !isnothing(outputs) &amp;&amp; supports_partial_evaluation(op)
+        partial_op!(y, op, x, p, outputs)
+    end
+    return eval_op!(y, op, x, p)
+end
+function func_grads!(Dy, op::AbstractNonlinearOperator, x, p, outputs=nothing)
+    if !isnothing(outputs) &amp;&amp; supports_partial_evaluation(op)
+        partial_grads!(Dy, op, x, p, outputs)
+    end
+    return eval_grads!(Dy, op, x, p)
+end
+function func_vals_and_grads!(y, Dy, op::AbstractNonlinearOperator, x, p, outputs=nothing)
+    if !isnothing(outputs) &amp;&amp; supports_partial_evaluation(op)
+        partial_op_and_grads!(y, Dy, op, x, p, outputs)
+    end
+    return eval_op_and_grads!(y, Dy, op, x, p)
+end
+function func_hessians!(H, op::AbstractNonlinearOperator, x, p, outputs=nothing)
+    if !isnothing(outputs) &amp;&amp; supports_partial_evaluation(op)
+        partial_hessians!(H, op, x, p, outputs)
+    end
+    return eval_hessians!(H, op, x, p)
+end
+function func_vals_and_grads_and_hessians!(
+    y, Dy, H, op::AbstractNonlinearOperator, x, p, outputs=nothing)
+    if !isnothing(outputs) &amp;&amp; supports_partial_evaluation(op)
+        partial_op_and_grads_and_hessians!(y, Dy, H, op, x, p, outputs)
+    end
+    eval_op_and_grads_and_hessians!(y, Dy, H, op, x, p)
+end</code></pre><h3 id="Methods-AbstractNonlinearOperatorNoParams"><a class="docs-heading-anchor" href="#Methods-AbstractNonlinearOperatorNoParams">Methods <code>AbstractNonlinearOperatorNoParams</code></a><a id="Methods-AbstractNonlinearOperatorNoParams-1"></a><a class="docs-heading-anchor-permalink" href="#Methods-AbstractNonlinearOperatorNoParams" title="Permalink"></a></h3><p>The interface for operators without parameters is very similar to what&#39;s above. In fact, we could always treat it as a special case of <code>AbstractNonlinearOperatorWithParams</code> and simply ignore the parameter vector. However, in some situation it might be desirable to have the methods without <code>p</code> readily at hand. This also makes writing extensions a tiny bit easier.</p><pre><code class="language-julia hljs">function eval_op!(y, op::AbstractNonlinearOperatorNoParams, x)
+    return error(&quot;No implementation of `eval_op!` for operator $op.&quot;)
+end
+function eval_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x)
+    return error(&quot;No implementation of `eval_grads!` for operator $op.&quot;)
+end</code></pre><p>Optional, derived method for values and gradients:</p><pre><code class="language-julia hljs">function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x)
+    eval_op!(y, op, x)
+    eval_grads!(Dy, op, x)
+    return nothing
+end</code></pre><p>Same for Hessians:</p><pre><code class="language-julia hljs">function eval_hessians!(H, op::AbstractNonlinearOperatorNoParams, x)
+    return error(&quot;No implementation of `eval_hessians!` for operator $op.&quot;)
+end
+function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorNoParams, x)
+    eval_op_and_grads!(y, Dy, op, x)
+    eval_hessians!(H, op, x)
+    return nothing
+end</code></pre><p>Some operators might support partial evaluation. They should implement these methods, if <code>supports_partial_evaluation</code> returns <code>true</code>:</p><pre><code class="language-julia hljs">function partial_op!(y, op::AbstractNonlinearOperatorNoParams, x, outputs)
+    return error(&quot;Partial evaluation not implemented.&quot;)
+end
+function partial_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x, outputs)
+    return error(&quot;Partial Jacobian not implemented.&quot;)
+end
+function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x, outputs)
+    partial_op!(y, op, x, outputs)
+    partial_grads!(Dy, op, x, outputs)
+    return nothing
+end
+function partial_hessians!(H, op::AbstractNonlinearOperatorNoParams, x, outputs)
+    return error(&quot;Partial Hessians not implemented.&quot;)
+end
+function partial_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorNoParams, x, outputs)
+    partial_op_and_grads!(y, Dy, op, x, outputs)
+    partial_hessians!(H, op, x, outputs)
+    return nothing
+end</code></pre><p>The safe-guarded methods simply forward to the parametric versions and pass <code>nothing</code> parameters:</p><pre><code class="language-julia hljs">function func_vals!(y, op::AbstractNonlinearOperatorNoParams, x, outputs=nothing)
+    return func_vals!(y, op, x, nothing, outputs)
+end
+function func_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x, outputs=nothing)
+    return func_grads!(Dy, op, x, nothing, outputs)
+end
+function func_vals_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x, outputs=nothing)
+    return func_vals_and_grads!(y, Dy, op, x, nothing, outputs)
+end
+function func_hessians!(H, op::AbstractNonlinearOperatorNoParams, x, outputs=nothing)
+    return func_hessians!(H, op, x, nothing, outputs)
+end
+function func_vals_and_grads_and_hessians!(
+    y, Dy, H, op::AbstractNonlinearOperatorNoParams, x, outputs=nothing
+)
+    return func_vals_and_grads_and_hessians!(y, Dy, H, op, x, nothing, outputs)
+end</code></pre><h4 id="Parameter-Methods-for-Non-Parametric-Operators"><a class="docs-heading-anchor" href="#Parameter-Methods-for-Non-Parametric-Operators">Parameter-Methods for Non-Parametric Operators</a><a id="Parameter-Methods-for-Non-Parametric-Operators-1"></a><a class="docs-heading-anchor-permalink" href="#Parameter-Methods-for-Non-Parametric-Operators" title="Permalink"></a></h4><p>To also be able to use non-parametric operators in the more general setting, implement the parametric-interface:</p><pre><code class="language-julia hljs">function eval_op!(y, op::AbstractNonlinearOperatorNoParams, x, p)
+    return eval_op!(y, op, x)
+end
+function eval_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x, p)
+    return eval_grads!(Dy, op, x)
+end
+function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x, p)
+    return eval_op_and_grads!(y, Dy, op, x)
+end
+function eval_hessians!(H, op::AbstractNonlinearOperatorNoParams, x, p)
+    return eval_hessians!(H, op, x)
+end
+function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorNoParams, x, p)
+    return eval_op_and_grads_and_hessians!(y, Dy, H, op, x)
+end</code></pre><p>Partial evaluation or differentiation:</p><pre><code class="language-julia hljs">function partial_op!(y, op::AbstractNonlinearOperatorNoParams, x, p, outputs)
+    return partial_op!(y, op, x, outputs)
+end
+function partial_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x, p, outputs)
+    return partial_grads!(Dy, op, x, outputs)
+end
+function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x, p, outputs)
+    return partial_op_and_grads!(y, Dy, op, x, outputs)
+end
+function partial_hessians!(H, op::AbstractNonlinearOperatorNoParams, x, p, outputs)
+    return partial_hessians!(H, op, x, outputs)
+end
+function partial_op_and_grads_and_hessians!(
+    y, Dy, H, op::AbstractNonlinearOperatorNoParams, x, p, outputs
+)
+    return partial_op_and_grads_and_hessians!(y, Dy, H, op, x, outputs)
+end</code></pre><h4 id="Non-Parametric-Methods-for-Parametric-Operators"><a class="docs-heading-anchor" href="#Non-Parametric-Methods-for-Parametric-Operators">Non-Parametric Methods for Parametric Operators</a><a id="Non-Parametric-Methods-for-Parametric-Operators-1"></a><a class="docs-heading-anchor-permalink" href="#Non-Parametric-Methods-for-Parametric-Operators" title="Permalink"></a></h4><p>These should only be used when you know what you are doing, as we set the parameters to <code>nothing</code>. This is safe only if we now that an underlying function is not-parametric, but somehow wrapped in something implementing <code>AbstractNonlinearOperatorWithParams</code>.</p><pre><code class="language-julia hljs">function eval_op!(y, op::AbstractNonlinearOperatorWithParams, x)
+    return eval_op!(y, op, x, nothing)
+end
+function eval_grads!(Dy, op::AbstractNonlinearOperatorWithParams, x)
+    return eval_grads!(Dy, op, x, nothing)
+end
+
+function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x)
+    return eval_op_and_grads!(y, Dy, op, x, nothing)
+end
+
+function eval_hessians!(H, op::AbstractNonlinearOperatorWithParams, x)
+    return eval_hessians!(H, op, x, nothing)
+end
+
+function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWithParams, x)
+    return eval_op_and_grads_and_hessians!(y, Dy, H, op, x, nothing)
+end
+
+function partial_op!(y, op::AbstractNonlinearOperatorWithParams, x, outputs)
+    return partial_op!(y, op, x, nothing, outputs)
+end
+function partial_grads!(Dy, op::AbstractNonlinearOperatorWithParams, x, outputs)
+    return partial_grads!(Dy, op, x, nothing, outputs)
+end
+function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x, outputs)
+    return partial_op_and_grads!(y, Dy, op, x, nothing, outputs)
+end
+function partial_hessians!(H, op::AbstractNonlinearOperatorWithParams, x, outputs)
+    return partial_hessians!(H, op, x, nothing, outputs)
+end
+function partial_op_and_grads_and_hessians!(
+    y, Dy, H, op::AbstractNonlinearOperatorWithParams, x, outputs
+)
+    return partial_op_and_grads_and_hessians!(y, Dy, H, op, x, nothing, outputs)
+end</code></pre><h2 id="Types-and-Methods-for-Surrogate-Models"><a class="docs-heading-anchor" href="#Types-and-Methods-for-Surrogate-Models">Types and Methods for Surrogate Models</a><a id="Types-and-Methods-for-Surrogate-Models-1"></a><a class="docs-heading-anchor-permalink" href="#Types-and-Methods-for-Surrogate-Models" title="Permalink"></a></h2><p>An <code>AbstractSurrogateModel</code> is similar to <code>AbstractNonlinearOperator</code>. Such a surrogate model is always non-parametric, as parameters of operators are assumed to be fix in between runs.</p><pre><code class="language-julia hljs">abstract type AbstractSurrogateModel end</code></pre><p>We also want to be able to define the behavior of models with light-weight objects:</p><pre><code class="language-julia hljs">abstract type AbstractSurrogateModelConfig end</code></pre><h3 id="Indicator-Methods"><a class="docs-heading-anchor" href="#Indicator-Methods">Indicator Methods</a><a id="Indicator-Methods-1"></a><a class="docs-heading-anchor-permalink" href="#Indicator-Methods" title="Permalink"></a></h3><p>Functions to indicate the order of the surrogate model:</p><pre><code class="language-julia hljs">requires_grads(::AbstractSurrogateModelConfig)=false
+requires_hessians(::AbstractSurrogateModelConfig)=false</code></pre><p>A function to indicate that a model should be updated when the trust region has changed:</p><pre><code class="language-julia hljs">depends_on_trust_region(::AbstractSurrogateModel)=true</code></pre><h3 id="Training"><a class="docs-heading-anchor" href="#Training">Training</a><a id="Training-1"></a><a class="docs-heading-anchor-permalink" href="#Training" title="Permalink"></a></h3><pre><code class="language-julia hljs">&quot;&quot;&quot;
+    init_surrogate(
+        model_config, nonlin_op, dim_in, dim_out, params, T
+    )
+
+Return a model subtyping `AbstractSurrogateModel`, as defined by
+`model_config::AbstractSurrogateModelConfig`, for the nonlinear operator `nonlin_op`.
+The operator (and model) has input dimension `dim_in` and output dimension `dim_out`.
+`params` is the current parameter object for `nonlin_op` and is cached.
+`T` is a subtype of `AbstractFloat` to indicate precision of cache arrays.
+&quot;&quot;&quot;
+function init_surrogate(
+    ::AbstractSurrogateModelConfig, op, dim_in, dim_out, params, T)::AbstractSurrogateModel
+    return nothing
+end
+
+function update!(
+    surr::AbstractSurrogateModel, op, Δ, x, fx, lb, ub; kwargs...
+)
+    return nothing
+end</code></pre><h3 id="Evaluation"><a class="docs-heading-anchor" href="#Evaluation">Evaluation</a><a id="Evaluation-1"></a><a class="docs-heading-anchor-permalink" href="#Evaluation" title="Permalink"></a></h3><p>In place evaluation and differentiation, similar to <code>AbstractNonlinearOperatorNoParams</code>. Mandatory:</p><pre><code class="language-julia hljs">function model_op!(y, surr::AbstractSurrogateModel, x)
+    return nothing
+end</code></pre><p>Mandatory:</p><pre><code class="language-julia hljs">function model_grads!(Dy, surr::AbstractSurrogateModel, x)
+    return nothing
+end</code></pre><p>Optional:</p><pre><code class="language-julia hljs">function model_op_and_grads!(y, Dy, surr::AbstractSurrogateModel, x)
+    model_op!(y, surr, x )
+    model_grads!(Dy, surr, x)
+    return nothing
+end</code></pre><h4 id="Optional-Partial-Evaluation"><a class="docs-heading-anchor" href="#Optional-Partial-Evaluation">Optional Partial Evaluation</a><a id="Optional-Partial-Evaluation-1"></a><a class="docs-heading-anchor-permalink" href="#Optional-Partial-Evaluation" title="Permalink"></a></h4><pre><code class="language-julia hljs">supports_partial_evaluation(::AbstractSurrogateModel)=false
+function model_op!(y, surr::AbstractSurrogateModel, x, outputs)
+    return error(&quot;Surrogate model does not support partial evaluation.&quot;)
+end
+function model_grads!(y, surr::AbstractSurrogateModel, x, outputs)
+    return error(&quot;Surrogate model does not support partial Jacobian.&quot;)
+end
+function model_op_and_grads!(y, Dy, surr::AbstractSurrogateModel, x, outputs)
+    model_op!(y, surr, x, outputs)
+    model_grads!(y, surr, x, outputs)
+    return nothing
+end</code></pre><h4 id="Safe-guarded,-internal-Methods"><a class="docs-heading-anchor" href="#Safe-guarded,-internal-Methods">Safe-guarded, internal Methods</a><a id="Safe-guarded,-internal-Methods-1"></a><a class="docs-heading-anchor-permalink" href="#Safe-guarded,-internal-Methods" title="Permalink"></a></h4><p>The methods below are used in the algorithm and have the same signature as the corresponding methods for <code>AbstractNonlinearOperator</code>. Thus, we do not have to distinguish types in practice.</p><pre><code class="language-julia hljs">function func_vals!(y, surr::AbstractSurrogateModel, x, p, outputs=nothing)
+    if !isnothing(outputs)
+        if supports_partial_evaluation(surr)
+            return model_op!(y, surr, x, outputs)
+        # else
+        #     @warn &quot;Partial evaluation not supported by surrogate model.&quot;
+        end
+    end
+    return model_op!(y, surr, x)
+end
+function func_grads!(Dy, surr::AbstractSurrogateModel, x, p, outputs=nothing)
+    if !isnothing(outputs)
+        if supports_partial_evaluation(surr)
+            return model_grads!(Dy, surr, x, outputs)
+        # else
+        #     @warn &quot;Partial evaluation not supported by surrogate model.&quot;
+        end
+    end
+    return model_grads!(Dy, surr, x)
+end
+function func_vals_and_grads!(y, Dy, surr::AbstractSurrogateModel, x, p, outputs=nothing)
+    if !isnothing(outputs)
+        if supports_partial_evaluation(surr)
+            return model_op_and_grads!(y, Dy, surr, x, outputs)
+        # else
+        #     @warn &quot;Partial evaluation not supported by surrogate model.&quot;
+        end
+    end
+    return model_op_and_grads!(y, Dy, surr, x)
+end</code></pre><h2 id="Module-Exports"><a class="docs-heading-anchor" href="#Module-Exports">Module Exports</a><a id="Module-Exports-1"></a><a class="docs-heading-anchor-permalink" href="#Module-Exports" title="Permalink"></a></h2><pre><code class="language-julia hljs">export AbstractNonlinearOperator, AbstractNonlinearOperatorNoParams, AbstractNonlinearOperatorWithParams
+export AbstractSurrogateModel, AbstractSurrogateModelConfig
+export supports_partial_evaluation, provides_grads, provides_hessians, requires_grads, requires_hessians
+export func_vals!, func_grads!, func_hessians!, func_vals_and_grads!, func_vals_and_grads_and_hessians!
+export eval_op!, eval_grads!, eval_hessians!, eval_op_and_grads!, eval_op_and_grads_and_hessians!
+export model_op!, model_grads!, model_op_and_grads!
+export init_surrogate, update!
+
+end#module</code></pre><hr/><p><em>This page was generated using <a href="https://github.com/fredrikekre/Literate.jl">Literate.jl</a>.</em></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../dev_notes/">« (Dev) Notes</a><a class="docs-footer-nextpage" href="../mop/">AbstractMOP Interface »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.24 on <span class="colophon-date" title="Tuesday 26 September 2023 07:52">Tuesday 26 September 2023</span>. Using Julia version 1.9.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
