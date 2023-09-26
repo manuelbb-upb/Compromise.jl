@@ -90,7 +90,7 @@ diff_nl_ineq_constraints!(Dy::Nothing, mod::AbstractMOPSurrogate, x::RVec)=nothi
 diff_nl_eq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=grads_nl_eq_constraints!(Dy, mod, x)
 diff_nl_ineq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=grads_nl_ineq_constraints!(Dy, mod, x)
 
-# ## Optionally, we can have evaluation and differentiation in one go:
+# Optionally, we can have evaluation and differentiation in one go:
 function eval_and_grads_objectives!(y::RVec, Dy::RMat, mod::M, x::RVec) where {M<:AbstractMOPSurrogate}
     eval_objectives!(y, mop, x)
     grads_objectives!(Dy, mod, x)

@@ -8,11 +8,29 @@ using Compromise
 using Documenter
 
 using Literate
+
+out_path = joinpath(@__DIR__, "src")
+
+# Process Literate source files
+lit_src_path = joinpath(@__DIR__, "literate_src")
+## README
+## for docs:
+Literate.markdown(joinpath(lit_src_path, "README.jl"), out_path)
+## for github:
+Literate.markdown(joinpath(lit_src_path, "README.jl"), joinpath(@__DIR__, "..");
+    execute=false, flavor=Literate.CommonMarkFlavor()
+)
+
+# Process original source files containing documentation
 src_path = joinpath(@__DIR__, "..", "src")
 out_path = joinpath(@__DIR__, "src")
 
-Literate.markdown(joinpath(src_path, "mop.jl"), out_path; execute=false, flavor=Literate.CommonMarkFlavor())
-Literate.markdown(joinpath(src_path, "models.jl"), out_path; execute=false, flavor=Literate.CommonMarkFlavor())
+Literate.markdown(joinpath(src_path, "mop.jl"), out_path; 
+    execute=false, flavor=Literate.CommonMarkFlavor())
+Literate.markdown(joinpath(src_path, "models.jl"), out_path; 
+    execute=false, flavor=Literate.CommonMarkFlavor())
+Literate.markdown(joinpath(src_path, "CompromiseEvaluators.jl"), out_path; 
+    execute=false, flavor=Literate.CommonMarkFlavor())
 
 DocMeta.setdocmeta!(Compromise, :DocTestSetup, :(using Compromise); recursive=true)
 
@@ -29,8 +47,9 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
+        "Examples" => ["README" => "README.md",],
         "(Dev) Notes" => "dev_notes.md",
-        "Interfaces" => ["mop.md", "models.md"],
+        "Interfaces" => ["CompromiseEvaluators.md", "mop.md", "models.md"],
     ],
 )
 

@@ -1,5 +1,24 @@
-import ForwardDiff as FD
-struct ForwardDiffBackend <: AbstractAutoDiffBackend end
+module ForwardDiffBackendExt
+
+export ForwardDiffBackend
+
+import Compromise as C
+import Compromise: ad_grads!, ad_op_and_grads!, ad_hessians!, 
+    ad_op_and_grads_and_hessians!
+
+if isdefined(Base, :get_extension)
+    import ForwardDiff as FD
+    import ForwardDiff.DiffResults
+    import ForwardDiff: jacobian, jacobian!, JacobianConfig, DiffResult, MutableDiffResult,
+        Dual, Chunk, Tag, value, checktag
+else
+    import ..ForwardDiff as FD
+    import ..ForwardDiff.DiffResults
+    import ..ForwardDiff: jacobian, jacobian!, JacobianConfig, DiffResult, MutableDiffResult,
+        Dual, Chunk, Tag, value, checktag
+end
+
+struct ForwardDiffBackend <: C.AbstractAutoDiffBackend end
 
 #src given f(x, p), return x -> f(x, p)
 #src const FixParams = Base.Fix2
@@ -10,6 +29,8 @@ struct FixParams{F, P}
     FixParams(f::F, p) where {F} = new{F, Base._stable_typeof(p)}(f, p)
     FixParams(f::Type{F}, p) where {F} = new{Type{F}, Base._stable_typeof(p)}(f, p)
 end
+ensure_vec(x)=x
+ensure_vec(x::Number)=[x,]
 (fp::FixParams)(x) = ensure_vec(fp.func(x, fp.params))
 
 #src given f!(y, x, p), return (y, x) -> f!(y, x)
@@ -23,10 +44,6 @@ end
 (fp::FixParams!)(y, x) = fp.func!(y, x, fp.params)
 
 #================================ Vector Hessians ========================================#
-
-import ForwardDiff.DiffResults
-import ForwardDiff: jacobian, jacobian!, JacobianConfig, DiffResult, MutableDiffResult,
-    Dual, Chunk, Tag, value, checktag
 
 struct VectorHessianConfig{T, V, Y, N, DI, DO}
     inner_config::JacobianConfig{T, Dual{T, V, N}, N, DI}
@@ -133,30 +150,31 @@ function vector_hessian!(
 end
 #================================ Vector Hessians ========================================#
 
-function eval_grads!(Dy, backend::ForwardDiffBackend, func!, x, p, f_is_in_place::Val{true})
+function ad_grads!(Dy, backend::ForwardDiffBackend, func!, x, p, f_is_in_place::Val{true})
     @debug "Allocating temporary output array for `eval_grads!`."
     y = similar(Dy, size(Dy, 1))
     FD.jacobian!(transpose(Dy), FixParams!(func!, p), y, x)
     return nothing
 end
 
-function eval_grads!(Dy, backend::ForwardDiffBackend, func, x, p, f_is_in_place::Val{false})
+function ad_grads!(Dy, backend::ForwardDiffBackend, func, x, p, f_is_in_place::Val{false})
     FD.jacobian!(transpose(Dy), FixParams(func, p), x)
     return nothing
 end
-
-function eval_op_and_grads!(y, Dy, backend::ForwardDiffBackend, func!, x, p, f_is_in_place::Val{true})
+#=
+function ad_op_and_grads!(y, Dy, backend::ForwardDiffBackend, func!, x, p, f_is_in_place::Val{true})
     FD.jacobian!(transpose(Dy), FixParams!(func!, p), y, x)
     return nothing
 end
 
-function eval_op_and_grads!(y, Dy, backend::ForwardDiffBackend, func, x, p, f_is_in_place::Val{false})
+function ad_op_and_grads!(y, Dy, backend::ForwardDiffBackend, func, x, p, f_is_in_place::Val{false})
     res = FD.DiffResults.DiffResult(y, transpose(Dy))
     FD.jacobian!(res, FixParams(func, p), x)
     return nothing
 end
+=#
 
-function eval_hessians!(
+function ad_hessians!(
     H, backend::ForwardDiffBackend, func!, x, p, f_is_in_place::Val{true}
 )
     @debug "Allocating temporary output arrays for `eval_hessians!`."
@@ -168,7 +186,7 @@ function eval_hessians!(
     return nothing
 end
 
-function eval_hessians!(
+function ad_hessians!(
     H, backend::ForwardDiffBackend, func, x, p, f_is_in_place::Val{false}
 )
     @debug "Allocating temporary output arrays for `eval_hessians!`."
@@ -180,8 +198,7 @@ function eval_hessians!(
     return nothing
 end
 
-
-function eval_op_and_grads_and_hessians!(
+function ad_op_and_grads_and_hessians!(
     y, Dy, H, backend::ForwardDiffBackend, func, x, p, f_is_in_place::Val{true}
 )
     F = FixParams!(func, p)
@@ -190,7 +207,7 @@ function eval_op_and_grads_and_hessians!(
     return nothing
 end
 
-function eval_op_and_grads_and_hessians!(
+function ad_op_and_grads_and_hessians!(
     y, Dy, H, backend::ForwardDiffBackend, func, x, p, f_is_in_place::Val{false}
 )
     F = FixParams(func, p)
@@ -199,17 +216,19 @@ function eval_op_and_grads_and_hessians!(
     return nothing
 end
 
-function eval_op_and_grads!(
+function ad_op_and_grads!(
     y, Dy, backend::ForwardDiffBackend, func, x, p, f_is_in_place::Val{true}
 )
     res = FD.DiffResults.DiffResult(y, transpose(Dy))
     FD.jacobian!(res, FixParams!(func, p), y, x)
     return nothing
 end
-function eval_op_and_grads!(
+
+function ad_op_and_grads!(
     y, Dy, backend::ForwardDiffBackend, func, x, p, f_is_in_place::Val{false}
 )
     res = FD.DiffResults.DiffResult(y, transpose(Dy))
     FD.jacobian!(res, FixParams(func, p), x)   
     return nothing
 end
+end#module

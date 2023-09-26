@@ -1,4 +1,9 @@
+module TaylorPolynomialModels
+
 import LinearAlgebra as LA
+using Parameters: @with_kw
+using ..Compromise.CompromiseEvaluators
+const CE = CompromiseEvaluators
 
 struct TaylorPolynomial1{
     X <: AbstractVector{<:Real},
@@ -39,20 +44,20 @@ function TaylorPolynomial2(dim_in, dim_out, T)
     return TaylorPolynomial2(tp1, Hfx, xtmp)
 end
 
-function init_surrogate(tp_cfg::TaylorPolynomialConfig, op, dim_in, dim_out, params, T)
+function CE.init_surrogate(tp_cfg::TaylorPolynomialConfig, op, dim_in, dim_out, params, T)
     if tp_cfg.degree == 1
-        return TaylorPolynomial2(dim_in, dim_out, T)
+        return TaylorPolynomial1(dim_in, dim_out, T)
     else
         return TaylorPolynomial2(dim_in, dim_out, T)
     end
 end
 
 const TaylorPoly = Union{TaylorPolynomial1, TaylorPolynomial2}
-depends_on_trust_region(::TaylorPoly)=false
-requires_grads(::Type{<:TaylorPoly})=true
-requires_hessians(tp::Type{TaylorPolynomial2})=true
+CE.depends_on_trust_region(::TaylorPoly)=false
+CE.requires_grads(::Type{<:TaylorPoly})=true
+CE.requires_hessians(tp::Type{TaylorPolynomial2})=true
 
-function model_op!(y, tp::TaylorPolynomial1, x)
+function CE.model_op!(y, tp::TaylorPolynomial1, x)
     Δx = tp.Δx
     Δx .= x .- tp.x0
 
@@ -61,7 +66,8 @@ function model_op!(y, tp::TaylorPolynomial1, x)
     LA.mul!(y, tp.Dfx', Δx, 1, 1)
     return nothing
 end
-function model_op!(y, tp::TaylorPolynomial2, x)
+
+function CE.model_op!(y, tp::TaylorPolynomial2, x)
     model_op!(y, tp.tp, x)
     Δx = tp.tp.Δx
     H = tp.Hfx
@@ -71,11 +77,12 @@ function model_op!(y, tp::TaylorPolynomial2, x)
     return nothing
 end
 
-function model_grads!(Dy, tp::TaylorPolynomial1, x)
+function CE.model_grads!(Dy, tp::TaylorPolynomial1, x)
     Dy .= tp.Dfx
     return nothing
 end
-function model_grads!(Dy, tp::TaylorPolynomial2, x)
+
+function CE.model_grads!(Dy, tp::TaylorPolynomial2, x)
     tp1 = tp.tp
     model_grads!(Dy, tp1, x)
     Δx = tp1.Δx
@@ -89,7 +96,7 @@ function model_grads!(Dy, tp::TaylorPolynomial2, x)
     return nothing
 end
 
-function model_op_and_grads!(y, Dy, tp::TaylorPolynomial1, x)
+function CE.model_op_and_grads!(y, Dy, tp::TaylorPolynomial1, x)
     Δx = tp.Δx
     Δx .= x .- tp.x0
 
@@ -99,7 +106,7 @@ function model_op_and_grads!(y, Dy, tp::TaylorPolynomial1, x)
     return nothing
 end
 
-function model_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
+function CE.model_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
     tp1 = tp.tp
     model_op_and_grads!(y, Dy, tp1, x)
     Δx = tp1.Δx
@@ -121,14 +128,18 @@ function model_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
     return nothing
 end
 
-function update!(tp::TaylorPolynomial1, op, Δ, x, fx, lb, ub; kwargs...)
+function CE.update!(tp::TaylorPolynomial1, op, Δ, x, fx, lb, ub; kwargs...)
     copyto!(tp.x0, x)
     eval_op_and_grads!(tp.fx, tp.Dfx, op, x)
 end
 
-function update!(tp::TaylorPolynomial2, op, Δ, x, fx, lb, ub; kwargs...)
+function CE.update!(tp::TaylorPolynomial2, op, Δ, x, fx, lb, ub; kwargs...)
     tp1 = tp.tp
     copyto!(tp1.x0, x)
     eval_op_and_grads_and_hessians!(tp1.fx, tp1.Dfx, tp.Hfx, op, x)
     return nothing
 end
+
+export TaylorPoly, TaylorPolynomial1, TaylorPolynomial2, TaylorPolynomialConfig
+
+end#module

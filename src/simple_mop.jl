@@ -1,12 +1,22 @@
-import .CompromiseEvaluators: NonlinearFunction, AbstractSurrogateModel, 
-    AbstractSurrogateModelConfig, AbstractNonlinearOperator, AbstractNonlinearOperatorNoParams
-import .CompromiseEvaluators: requires_grads, provides_grads, requires_hessians, provides_hessians
-import .CompromiseEvaluators: eval_op!, eval_grads!, eval_op_and_grads!
-import .CompromiseEvaluators: model_op!, model_grads!, model_op_and_grads!
-import .CompromiseEvaluators: NoBackend
-import .CompromiseEvaluators: TaylorPolynomialConfig, ExactModelConfig
-import .CompromiseEvaluators: init_surrogate, update!
-import .CompromiseEvaluators: RBFConfig, RBFModel, CubicKernel, InverseMultiQuadricKernel, GaussianKernel
+# # Basic Proof-Of-Concept Implementations of Multi-Objective Problems
+
+# ## Scaled Evaluation
+# The optimizer might internally apply a scaling to the variables.
+# The user-provided multi-objective problem does not know about this scaling
+# and we have to consider it when evaluating and differntiating the problem
+# functions.
+#
+# Currently we restrict ourselves to affine-linear transformations.
+# Given `scaler::AbstractAffineScaler`,
+# consider the unscaled variable vector ``ξ``.
+# The scaled variable is ``x = Tξ + t``, where ``T`` is the `scaling_matrix(scaler)`
+# and ``t`` is the `scaling_offset(scaler)`.
+# Unscaling happens via ``ξ = Sx + s``, where ``S=T^{-1}`` is 
+# `unscaling_matrix(scaler)` and ``s=-T^{-1}t`` is 
+# `unscaling_offset(scaler)`.
+#
+# A `ScaledOperator` wraps some other `AbstractNonlinearOperator` and enables caching
+# of (un-)scaling results as well taking care of the chain rule for derivatives:
 
 struct ScaledOperator{O, S, XI, D, H} <: AbstractNonlinearOperatorNoParams
     op :: O
@@ -19,15 +29,23 @@ struct ScaledOperator{O, S, XI, D, H} <: AbstractNonlinearOperatorNoParams
     Hy :: H
 end
 
+# Consider ``f: ℝ^n → ℝ^m`` and the unscaling map ``u: ℝ^n → ℝ^n``.
+# By the chain rule we have ``∇(f∘u)(x) = ∇f(ξ)*T``, where ``T`` is 
+# the Jacobian of ``u``.
+# As we are actually working with transposed Jacobians `Dy`, we compute
+# `T'Dy`:
 function scale_grads!(Dy, sop)
-    ## unscaling: u(x) = ξ = Tx + b => jacobian is T
-    ## composition op(u(x)) => jacobian is Dy'T => grads are T'Dy
     LA.mul!(Dy, transpose(unscaling_matrix(sop.scaler)), sop.Dy)
     return nothing
 end
+
+# Usually, the chain rule for second-order derivatives is more complicated:
+# ```math
+#   ∇²(f∘u)(x) = Tᵀ∇²f(ξ)T + ∑ₖ ∇fₖ(ξ) ∇²u
+# ```
+# But ``u`` is affine, so the second term vanishes and we are left with 
+# the matrix-matrix-matrix product:
 function scale_hessians!(H, sop)
-    ## H(op ∘ u) = T' H(op) * T + ∑_k (∇op)_k * Hu
-    ## but u is affine, the last term vanishes
     T = unscaling_matrix(sop.scaler)
     for i = axes(H, 3)
         LA.mul!(sop.Hy[:, :, i], transpose(T), H[:, :, i])
@@ -36,33 +54,39 @@ function scale_hessians!(H, sop)
     return nothing
 end
 
-function eval_op!(y, sop::ScaledOperator, x)
+# ### Operator Interface
+
+# Evaluation of a `ScaledOperator` is straight-forward:
+function CE.eval_op!(y, sop::ScaledOperator, x)
     unscale!(sop.ξ, sop.scaler, x)
     return eval_op!(y, sop.op, sop.ξ)
 end
 
-function eval_grads!(Dy, sop::ScaledOperator, x)
+# With the above chain-rule functions, it is now easy to implement the 
+# complete operator interface for `ScaledOperator`.
+# Taking gradients requires unscaling of the variables, differntiation at 
+# the unscaled site and a re-scaling of the gradients:
+function CE.eval_grads!(Dy, sop::ScaledOperator, x)
     unscale!(sop.ξ, sop.scaler, x)
     eval_grads!(sop.Dy, sop.op, sop.ξ)
     scale_grads!(Dy, sop)
     return nothing
 end
-
-function eval_op_and_grads!(y, Dy, sop::ScaledOperator, x)
+# We don't have to unscale twice when evaluating and differntiating:
+function CE.eval_op_and_grads!(y, Dy, sop::ScaledOperator, x)
     unscale!(sop.ξ, sop.scaler, x)
     eval_op_and_grads!(y, sop.Dy, sop.op, sop.ξ)
     scale_grads!(Dy, so)
     return nothing
 end
-
-function eval_hessians!(H, sop::ScaledOperator, x)
+# The procedure is similar for Hessians:
+function CE.eval_hessians!(H, sop::ScaledOperator, x)
     unscale!(sop.ξ, sop.scaler, x)
     eval_hessians!(H, sop.op, sop.ξ)
     scale_hessians!(H, sop)
     return nothing
 end
-
-function eval_op_and_grads_and_hessians!(y, Dy, H, sop, x)
+function CE.eval_op_and_grads_and_hessians!(y, Dy, H, sop, x)
     unscale!(sop.ξ, sop.scaler, x)
     eval_op_and_grads_and_hessians!(y, sop.Dy, H, sop.op, sop.ξ)
     scale_grads!(Dy, sop)
@@ -70,8 +94,35 @@ function eval_op_and_grads_and_hessians!(y, Dy, H, sop, x)
     return nothing
 end
 
+# ## `SimpleMOP`
+# In this section, we will define two kinds of simple problem structures:
 abstract type SimpleMOP <: AbstractMOP end
 
+# A `MutableMOP` is meant to be initialized empty and built up iteratively.
+"""
+    MutableMOP(; num_vars, kwargs...)
+
+Initialize a multi-objective problem with `num_vars` variables.
+
+# Functions
+There can be exactly one (possibly vector-valued) objective function,
+one nonlinear equality constraint function, and one nonlinear inequality constraint function.
+For now, they have to be of type `NonlinearFunction`.
+You could provide these functions with the keyword-arguments `objectives`,
+`nl_eq_constraints` or `nl_ineq_constraints` or set the fields of the same name.
+To conveniently add user-provided functions, there are helper functions, 
+like `add_objectives!`.
+
+## LinearConstraints
+Box constraints are defined by the vectors `lb` and `ub`.
+Linear equality constraints ``Ex=c`` are defined by the matrix `E` and the vector `c`.
+Inequality constraints read ``Ax≤b`` and use `A` and `b`.
+
+# Surrogate Configuration
+Use the keyword-arguments `mcfg_objectives` to provide an `AbstractSurrogateModelConfig`
+to define how the objectives should be modelled.
+By default, we assume `ExactModelConfig()`, which requires differentiable objectives.
+"""
 @with_kw mutable struct MutableMOP <: SimpleMOP
     objectives :: Union{Nothing, NonlinearFunction} = nothing
     nl_eq_constraints :: Union{Nothing, NonlinearFunction} = nothing
@@ -95,7 +146,11 @@ abstract type SimpleMOP <: AbstractMOP end
     A :: Union{Nothing, Matrix{Float64}} = nothing
     b :: Union{Nothing, Vector{Float64}} = nothing
 end
+MutableMOP(num_vars::Int)=MutableMOP(;num_vars)
 
+# The `TypedMOP` looks nearly the same, but is strongly typed and immutable.
+# We initialize a `TypedMOP` from a `MutableMOP` before optimization for 
+# performance reasons:
 struct TypedMOP{
     O, NLEC,NLIC,
     MTO, MTNLEC, MTNLIC,
@@ -122,6 +177,7 @@ struct TypedMOP{
     Ab :: AB
 end
 
+# This initialization really is just a forwarding of all fields:
 function initialize(mop::MutableMOP, ξ0::RVec)
     Ec = lin_eq_constraints(mop)
     Ab = lin_ineq_constraints(mop)
@@ -143,16 +199,29 @@ function initialize(mop::MutableMOP, ξ0::RVec)
    )
 end
 
-MutableMOP(num_vars::Int)=MutableMOP(;num_vars)
+# ### Iterative Problem Setup
 
-parse_mcfg(::Nothing)=parse_mcfg(:exact)
+# First, let's define some helpers to parse model configuration specifications:
+# If a configuration is given already, do nothing:
 parse_mcfg(mcfg::AbstractSurrogateModelConfig)=mcfg
+# We can also allow Symbols:
 parse_mcfg(mcfg_symb::Symbol)=parse_mcfg(Val(mcfg_symb))
 parse_mcfg(::Val{:exact})=ExactModelConfig()
 parse_mcfg(::Val{:rbf})=RBFConfig()
 parse_mcfg(::Val{:taylor1})=TaylorPolynomialConfig(;degree=1)
 parse_mcfg(::Val{:taylor2})=TaylorPolynomialConfig(;degree=2)
+# The default value `nothing` redirects to an `ExactModelConfig`:
+parse_mcfg(::Nothing)=parse_mcfg(:exact)
 
+# Add function is the backend for the helper functions `add_objectives!` etc.
+"""
+    add_function!(func_field, mop, op, model; dim_out, backend=NoBackend())
+
+Add the operator `op` to `mop` at `func_field` and use model configuration `model`.
+Keyword argument `dim_out::Int` is mandatory.
+E.g., `add_function!(:objectives, mop, op, :rbf; dim_out=2)` adds `op`
+as the bi-valued objective to `mop`.
+"""
 function add_function!(
     func_field::Symbol, mop::MutableMOP, op::AbstractNonlinearOperator, 
     model::Union{AbstractSurrogateModelConfig, Nothing, Symbol}=nothing;
@@ -166,6 +235,8 @@ function add_function!(
     setfield!(mop, Symbol("mcfg_", func_field), mod)
     return nothing
 end
+
+# Allow for adding basic `Function`s instead of operators:
 function add_function!(
     func_field::Symbol, mop::MutableMOP, func::Function,
     model::Union{AbstractSurrogateModelConfig, Nothing, Symbol}=nothing; 
@@ -175,6 +246,7 @@ function add_function!(
     return add_function!(func_field, mop, op, model; dim_out)
 end
 
+# Define methods to allow hand-crafted gradient functions:
 function add_function!(
     func_field::Symbol, mop::MutableMOP, func::Function, grads::Function,
     model::Union{AbstractSurrogateModelConfig, Nothing, Symbol}=nothing;
@@ -183,7 +255,6 @@ function add_function!(
     op = NonlinearFunction(; func, grads, func_iip, grads_iip, backend)
     return add_function!(func_field, mop, op, model; dim_out) 
 end
-
 function add_function!(
     func_field::Symbol, mop::MutableMOP, func::Function, grads::Function,
     func_and_grads::Function,
@@ -195,6 +266,9 @@ function add_function!(
     return add_function!(func_field, mop, op, model; dim_out) 
 end
 
+#src #TODO allow for passing Hessians...
+# We now generate the derived helper functions `add_objectives!`,
+# `add_nl_ineq_constraints!` and `add_nl_eq_constraints!`:
 for fntype in (:objectives, :nl_eq_constraints, :nl_ineq_constraints)
     add_fn = Symbol("add_", fntype, "!")
     @eval function $(add_fn)(args...; kwargs...)
@@ -202,18 +276,24 @@ for fntype in (:objectives, :nl_eq_constraints, :nl_ineq_constraints)
     end
 end
 
+# ### Interface Implementation
+# Define the most basic Getters:
 precision(::SimpleMOP) = Float64
 model_type(::SimpleMOP) = SimpleMOPSurrogate
 
+# Box constraints are easy:
+lower_var_bounds(mop::SimpleMOP)=mop.lb
+upper_var_bounds(mop::SimpleMOP)=mop.ub
+
+# To access functions, retrieve the corresponding fields of the MOP:
 for dim_func in (:dim_objectives, :dim_nl_eq_constraints, :dim_nl_ineq_constraints)
     @eval function $(dim_func)(mop::SimpleMOP)
         return getfield(mop, $(Meta.quot(dim_func)))
     end
 end
 
-lower_var_bounds(mop::SimpleMOP)=mop.lb
-upper_var_bounds(mop::SimpleMOP)=mop.ub
-
+# Linear constraints are returned only if the matrix is not nothing.
+# If the offset vector is nothing, we return zeros:
 function lin_eq_constraints(mop::MutableMOP)
     isnothing(mop.E) && return nothing
     if isnothing(mop.c)
@@ -230,13 +310,29 @@ function lin_ineq_constraints(mop::MutableMOP)
     return mop.A, mop.b
 end
 
+# The `TypedMOP` stores tuples (of a matrix and a vector instead):
 lin_eq_constraints(mop::TypedMOP) = mop.Ec
 lin_ineq_constraints(mop::TypedMOP) = mop.Ab
 
-eval_objectives!(y::RVec, mop::SimpleMOP, x::RVec)=eval_op!(y, mop.objectives, x)
-eval_nl_eq_constraints!(y::RVec, mop::SimpleMOP, x::RVec)=eval_op!(y, mop.nl_eq_constraints, x)
-eval_nl_ineq_constraints!(y::RVec, mop::SimpleMOP, x::RVec)=eval_op!(y, mop.nl_ineq_constraints, x)
+# Because we store `AbstractNonlinearOperator`s, evaluation can simply be redirected:
+function eval_objectives!(y::RVec, mop::SimpleMOP, x::RVec)
+    return eval_op!(y, mop.objectives, x)
+end
+function eval_nl_eq_constraints!(y::RVec, mop::SimpleMOP, x::RVec)
+    return eval_op!(y, mop.nl_eq_constraints, x)
+end
+function eval_nl_ineq_constraints!(y::RVec, mop::SimpleMOP, x::RVec)
+    return eval_op!(y, mop.nl_ineq_constraints, x)
+end
 
+# ## Surrogate Modelling of `SimpleMOP`
+
+# For `SimpleMOP`, the surrogates are stored in the type-stable structure
+# `SimpleMOPSurrogate`, with exactly one surrogate for each kind of problem 
+# function.
+# We additionally store the operators, because we might wrap them as
+# `ScaledOperator` and don't want to modify the original problem.
+# (Also, I am not sure if the scaler is available when the problem is initialized).
 struct SimpleMOPSurrogate{O, NLEC, NLIC, MO, MNLEC, MNLIC} <: AbstractMOPSurrogate
     objectives :: O
     nl_eq_constraints :: NLEC
@@ -252,22 +348,27 @@ struct SimpleMOPSurrogate{O, NLEC, NLIC, MO, MNLEC, MNLIC} <: AbstractMOPSurroga
     mod_nl_ineq_constraints :: MNLIC 
 end
 
+# The precision is again fixed:
 precision(mod::SimpleMOPSurrogate)=Float64
 
+# Getters are generated automatically:
 for dim_func in (:dim_objectives, :dim_nl_eq_constraints, :dim_nl_ineq_constraints)
     @eval function $(dim_func)(mod::SimpleMOPSurrogate)
         return getfield(mod, $(Meta.quot(dim_func)))
     end
 end
 
+# The model container is dependent on the trust-region if any of the models is:
 function depends_on_trust_region(mod::SimpleMOPSurrogate)
     return CE.depends_on_trust_region(mod.mod_objectives) ||
         CE.depends_on_trust_region(mod.mod_nl_eq_constraints) ||
         CE.depends_on_trust_region(mod.mod_nl_ineq_constraints)
 end
 
+# At the moment, I have not yet thought about what we would need to change for dynamic scaling:
 supports_scaling(::Type{<:SimpleMOPSurrogate})=ConstantAffineScaling()
 
+# Evaluation redirects to evaluation of the surrogates:
 function eval_objectives!(y::RVec, mod::SimpleMOPSurrogate, x::RVec)
     return model_op!(y, mod.mod_objectives, x)
 end
@@ -277,6 +378,7 @@ end
 function eval_nl_ineq_constraints!(y::RVec, mod::SimpleMOPSurrogate, x::RVec)
     return model_op!(y, mod.mod_nl_ineq_constraints, x)
 end
+# Gradients:
 function grads_objectives!(Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
     return model_grads!(Dy, mod.mod_objectives, x)
 end
@@ -286,7 +388,6 @@ end
 function grads_nl_ineq_constraints!(Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
     return model_grads!(Dy, mod.mod_nl_ineq_constraints, x)
 end
-
 function eval_and_grads_objectives!(y::RVec, Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
     return model_op_and_grads!(y, Dy, mod.mod_objectives, x)
 end
@@ -296,7 +397,8 @@ end
 function eval_and_grads_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
     return model_op_and_grads!(y, Dy, mod.mod_nl_ineq_constraints, x)
 end
-
+# ### Initialization and Training
+# These helpers make an operator respect scaling by returning `ScaledOperator`:
 scale_wrap_op(scaler::IdentityScaler, op, mcfg, dim_in, dim_out, T)=op
 function scale_wrap_op(scaler, op, mcfg, dim_in, dim_out, T)
     ξ = zeros(T, dim_in)
@@ -307,10 +409,16 @@ function scale_wrap_op(scaler, op, mcfg, dim_in, dim_out, T)
     end
     Hy = if requires_hessians(mcfg)
         zeros(T, dim_in, dim_in, dim_out)
+    else
+        nothing
     end
-    return ScaledOperatorOrModel(op, scaler, ξ, Dy, Hy)
+    return ScaledOperator(op, scaler, ξ, Dy, Hy)
 end
 
+# We use the `ScaledOperator` in the `SimpleMOPSurrogate` to make writing models
+# as easy as possible. 
+# Modellers should always assume working in the scaled domain and not be bothered
+# with transformations...
 function init_models(mop::SimpleMOP, n_vars, scaler)
     d_objf = dim_objectives(mop)
     d_nl_eq = dim_nl_eq_constraints(mop)
@@ -333,6 +441,7 @@ function init_models(mop::SimpleMOP, n_vars, scaler)
         objf, nl_eq, nl_ineq, d_in, d_objf, d_nl_eq, d_nl_ineq, mobjf, mnl_eq, mnl_ineq)
 end
 
+# The sub-models are trained separately:
 function update_models!(
     mod::SimpleMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts; 
     point_has_changed

@@ -1,4 +1,11 @@
+module RBFModels
+
+using ..Compromise.CompromiseEvaluators
+const CE = CompromiseEvaluators
+
 using ElasticArrays
+import LinearAlgebra as LA
+using Parameters: @with_kw, @unpack
 
 abstract type AbstractRBFKernel end
 
@@ -662,11 +669,11 @@ end
 end
 
 # ## Interface Implementation
-depends_on_trust_region(::RBFModel)=true
-requires_grads(::RBFConfig)=false
-requires_hessians(::RBFConfig)=false
+CE.depends_on_trust_region(::RBFModel)=true
+CE.requires_grads(::RBFConfig)=false
+CE.requires_hessians(::RBFConfig)=false
 
-function init_surrogate(cfg::RBFConfig, op, dim_in, dim_out, params, T)
+function CE.init_surrogate(cfg::RBFConfig, op, dim_in, dim_out, params, T)
     @unpack kernel, search_factor, max_search_factor, th_qr, th_cholesky = cfg
     
     shape_param = Ref(zero(T))
@@ -710,8 +717,7 @@ function init_surrogate(cfg::RBFConfig, op, dim_in, dim_out, params, T)
         x0, s, Φ, lb, ub, lb_max, ub_max, Y, dists, Z, Pr, Pr_xi, LHS, RHS, coeff)
 end
 
-
-@views function model_op!(y, rbf::RBFModel, x)
+@views function CE.model_op!(y, rbf::RBFModel, x)
     @unpack s, x0, point_indices, database, coeff, Φ, Y = rbf
     @unpack database_x, dim_x = database
     
@@ -737,7 +743,7 @@ end
     return nothing
 end
 
-function model_grads!(Dy, rbf::RBFModel, x)
+function CE.model_grads!(Dy, rbf::RBFModel, x)
     ## size(Dy) = dim_x * dim_y
     @unpack s, x0, point_indices, database, coeff, Φ, Y, Pr_xi = rbf
     @unpack database_x, dim_x = database
@@ -764,7 +770,7 @@ function model_grads!(Dy, rbf::RBFModel, x)
     return nothing
 end
 
-function update!(
+function CE.update!(
     rbf::RBFModel, op, Δ, x, fx, lb, ub; 
     point_has_changed, Δ_max, kwargs...
 )
@@ -773,3 +779,8 @@ end
 
 #src function model_op_and_grads! end # TODO
 # TODO partial evaluation
+
+export RBFModel, RBFConfig
+export CubicKernel, GaussianKernel, InverseMultiQuadricKernel
+
+end#module

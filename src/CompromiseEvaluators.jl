@@ -1,30 +1,50 @@
+#src This file is meant to be parsed by Literate.jl
+# # Module `CompromiseEvaluators`
+# This file provides a submodule defining abstract types and interfaces for evaluation
+# of vector-vector-functions and surrogate models.
+
+module CompromiseEvaluators #src
+
+# ## `AbstractNonlinearOperator` Interface
+#=
+An object subtyping `AbstractNonlinearOperator` represents a function mapping real-valued
+vectors to real-valued vectors.
+The interface defines methods to evaluate such a function.
+These methods are used internally by Compromise, and we made the decision to assume
+in-place functions.
+If the user has out-of-place functions, they have to transform them accordingly.
+Alternatively, this functionality can be provided by utility types implementing the interface.
+=#
+
 abstract type AbstractNonlinearOperator end
 
+# A function can have parameters that are constant in a single optimization run, and 
+# the type structure reflects this distinction:
 abstract type AbstractNonlinearOperatorWithParams <: AbstractNonlinearOperator end
 abstract type AbstractNonlinearOperatorNoParams <: AbstractNonlinearOperator end
 
-#=
-# # `AbstractNonlinearOperator` Interface
-The `AbstractNonlinearOperator` interface is designed to best suit the needs of the 
-evaluation tree structure.
-For a user, this might make its implementation a bit awkward or counter-intuitive,
-because we want evaluation and differentiation calls to be mutating.
-For example, evaluation of a function requires a function with signature similar to 
-`func!(y, x)`, where the target array is a view into some pre-allocated memory.
-We also assume, that it is preferrable to do evaluation and differentiation in one pass, 
-whenever possible, so it is advised to overwrite `eval_op_and_grads!` and similar 
-methods.
-=#
-
-# ## Common Methods
-# Functions to indicate if an operator implements `eval_grads!`, `eval_hessians!`, etc ...
+# ### Common Methods
+# Both, `AbstractNonlinearOperatorWithParams` and `AbstractNonlinearOperatorNoParams`
+# have methods like `eval_op!`.
+# The signatures look different, though.
+# That is why there is a separate section for both types.
+# The below methods have the same signature for both operator supertypes:
+#
+# Evaluation of derivatives is optional if evaluation-based models are used.
+# We have functions to indicate if an operator implements `eval_grads!`, `eval_hessians!`:
 provides_grads(op::AbstractNonlinearOperator)=false
 provides_hessians(op::AbstractNonlinearOperator)=false
 
-# Indicate, if individual outputs of a vector-valued function can be queried seperately:
+# In certain situations (nonlinear subproblems relying on minimization of scalar-valued 
+# objective or constraint compoments) it might be beneficial if only certain outputs
+# of a vector-function could be evaluated.
+# The method `supports_partial_evaluation` signals this feature.
+# If it returns `true`, the feature is assumed to be available for derivatives as well.
+# In this situation, the type should implment methods starting with `partial_`, see below
+# for details.
 supports_partial_evaluation(op::AbstractNonlinearOperator) = false
 
-# ## `AbstractNonlinearOperatorWithParams`
+# ### Methods for `AbstractNonlinearOperatorWithParams`
 # The methods below should be implemented to evaluate parameter dependent operators: 
 """
     eval_op!(y, op, x, p)
@@ -56,8 +76,7 @@ function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x, p
 end
 
 # If Hessian matrices are needed, implement `eval_hessians!(H, op, x, p)`.
-# Assume `H` to be a vector of matrices, each matrix corresponding to the hessian of 
-# some operator output.
+# Assume `H` to be a 3D array, where the last index iterates over the function outputs.
 # That is, `H[:,:,1]` is a matrix containing second order partial derivatives of the first 
 # output, `H[:,:,2]` has second order derivatives for the second output, and so forth...
 # Moreover, in unlike with `eval_grads!`, the Hessian information should be stored in 
@@ -88,7 +107,9 @@ function eval_op_and_grads!(y, Dy, H, op::AbstractNonlinearOperatorWithParams, x
 end
 
 # Some operators might support partial evaluation. 
-# They should implement these methods, if `supports_partial_evaluation` returns `true`:
+# They should implement these methods, if `supports_partial_evaluation` returns `true`.
+# The argument `outputs` is an iterable of output indices, assuming `1` to be the first output.
+# `y` is the full length vector, and `partial_op!` should set `y[outputs]`.
 function partial_op!(y, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
     ## length(y)==length(outputs)
     return error("Partial evaluation not implemented.")
@@ -148,13 +169,14 @@ function func_vals_and_grads_and_hessians!(
     eval_op_and_grads_and_hessians!(y, Dy, H, op, x, p)
 end
 
-# ## `AbstractNonlinearOperatorNoParams`
+# ### Methods `AbstractNonlinearOperatorNoParams`
 # 
 # The interface for operators without parameters is very similar to what's above.
 # In fact, we could always treat it as a special case of `AbstractNonlinearOperatorWithParams`
 # and simply ignore the parameter vector.
 # However, in some situation it might be desirable to have the methods without `p`
 # readily at hand.
+# This also makes writing extensions a tiny bit easier.
 
 #src The below methods have been written by ChatGPT according to what is above:
 function eval_op!(y, op::AbstractNonlinearOperatorNoParams, x)
@@ -220,7 +242,7 @@ function func_vals_and_grads_and_hessians!(
     return func_vals_and_grads_and_hessians!(y, Dy, H, op, x, nothing, outputs)
 end
 
-# ### Parameter-Methods for Non-Parametric Operators
+# #### Parameter-Methods for Non-Parametric Operators
 # To also be able to use non-parametric operators in the more general setting, 
 # implement the parametric-interface:
 
@@ -259,7 +281,7 @@ function partial_op_and_grads_and_hessians!(
     return partial_op_and_grads_and_hessians!(y, Dy, H, op, x, outputs)
 end
 
-# ### Non-Parametric Methods for Parametric Operators
+# #### Non-Parametric Methods for Parametric Operators
 # These should only be used when you know what you are doing, as we set the parameters
 # to `nothing`.
 # This is safe only if we now that an underlying function is not-parametric, but somehow
@@ -301,6 +323,119 @@ function partial_op_and_grads_and_hessians!(
     return partial_op_and_grads_and_hessians!(y, Dy, H, op, x, nothing, outputs)
 end
 
-include("autodiff_backends.jl")
-include("wrapped_function.jl")
-include("nonlinear_function.jl")
+# ## Types and Methods for Surrogate Models
+
+# An `AbstractSurrogateModel` is similar to `AbstractNonlinearOperator`.
+# Such a surrogate model is always non-parametric, as parameters of operators are assumed 
+# to be fix in between runs.
+abstract type AbstractSurrogateModel end
+
+# We also want to be able to define the behavior of models with light-weight objects:
+abstract type AbstractSurrogateModelConfig end
+
+# ### Indicator Methods
+# Functions to indicate the order of the surrogate model:
+requires_grads(::AbstractSurrogateModelConfig)=false
+requires_hessians(::AbstractSurrogateModelConfig)=false
+
+# A function to indicate that a model should be updated when the trust region has changed:
+depends_on_trust_region(::AbstractSurrogateModel)=true
+
+# ### Training
+"""
+    init_surrogate(
+        model_config, nonlin_op, dim_in, dim_out, params, T
+    )
+
+Return a model subtyping `AbstractSurrogateModel`, as defined by 
+`model_config::AbstractSurrogateModelConfig`, for the nonlinear operator `nonlin_op`.
+The operator (and model) has input dimension `dim_in` and output dimension `dim_out`.
+`params` is the current parameter object for `nonlin_op` and is cached.
+`T` is a subtype of `AbstractFloat` to indicate precision of cache arrays.
+"""
+function init_surrogate(
+    ::AbstractSurrogateModelConfig, op, dim_in, dim_out, params, T)::AbstractSurrogateModel
+    return nothing
+end
+
+function update!(
+    surr::AbstractSurrogateModel, op, Δ, x, fx, lb, ub; kwargs...
+)
+    return nothing    
+end
+
+# ### Evaluation
+# In place evaluation and differentiation, similar to `AbstractNonlinearOperatorNoParams`.
+# Mandatory:
+function model_op!(y, surr::AbstractSurrogateModel, x)
+    return nothing
+end
+# Mandatory:
+function model_grads!(Dy, surr::AbstractSurrogateModel, x)
+    return nothing
+end
+# Optional:
+function model_op_and_grads!(y, Dy, surr::AbstractSurrogateModel, x)
+    model_op!(y, surr, x )
+    model_grads!(Dy, surr, x)
+    return nothing
+end
+# #### Optional Partial Evaluation
+supports_partial_evaluation(::AbstractSurrogateModel)=false
+function model_op!(y, surr::AbstractSurrogateModel, x, outputs)
+    return error("Surrogate model does not support partial evaluation.")
+end
+function model_grads!(y, surr::AbstractSurrogateModel, x, outputs)
+    return error("Surrogate model does not support partial Jacobian.")
+end
+function model_op_and_grads!(y, Dy, surr::AbstractSurrogateModel, x, outputs)
+    model_op!(y, surr, x, outputs)
+    model_grads!(y, surr, x, outputs)
+    return nothing
+end
+
+# #### Safe-guarded, internal Methods
+# The methods below are used in the algorithm and have the same signature as 
+# the corresponding methods for `AbstractNonlinearOperator`.
+# Thus, we do not have to distinguish types in practice.
+function func_vals!(y, surr::AbstractSurrogateModel, x, p, outputs=nothing)
+    if !isnothing(outputs)
+        if supports_partial_evaluation(surr)
+            return model_op!(y, surr, x, outputs)
+        ## else
+        ##     @warn "Partial evaluation not supported by surrogate model."
+        end
+    end
+    return model_op!(y, surr, x)
+end
+function func_grads!(Dy, surr::AbstractSurrogateModel, x, p, outputs=nothing)
+    if !isnothing(outputs)
+        if supports_partial_evaluation(surr)
+            return model_grads!(Dy, surr, x, outputs)
+        ## else
+        ##     @warn "Partial evaluation not supported by surrogate model."
+        end
+    end
+    return model_grads!(Dy, surr, x)
+end
+function func_vals_and_grads!(y, Dy, surr::AbstractSurrogateModel, x, p, outputs=nothing)
+    if !isnothing(outputs)
+        if supports_partial_evaluation(surr)
+            return model_op_and_grads!(y, Dy, surr, x, outputs)
+        ## else
+        ##     @warn "Partial evaluation not supported by surrogate model."
+        end
+    end
+    return model_op_and_grads!(y, Dy, surr, x)
+end
+
+# ## Module Exports
+export AbstractNonlinearOperator, AbstractNonlinearOperatorNoParams, AbstractNonlinearOperatorWithParams
+export AbstractSurrogateModel, AbstractSurrogateModelConfig
+export supports_partial_evaluation, provides_grads, provides_hessians, requires_grads, requires_hessians
+export func_vals!, func_grads!, func_hessians!, func_vals_and_grads!, func_vals_and_grads_and_hessians!
+export eval_op!, eval_grads!, eval_hessians!, eval_op_and_grads!, eval_op_and_grads_and_hessians!
+export model_op!, model_grads!, model_op_and_grads!
+export init_surrogate, update!
+
+end#module
