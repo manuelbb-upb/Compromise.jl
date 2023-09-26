@@ -224,3 +224,5 @@ in the main loop.
 	TOLERANCE_X = 3
 	TOLERANCE_F = 4
 end
+
+const DEFAULT_PRECISION=Float32

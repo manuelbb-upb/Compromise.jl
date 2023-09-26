@@ -29,6 +29,8 @@ struct FixParams{F, P}
     FixParams(f::F, p) where {F} = new{F, Base._stable_typeof(p)}(f, p)
     FixParams(f::Type{F}, p) where {F} = new{Type{F}, Base._stable_typeof(p)}(f, p)
 end
+ensure_vec(x)=x
+ensure_vec(x::Number)=[x,]
 (fp::FixParams)(x) = ensure_vec(fp.func(x, fp.params))
 
 #src given f!(y, x, p), return (y, x) -> f!(y, x)

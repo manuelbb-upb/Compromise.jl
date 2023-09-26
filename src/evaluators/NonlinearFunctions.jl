@@ -265,7 +265,7 @@ end
 @forward CE.eval_op_and_grads!(y, Dy, op::NonlinearFunction, x)
 @forward CE.eval_op_and_grads_and_hessians!(y, Dy, H, op::NonlinearFunction, x)
 
-export AbstractAutoDiffBackend
+export AbstractAutoDiffBackend, NoBackend
 export ad_grads!, ad_hessians!, ad_op_and_grads!, ad_op_and_grads_and_hessians!
 export NonlinearFunction, NonlinearParametricFunction
 end#module

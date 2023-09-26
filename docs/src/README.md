@@ -1,3 +1,7 @@
+```@meta
+EditURL = "<unknown>/docs/literate_src/README.jl"
+```
+
 # Compromise.jl
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://manuelbb-upb.github.io/Compromise.jl/stable/)
@@ -25,7 +29,7 @@ constraints are violated.
 
 First we load the optimizer package, “Compromise.jl”:
 
-````julia
+````@example README
 using Compromise
 ````
 
@@ -36,7 +40,7 @@ We can use it to set up a problem step by step.
 The only information required for initialization is the
 number of variables:
 
-````julia
+````@example README
 mop = MutableMOP(;num_vars = 2)
 ````
 
@@ -49,7 +53,7 @@ Alternatively, they need objects of type `Compromise.NonlinearFunction`.
 We have helpers to support normal julia functions.
 For example, consider this vector-to-vector function:
 
-````julia
+````@example README
 function objective_function(x)
     return [
         (x[1] - 2)^2 + (x[2] - 1)^2;
@@ -61,7 +65,7 @@ end
 We can easily derive the gradients, so let's also define them
 manually, to use derivative-based models:
 
-````julia
+````@example README
 function objective_grads(x)
     # return the transposed Jacobian, i.e., gradients as columns
     df11 = df21 = 2 * (x[1] - 2)
@@ -81,7 +85,7 @@ We also have to tell the optimizer about the function signature.
 `objective_function!(fx, x)`.
 `dim_out` is a mandatory argument.
 
-````julia
+````@example README
 add_objectives!(
     mop, objective_function, objective_grads, :taylor1;
     dim_out=2, func_iip=false, grads_iip=false
@@ -98,7 +102,7 @@ We support non-convex, nonlinear constraints (as long as they are relaxable).
 For example, we can constrain the problem to ℝ² without unit ball.
 For demonstration purposes, use an in-place function:
 
-````julia
+````@example README
 nl_ineq_function!(y, x) = y[1] = 1 - sum(x.^2)
 ````
 
@@ -120,7 +124,7 @@ There is other cool features. If you want to vary the shape parameter
 with the trust-region radius, you can give a function ``Δ ↦ ε(Δ)``
 to `GaussianKernel` (as well as `InverseMultiQuadricKernel`).
 
-````julia
+````@example README
 gk = GaussianKernel(del -> min(1/del, 1_000))
 Compromise.RBFModels.shape_paramater(gk, 1) # equals 1.0
 Compromise.RBFModels.shape_paramater(gk, 0.0005) ## equals 1000
@@ -129,7 +133,7 @@ Compromise.RBFModels.shape_paramater(gk, 0.0005) ## equals 1000
 For now, we stick with the fixed shape parameter and finalize
 our problem:
 
-````julia
+````@example README
 add_nl_ineq_constraints!(mop, nl_ineq_function!, :rbf;
     func_iip=true, dim_out=1
 )
@@ -138,7 +142,7 @@ add_nl_ineq_constraints!(mop, nl_ineq_function!, :rbf;
 The `MutableMOP` is turned into a `TypedMOP` during initialization.
 We can thus simply pass it to `optimize`:
 
-````julia
+````@example README
 final_vals, ret = optimize(mop, [-2.0, 0.5])
 ````
 
@@ -153,7 +157,7 @@ objective values.
 The nonlinear equality constraints are `final_vals.hx`, the inequality
 constraints are `final_vals.gx`...
 
-````julia
+````@example README
 final_vals.x, final_vals.fx
 ````
 
@@ -162,19 +166,19 @@ There is an optional `ForwardDiff` extension.
 To use a derivative-based model without specifying the gradients by-hand,
 first load `ForwardDiff`.
 
-````julia
+````@example README
 using ForwardDiff
 ````
 
 Now, `ForwardDiffBackend` should be available:
 
-````julia
+````@example README
 diff_backend = ForwardDiffBackend()
 ````
 
 Setup the problem:
 
-````julia
+````@example README
 mop = MutableMOP(2)
 add_objectives!(mop, objective_function, :exact;
     func_iip=false, dim_out=2, backend=diff_backend

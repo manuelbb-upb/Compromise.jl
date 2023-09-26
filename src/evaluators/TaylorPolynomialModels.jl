@@ -1,8 +1,9 @@
-module TalyorPolynomialModels
+module TaylorPolynomialModels
 
 import LinearAlgebra as LA
+using Parameters: @with_kw
 using ..Compromise.CompromiseEvaluators
-const CompromiseEvaluators = CE
+const CE = CompromiseEvaluators
 
 struct TaylorPolynomial1{
     X <: AbstractVector{<:Real},
@@ -45,7 +46,7 @@ end
 
 function CE.init_surrogate(tp_cfg::TaylorPolynomialConfig, op, dim_in, dim_out, params, T)
     if tp_cfg.degree == 1
-        return TaylorPolynomial2(dim_in, dim_out, T)
+        return TaylorPolynomial1(dim_in, dim_out, T)
     else
         return TaylorPolynomial2(dim_in, dim_out, T)
     end

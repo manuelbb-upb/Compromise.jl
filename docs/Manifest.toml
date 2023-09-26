@@ -2,7 +2,7 @@
 
 julia_version = "1.8.5"
 manifest_format = "2.0"
-project_hash = "ef8b69209c7d5570943c14d952ab93a8281356a8"
+project_hash = "725a81403dcf7587a6a5fbdbbcbd8039849ae07d"
 
 [[deps.AMD]]
 deps = ["Libdl", "LinearAlgebra", "SparseArrays", "Test"]
@@ -14,12 +14,6 @@ version = "0.5.0"
 git-tree-sha1 = "574baf8110975760d391c710b6341da1afa48d8c"
 uuid = "a4c015fc-c6ff-483c-b24f-f7ea428134e9"
 version = "0.0.1"
-
-[[deps.AbstractDifferentiation]]
-deps = ["ChainRulesCore", "ExprTools", "LinearAlgebra", "Requires"]
-git-tree-sha1 = "f83fd553acff1c6a7f5c4e6f5f2b5941d533cdc9"
-uuid = "c29ec348-61ec-40c8-8164-b8c60e9d9f3d"
-version = "0.5.2"
 
 [[deps.AbstractFFTs]]
 deps = ["ChainRulesCore", "LinearAlgebra"]
@@ -116,9 +110,9 @@ version = "0.6.0+0"
 
 [[deps.CUTENSOR_jll]]
 deps = ["Artifacts", "CUDA_Runtime_jll", "CompilerSupportLibraries_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "TOML"]
-git-tree-sha1 = "d2c1a1de70a8716acaeee873def6608d854212d5"
+git-tree-sha1 = "e231d9b8894558e22bb35910a2c5e7458655744f"
 uuid = "35b6c64b-1ee1-5834-92a3-3f624899209a"
-version = "1.7.0+0"
+version = "1.7.0+1"
 
 [[deps.ChainRulesCore]]
 deps = ["Compat", "LinearAlgebra", "SparseArrays"]
@@ -162,8 +156,8 @@ uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
 version = "1.0.1+0"
 
 [[deps.Compromise]]
-deps = ["AbstractDifferentiation", "COSMO", "Dictionaries", "ElasticArrays", "ForwardDiff", "JuMP", "LazyArrays", "LinearAlgebra", "NLopt", "Parameters", "Requires", "SparseArrayKit", "SparseArrays"]
-path = ".."
+deps = ["COSMO", "Dictionaries", "ElasticArrays", "JuMP", "LazyArrays", "LinearAlgebra", "NLopt", "Parameters", "Reexport", "Requires", "SparseArrayKit", "SparseArrays"]
+path = "/home/manuelbb/.julia/dev/Compromise"
 uuid = "254bc946-86ae-484f-a9da-8147cb79ba93"
 version = "0.0.1"
 
@@ -234,9 +228,9 @@ version = "1.4.2"
 
 [[deps.ForwardDiff]]
 deps = ["CommonSubexpressions", "DiffResults", "DiffRules", "LinearAlgebra", "LogExpFunctions", "NaNMath", "Preferences", "Printf", "Random", "SpecialFunctions", "StaticArrays"]
-git-tree-sha1 = "00e252f4d706b3d55a8863432e742bf5717b498d"
+git-tree-sha1 = "cf0fe81336da9fb90944683b8c41984b08793dad"
 uuid = "f6369f11-7733-5829-9624-2563aa707210"
-version = "0.10.35"
+version = "0.10.36"
 
 [[deps.GPUArrays]]
 deps = ["Adapt", "GPUArraysCore", "LLVM", "LinearAlgebra", "Printf", "Random", "Reexport", "Serialization", "Statistics"]

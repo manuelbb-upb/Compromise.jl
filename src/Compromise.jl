@@ -1,24 +1,56 @@
 module Compromise
 
+# ## Imports
+
+# ### External Dependencies
+# We use the macros in `Parameters` quite often, because of their convenience:
 import Parameters: @with_kw, @unpack
-import JuMP
-import COSMO
+# Everything in this module needs at least some linear algebra:
+import LinearAlgebra as LA
 
-import NLopt 
+# Re-export symbols from important sub-modules
+import Reexport: @reexport
 
+# With the external dependencies available, we can include global type definitions and constants:
+include("types.jl")
+include("utils.jl")
+
+# #### Optimization Packages
+# At some point, the choice of solver is meant to be configurable, with different
+# extensions to choose from:
+import JuMP     # LP and QP modelling for descent and normal steps
+import COSMO    # actual QP solver
 const DEFAULT_QP_OPTIMIZER=COSMO.Optimizer
-const DEFAULT_PRECISION=Float32
+# For restoration we currently use `NLopt`. This is also meant to become 
+# configurable...
+import NLopt
 
-#include("CompromiseEvaluators/CompromiseEvaluators.jl")
-#import .CompromiseEvaluators as CE
+# ### Interfaces and Algorithm Types
+# Abstract types and interfaces to handle multi-objective optimization problems...
+include("mop.jl")
+# ... and how to model them:
+include("models.jl")
+
+# Tools to scale and unscale variables:
+include("affine_scalers.jl")
+# Implementations of Filter(s):
+include("filter.jl")
+# Types and methods to compute inexact normal steps and descent steps:
+include("descent.jl")
+# The restoration utilities:
+include("restoration.jl")
+
+# ### Internal Dependencies or Extensions
+# Import operator types and interface definitions:
 include("CompromiseEvaluators.jl")
-import .CompromiseEvaluators
+using .CompromiseEvaluators
 const CE = CompromiseEvaluators
-export CompromiseEvaluators
 
+# Import wrapper types to make user-provided functions conform to the operator interface:
 include("evaluators/NonlinearFunctions.jl")
 using .NonlinearFunctions
 
+# Import the optional extension `ForwardDiffBackendExt`, if `ForwardDiff` is available:
 if !isdefined(Base, :get_extension)
     using Requires
 end
@@ -32,6 +64,8 @@ end
     end
 end
 
+# As of now, it is not easy to export stuff from extensions.
+# We have this Getter instead:
 function ForwardDiffBackend()
     if !isdefined(Base, :get_extension)
         if isdefined(@__MODULE__, :ForwardDiffBackendExt)
@@ -45,32 +79,24 @@ function ForwardDiffBackend()
 end
 export ForwardDiffBackend
 
+# Import Radial Basis Function surrogates:
 include("evaluators/RBFModels.jl")
-using .RBFModels
+@reexport using .RBFModels
 
+# Taylor Polynomial surrogates:
+include("evaluators/TaylorPolynomialModels.jl")
+@reexport using .TaylorPolynomialModels
 
-#=
-import LinearAlgebra as LA
- 
-# However, files are allowed to depend on other files for function/method definitions.
-# For those, order is not relevant, but a note in the respective file would be nice.
-include("types.jl")
-include("utils.jl")
+# Exact “Surrogates”:
+include("evaluators/ExactModels.jl")
+@reexport using .ExactModels
 
-include("mop.jl")
-
-include("models.jl")
-
-include("affine_scalers.jl")
-
-include("filter.jl")
-
-include("descent.jl")
-
-include("restoration.jl")
-
+# The helpers in `simple_mop.jl` depend on those model types:
 include("simple_mop.jl")
+export MutableMOP, add_objectives!, add_nl_ineq_constraints!, add_nl_eq_constraints!
 
+# ## The Algorithm
+# (This still neads some re-factoring...)
 var_bounds_valid(lb, ub)=true
 var_bounds_valid(lb::Nothing, ub::RVec)=!(any(isequal(-Inf), ub))
 var_bounds_valid(lb::RVec, ub::Nothing)=!(any(isequal(Inf), lb))
@@ -431,5 +457,7 @@ function do_iteration(
     end
     return this_it_stat, rcode, point_has_changed, _Δ
 end
-=#
+
+export optimize
+
 end

@@ -1,7 +1,7 @@
 module ExactModels
 
 using ..Compromise.CompromiseEvaluators
-const CompromiseEvaluators = CE
+const CE = CompromiseEvaluators
 
 Base.@kwdef struct ExactModel{O,P} <: AbstractSurrogateModel#{O<:AbstractNonlinearOperator, P}
     op :: O
@@ -28,5 +28,7 @@ function CE.model_op_and_grads!(y, Dy, surr::ExactModel, x)
     return eval_op_and_grads!(y, Dy, surr.op, x, surr.params)
 end
 CE.supports_partial_evaluation(::ExactModel)=false
+
+export ExactModel, ExactModelConfig
 
 end#module
