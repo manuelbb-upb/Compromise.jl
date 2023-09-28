@@ -19,7 +19,7 @@ Additionally, we require information on the model variability
 and if we can build models for the scaled domain:
 
 ````julia
-depends_on_trust_region(::AbstractMOPSurrogate)::Bool=true
+depends_on_radius(::AbstractMOPSurrogate)::Bool=true
 supports_scaling(T::Type{<:AbstractMOPSurrogate})=NoScaling()
 ````
 

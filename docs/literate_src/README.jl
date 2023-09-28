@@ -68,7 +68,7 @@ end
 # `add_objectives` and also specify the model class to be used.
 # There are shorthand symbols, for example `:exact` or `taylor1`,
 # for objectives with known gradients.
-# Alternatively, give some `Compromise.AbstractSurrogateModelConfig`.
+# Alternatively, give some `Compromise.A_bstractSurrogateModelConfig`.
 # We also have to tell the optimizer about the function signature.
 # `func_iip=true` would imply an in-place objective with sigunature
 # `objective_function!(fx, x)`.

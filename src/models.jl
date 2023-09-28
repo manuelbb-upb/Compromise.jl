@@ -15,7 +15,7 @@ dim_nl_ineq_constraints(::AbstractMOPSurrogate)::Int=0   # optional
 
 # Additionally, we require information on the model variability
 # and if we can build models for the scaled domain:
-depends_on_trust_region(::AbstractMOPSurrogate)::Bool=true
+depends_on_radius(::AbstractMOPSurrogate)::Bool=true
 supports_scaling(T::Type{<:AbstractMOPSurrogate})=NoScaling()
 
 # ## Construction
@@ -24,10 +24,17 @@ supports_scaling(T::Type{<:AbstractMOPSurrogate})=NoScaling()
 init_models(mop::AbstractMOP, n_vars, scaler)::AbstractMOPSurrogate=nothing
 # It is trained with the update method.
 function update_models!(
-    mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts; point_has_changed
+    mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts
 )
     return nothing
 end
+
+# If a model is radius-dependent, 
+# we also need a function to copy the parameters from a source model to a target model:
+copy_model(mod::AbstractMOPSurrogate)=deepcopy(mod)
+copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=mod_trgt
+_copy_model(mod::AbstractMOPSurrogate)=depends_on_radius(mod) ? copy_model(mod) : mod
+_copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=depends_on_radius(mod_trgt) ? copyto_model!(mod_trgt, mod_src) : mod_trgt
 
 # ## Evaluation
 # Evaluation of nonlinear objective models requires the following method.

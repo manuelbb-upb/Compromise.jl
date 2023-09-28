@@ -14,7 +14,7 @@ struct TaylorPolynomial1{
     x0 :: X
     Δx :: X
     fx :: F
-    Dfx :: D 
+    Dfx :: D
 end
 
 struct TaylorPolynomial2{X, TP1<:TaylorPolynomial1{X}, H} <: AbstractSurrogateModel
@@ -27,10 +27,25 @@ end
     degree :: Int = 1
     @assert 1 <= degree <= 2 "Taylor polynomial must have degree 1 or 2."
 end    
-
+#=
+CE.copy_model(tp::Union{TaylorPolynomial1,TaylorPolynomial2})=deepcopy(tp)
+function CE.copyto_model!(tp_trgt::TaylorPolynomial1, tp_src::TaylorPolynomial1)
+    Base.copyto!(tp_trgt.x0, tp_src.x0)
+    Base.copyto!(tp_trgt.Δx, tp_src.Δx)
+    Base.copyto!(tp_trgt.fx, tp_src.fx)
+    Base.copyto!(tp_trgt.Dfx, tp_src.Dfx)
+    return nothing
+end
+function CE.copyto_model!(tp_trgt::TaylorPolynomial2, tp_src::TaylorPolynomial2)
+    CE.copyto_model!(tp_trgt.tp1, tp_src.tp1)
+    Base.copyto!(tp_trgt.xtmp, tp_src.xtmp)
+    Base.copyto!(tp_trgt.Hfx, tp_src.Hfx)
+    return nothing
+end
+=#
 
 function TaylorPolynomial1(dim_in, dim_out, T)
-    x0 = Vector{T}(undef, dim_in)
+    x0 = fill(T(NaN), dim_in)
     Δx = similar(x0)
     fx = Vector{T}(undef, dim_out)
     Dfx = Matrix{T}(undef, dim_in, dim_out)
@@ -53,7 +68,7 @@ function CE.init_surrogate(tp_cfg::TaylorPolynomialConfig, op, dim_in, dim_out, 
 end
 
 const TaylorPoly = Union{TaylorPolynomial1, TaylorPolynomial2}
-CE.depends_on_trust_region(::TaylorPoly)=false
+CE.depends_on_radius(::TaylorPoly)=false
 CE.requires_grads(::Type{<:TaylorPoly})=true
 CE.requires_hessians(tp::Type{TaylorPolynomial2})=true
 
@@ -129,14 +144,18 @@ function CE.model_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
 end
 
 function CE.update!(tp::TaylorPolynomial1, op, Δ, x, fx, lb, ub; kwargs...)
-    copyto!(tp.x0, x)
-    eval_op_and_grads!(tp.fx, tp.Dfx, op, x)
+    if tp.x0 != x || any(isnan.(tp.x0))
+        copyto!(tp.x0, x)
+        eval_op_and_grads!(tp.fx, tp.Dfx, op, x)
+    end
 end
 
 function CE.update!(tp::TaylorPolynomial2, op, Δ, x, fx, lb, ub; kwargs...)
-    tp1 = tp.tp
-    copyto!(tp1.x0, x)
-    eval_op_and_grads_and_hessians!(tp1.fx, tp1.Dfx, tp.Hfx, op, x)
+    if tp.x0 != x || any(isnan.(tp.x0))
+        tp1 = tp.tp
+        copyto!(tp1.x0, x)
+        eval_op_and_grads_and_hessians!(tp1.fx, tp1.Dfx, tp.Hfx, op, x)
+    end
     return nothing
 end
 

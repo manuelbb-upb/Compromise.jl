@@ -397,7 +397,7 @@ requires_hessians(::AbstractSurrogateModelConfig)=false
 A function to indicate that a model should be updated when the trust region has changed:
 
 ````julia
-depends_on_trust_region(::AbstractSurrogateModel)=true
+depends_on_radius(::AbstractSurrogateModel)=true
 ````
 
 ### Training
