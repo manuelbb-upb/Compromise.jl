@@ -47,7 +47,7 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
-        "Examples" => ["README" => "README.md",],
+        "Tutorials" => ["README" => "README.md", "stopping.md"],
         "(Dev) Notes" => "dev_notes.md",
         "Interfaces" => ["CompromiseEvaluators.md", "mop.md", "models.md"],
     ],

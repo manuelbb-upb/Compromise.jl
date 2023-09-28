@@ -292,7 +292,8 @@ end
 
 function optimize(
     MOP::AbstractMOP, ξ0::RVec;
-    algo_opts :: AlgorithmOptions = AlgorithmOptions()
+    algo_opts :: AlgorithmOptions = AlgorithmOptions(),
+    user_callback = NoUserCallback(),
 )
     @assert !isempty(ξ0) "Starting point array `x0` is empty."
     @assert dim_objectives(MOP) > 0 "Objective Vector dimension of problem is zero."
@@ -351,7 +352,8 @@ function optimize(
         !isnothing(stop_code) && break
         stop_code = do_iteration!(      # assume `copyto_model!`, otherwise, `mod, stop_code = do_iteration!...`
             iter_meta, mop, mod, scaler, lin_cons, scaled_cons, 
-            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, stop_crits, algo_opts
+            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, stop_crits, algo_opts,
+            user_callback
         )
     end
     return vals, stop_code
@@ -359,7 +361,8 @@ end
 
 function do_iteration!(
     iter_meta, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, stop_crits, algo_opts
+    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, stop_crits, algo_opts,
+    user_callback
 )
     ## assumptions at the start of an iteration:
     ## * `vals` holds valid values for the stored argument vector `x`.
@@ -379,6 +382,13 @@ function do_iteration!(
             )
             !isnothing(stop_code) && return stop_code
         end
+    end
+    if check_pre_iteration(user_callback)
+        stop_code = evaluate_stopping_criterion(
+            user_callback, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
+            vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
+        )
+        !isnothing(stop_code) && return stop_code
     end
 
     @logmsg algo_opts.log_level """\n
@@ -456,11 +466,19 @@ function do_iteration!(
             !isnothing(stop_code) && return stop_code
         end
     end
+    if check_post_descent_step(user_callback)
+        stop_code = evaluate_stopping_criterion(
+            user_callback, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
+            vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
+        )
+        !isnothing(stop_code) && return stop_code
+    end
     ## `χ` is the inexact criticality.
     ## For the convergence analysis to work, we also have to have the Criticality Routine:
     Δ, stop_code = criticality_routine(
         iter_meta, mod, step_vals, mod_vals, step_cache, crit_cache,
-        mop, scaler, lin_cons, scaled_cons, vals, vals_tmp, stop_crits, algo_opts
+        mop, scaler, lin_cons, scaled_cons, vals, vals_tmp, stop_crits, algo_opts, 
+        user_callback
     )
     !isnothing(stop_code) && return stop_code
     
@@ -494,6 +512,13 @@ function do_iteration!(
             )
             !isnothing(stop_code) && return stop_code
         end
+    end
+    if check_post_iteration(user_callback)
+        stop_code = evaluate_stopping_criterion(
+            user_callback, _Δ, mop, mod, scaler, lin_cons, scaled_cons, 
+            vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
+        )
+        !isnothing(stop_code) && return stop_code
     end
     # Finally, change filter and values
     if this_it_stat == FILTER_ADD || this_it_stat == FILTER_ADD_SHRINK

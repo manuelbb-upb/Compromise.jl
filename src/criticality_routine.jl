@@ -3,7 +3,8 @@ function criticality_routine(
     iter_meta,  # field `crit_val` and `num_crit_loops`
     mod, step_vals, mod_vals, step_cache, crit_cache,
     ## not modified
-    mop, scaler, lin_cons, scaled_cons, vals, vals_tmp, stop_crits, algo_opts
+    mop, scaler, lin_cons, scaled_cons, vals, vals_tmp, stop_crits, algo_opts,
+    user_callback
 )
     @unpack log_level, eps_theta, eps_crit, crit_M, crit_B, crit_alpha = algo_opts
     @unpack it_index = iter_meta
@@ -24,22 +25,27 @@ function criticality_routine(
         copyto!(step_valsj, step_vals)
         copyto!(mod_valsj, mod_vals)
         _copyto_model!(modj, mod)
-        break_outer=false
         while Δj > crit_M * χ
             iter_meta.num_crit_loops = j
+            stop_code=nothing
             for stopping_criterion in stop_crits
                 if check_pre_crit_loop(stopping_criterion)
                     stop_code = _evaluate_stopping_criterion(
                         stopping_criterion, Δj, mop, modj, scaler, lin_cons, scaled_cons, 
                         vals, vals_tmp, step_valsj, mod_valsj, filter, iter_meta, step_cachej, algo_opts
                     )
-                    if !isnothing(stop_code)
-                        break_outer=true
-                        break
-                    end
+                    !isnothing(stop_code) && break
                 end
             end
-            break_outer && break
+            !isnothing(stop_code) && break
+            if check_pre_crit_loop(user_callback)
+                stop_code = evaluate_stopping_criterion(
+                    user_callback, Δj, mop, modj, scaler, lin_cons, scaled_cons, 
+                    vals, vals_tmp, step_valsj, mod_valsj, filter, iter_meta, step_cachej, algo_opts
+                )
+                !isnothing(stop_code) && break
+            end
+            !isnothing(stop_code) && break
             @logmsg log_level "\tCRITICALITY LOOP $(j+1)."
             Δj *= crit_alpha 
             if depends_on_radius(modj)
@@ -74,13 +80,18 @@ function criticality_routine(
                         stopping_criterion, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
                         vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
                     )
-                    if !isnothing(stop_code)
-                        break_outer=true
-                        break
-                    end
+                    !isnothing(stop_code) && break
                 end
             end
-            break_outer && break
+            !isnothing(stop_code) && break
+            if check_post_crit_loop(user_callback)
+                stop_code = evaluate_stopping_criterion(
+                    user_callback, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
+                    vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
+                )
+                !isnothing(stop_code) && break
+            end
+            !isnothing(stop_code) && break
             j+=1
         end
         #=

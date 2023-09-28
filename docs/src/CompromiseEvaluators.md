@@ -400,7 +400,22 @@ A function to indicate that a model should be updated when the trust region has 
 depends_on_radius(::AbstractSurrogateModel)=true
 ````
 
-### Training
+### Initialization and Modification
+
+The choice to don't separate between a model and its parameters (like `Lux.jl` does)
+is historic.
+There are pros and cons to both approaches.
+The most obvious point in favor of how it is now are the unified evaluation interfaces.
+However, for the Criticality Routine we might need to copy models and retrain them for
+smaller trust-region radii.
+That is why we require implementation of `copy_model(source_model)` and
+`copyto_model!(trgt_model, src_model)`.
+A modeller should take care to really only copy parameter arrays and pass other large
+objects, such as databases, by reference so as to avoid a large memory-overhead.
+Moreover, we only need copies for radius-dependent models!
+You can ignore those methods otherwise.
+
+A surrogate is initialized from its configuration and the operator it is meant to model:
 
 ````julia
 """
@@ -418,7 +433,45 @@ function init_surrogate(
     ::AbstractSurrogateModelConfig, op, dim_in, dim_out, params, T)::AbstractSurrogateModel
     return nothing
 end
+````
 
+A function to return a copy of a model. Should be implemented if
+`depends_on_radius` returns `true`.
+Note, that the returned object does not have to be an “independent” copy, we allow
+for shared objects (like mutable database arrays or something of that sort)...
+
+````julia
+copy_model(mod_src)=deepcopy(mod_src)
+````
+
+A function to copy parameters between source and target models, like `Base.copy!` or
+`Base.copyto!`. Relevant mostly for trainable parameters.
+
+````julia
+copyto_model!(mod_trgt::AbstractSurrogateModel, mod_src::AbstractSurrogateModel)=mod_trgt
+
+function _copy_model(mod)
+    depends_on_radius(mod) && return copy_model(mod)
+    return mod
+end
+
+function _copyto_model!(mod_trgt, mod_src)
+    depends_on_radius(mod_trgt) && return copyto_model!(mod_trgt, mod_src)
+    return mod_trgt
+end
+````
+
+Because parameters are implicit, updates are in-place operations:
+
+````julia
+"""
+    update!(surrogate_model, nonlinear_operator, Δ, x, fx, lb, ub)
+
+Update the model on a trust region of size `Δ` in a box with lower left corner `lb`
+and upper right corner `ub` (in the scaled variable domain)
+`x` is a sub-vector of the current iterate conforming to the inputs of `nonlinear_operator`
+in the scaled domain. `fx` are the outputs of `nonlinear_operator` at `x`.
+"""
 function update!(
     surr::AbstractSurrogateModel, op, Δ, x, fx, lb, ub; kwargs...
 )

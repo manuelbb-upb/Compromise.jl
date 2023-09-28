@@ -1,5 +1,7 @@
 abstract type AbstractStoppingCriterion end
 
+struct NoUserCallback <: AbstractStoppingCriterion end
+
 check_pre_iteration(crit::AbstractStoppingCriterion)=false
 #src check_post_normal_step(crit::AbstractStoppingCriterion)=false
 check_post_descent_step(crit::AbstractStoppingCriterion)=false

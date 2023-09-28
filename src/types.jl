@@ -54,11 +54,11 @@ abstract type AbstractStepCache end
 	stop_delta_min = eps(Float64)
 
 	"Stop if the trial point ``xₜ`` is accepted and ``‖xₜ - x‖≤ δ‖x‖``."
-	stop_xtol_rel = 1e-5
+	stop_xtol_rel = -Inf
 	"Stop if the trial point ``xₜ`` is accepted and ``‖xₜ - x‖≤ ε``."
 	stop_xtol_abs = -Inf
 	"Stop if the trial point ``xₜ`` is accepted and ``‖f(xₜ) - f(x)‖≤ δ‖f(x)‖``."
-	stop_ftol_rel = 1e-5
+	stop_ftol_rel = -Inf
 	"Stop if the trial point ``xₜ`` is accepted and ``‖f(xₜ) - f(x)‖≤ ε``."
 	stop_ftol_abs = -Inf
 
