@@ -33,6 +33,7 @@ end
 # we also need a function to copy the parameters from a source model to a target model:
 copy_model(mod::AbstractMOPSurrogate)=deepcopy(mod)
 copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=mod_trgt
+# These internal helpers are derived:
 _copy_model(mod::AbstractMOPSurrogate)=depends_on_radius(mod) ? copy_model(mod) : mod
 _copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=depends_on_radius(mod_trgt) ? copyto_model!(mod_trgt, mod_src) : mod_trgt
 

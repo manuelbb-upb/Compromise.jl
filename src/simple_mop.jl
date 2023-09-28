@@ -447,10 +447,12 @@ function update_models!(
 )
     @unpack x, fx, gx, hx = vals
     @unpack lb, ub = scaled_cons
+    log_level = algo_opts.log_level
     Δ_max = algo_opts.delta_max
-    update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; Δ_max)
-    update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; Δ_max)
-    update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; Δ_max)
+
+    update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; Δ_max, log_level)
+    update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; Δ_max, log_level)
+    update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; Δ_max, log_level)
     return nothing
 end
 

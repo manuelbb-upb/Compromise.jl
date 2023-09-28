@@ -7,6 +7,8 @@ using ElasticArrays
 import LinearAlgebra as LA
 using Parameters: @with_kw, @unpack
 
+import Logging: @logmsg, Info
+
 abstract type AbstractRBFKernel end
 
 # Concerning the shape parameter ``ε``, we follow the definitions in 
@@ -398,10 +400,12 @@ function find_poised_points!(
     ## mutated:
     Y, Z, database_x, database_flags_x, point_flags, point_indices, round1_flags, Pr, Pr_xi, lb, ub,
     ## not mutated
-    x, Δ, Δ_box, global_lb, global_ub, search_factor, th_qr, j0=0; norm_p = Inf
+    x, Δ, Δ_box, global_lb, global_ub, search_factor, th_qr, j0=0; 
+    norm_p = Inf, log_level = Info
 )
     dim_in = length(x)
     ## compute trust region box corners with enlarged radius
+    @logmsg log_level "\t\tRBF Construction: Trying to find samples for Δ=$Δ."
     trust_region_bounds!(lb, ub, x, search_factor*Δ_box, global_lb, global_ub)
 
     ## reset Z to identity matrix:
@@ -448,7 +452,7 @@ reset_flags!(flag_vec::Nothing)=nothing
 reset_flags!(flag_vec)=fill!(flag_vec, false)
 function update_rbf_model!(
     rbf, op, Δ, x, fx, global_lb=nothing, global_ub=nothing; 
-    Δ_max=Δ, norm_p=Inf
+    Δ_max=Δ, norm_p=Inf, log_level=Info
 )
     dim_in = length(x)
 
@@ -481,7 +485,7 @@ function update_rbf_model!(
     Y = @view(_Y[1:end-1, 2:dim_in+1])
     @unpack database_x, database_flags_x = database
     j = find_poised_points!(Y, Z, database_x, database_flags_x, point_flags, point_indices, round1_flags,
-        Pr, Pr_xi, lb, ub, x, Δ, Δ, global_lb, global_ub, search_factor, th_qr; norm_p)
+        Pr, Pr_xi, lb, ub, x, Δ, Δ, global_lb, global_ub, search_factor, th_qr; norm_p, log_level)
 
     ## if points are missing, look in maximum trust region
     @unpack max_search_factor, lb_max, ub_max = rbf
@@ -489,7 +493,7 @@ function update_rbf_model!(
     fully_linear = n_missing == 0
     if !fully_linear && rbf.allow_nonlinear
         j = find_poised_points!(Y, Z, database_x, database_flags_x, point_flags, point_indices, round1_flags,
-            Pr, Pr_xi, lb_max, ub_max, x, Δ, Δ_max, global_lb, global_ub, max_search_factor, th_qr, j; norm_p)
+            Pr, Pr_xi, lb_max, ub_max, x, Δ, Δ_max, global_lb, global_ub, max_search_factor, th_qr, j; norm_p, log_level)
         n_missing = dim_in - j
         can_be_linear = false
     else
@@ -525,7 +529,8 @@ function update_rbf_model!(
     ## add constant polynomial basis function to last row 
     rbf.Y[end, :] .= 1
     
-    find_more_points!(rbf, x)
+    @logmsg log_level "\t\tRBF Construction: Using samples $(point_indices). Looking for more."
+    find_more_points!(rbf, x, log_level)
     compute_coefficients!(rbf)
 end
 
@@ -552,19 +557,20 @@ function compute_coefficients!(rbf)
     return nothing
 end
 
-function find_more_points!(rbf, x)
+function find_more_points!(rbf, x, log_level)
     φ = kernel_func(rbf)
     @unpack database = rbf
     @unpack database_x, point_flags, database_flags_x = database
     @unpack Y, Φ, Pr_xi, dists, lb_max, ub_max, max_points, th_cholesky, point_indices = rbf
     npoints = dim_p = length(point_indices)
     return find_more_points!(Y, Φ, Pr_xi, dists, point_flags, point_indices, database_flags_x, 
-        x, lb_max, ub_max, φ, database_x, npoints, dim_p, max_points, th_cholesky)
+        x, lb_max, ub_max, φ, database_x, npoints, dim_p, max_points, th_cholesky, log_level)
 end
 
 function find_more_points!(
     Y, _Φ, Pr_xi, dists, point_flags, point_indices, database_flags_x,
-    x, lb, ub, φ, database_x, npoints, dim_p, max_points, th_chol
+    x, lb, ub, φ, database_x, npoints, dim_p, max_points, th_chol,
+    log_level
 )
     T = eltype(Y)
     @assert npoints == dim_p "This version does not yet support `npoints < `dim_p`."
@@ -646,7 +652,7 @@ function find_more_points!(
                 #src @show _Lxi_*_Lxi_' .- _ZΦZxi_
 
                 if τ_xi >= th_chol
-                    @info "adding point $i"
+                    @logmsg log_level "\t\tRBF Construction: Adding point $i from database."
                     point_flags[i] = true
                     push!(point_indices, i)
                     Y[1:end-1, j] .= Pr_xi
@@ -833,9 +839,9 @@ end
 
 function CE.update!(
     rbf::RBFModel, op, Δ, x, fx, lb, ub; 
-    Δ_max, kwargs...
+    Δ_max=Δ, log_level, kwargs...
 )
-    update_rbf_model!(rbf, op, Δ, x, fx, lb, ub; Δ_max, norm_p=Inf)
+    update_rbf_model!(rbf, op, Δ, x, fx, lb, ub; Δ_max, log_level, norm_p=Inf)
 end
 
 #src function model_op_and_grads! end # TODO
