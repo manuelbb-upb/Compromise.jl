@@ -45,18 +45,20 @@ abstract type AbstractStepConfig end
 abstract type AbstractStepCache end
 
 # ## AlgorithmOptions
-@with_kw struct AlgorithmOptions{QPOPT}
-    max_iter :: Int = 100
+@with_kw struct AlgorithmOptions{SC}
+	log_level :: LogLevel = LogLevel(0)
+
+    max_iter :: Int = 500
 
     "Stop if the trust region radius is reduced to below `stop_delta_min`."
 	stop_delta_min = eps(Float64)
 
 	"Stop if the trial point ``xₜ`` is accepted and ``‖xₜ - x‖≤ δ‖x‖``."
-	stop_xtol_rel = 1e-5
+	stop_xtol_rel = -Inf
 	"Stop if the trial point ``xₜ`` is accepted and ``‖xₜ - x‖≤ ε``."
 	stop_xtol_abs = -Inf
 	"Stop if the trial point ``xₜ`` is accepted and ``‖f(xₜ) - f(x)‖≤ δ‖f(x)‖``."
-	stop_ftol_rel = 1e-5
+	stop_ftol_rel = -Inf
 	"Stop if the trial point ``xₜ`` is accepted and ``‖f(xₜ) - f(x)‖≤ ε``."
 	stop_ftol_abs = -Inf
 
@@ -102,7 +104,7 @@ abstract type AbstractStepCache end
 
     scaler_cfg :: Symbol = :box
 
-    qp_opt :: QPOPT = DEFAULT_QP_OPTIMIZER
+    step_config :: SC = SteepestDescentConfig()
 
     nl_opt :: Symbol = :LN_COBYLA
 
@@ -151,13 +153,31 @@ struct SurrogateValueArrays{FX, HX, GX, DFX, DHX, DGX}
     Dhx :: DHX
     Dgx :: DGX
 end
+function Base.copyto!(step_vals_trgt::SurrogateValueArrays, step_vals_src::SurrogateValueArrays)
+	for fn in fieldnames(SurrogateValueArrays)
+		trgt_fn = getfield(step_vals_trgt, fn)
+		isnothing(trgt_fn) && continue
+		copyto!(trgt_fn, getfield(step_vals_src, fn))
+	end
+	return nothing
+end
 
 struct StepValueArrays{T}
     n :: Vector{T}
     xn :: Vector{T}
     d :: Vector{T}
+	s :: Vector{T}
     xs :: Vector{T}
     fxs :: Vector{T}
+end
+
+function Base.copyto!(step_vals_trgt::StepValueArrays, step_vals_src::StepValueArrays)
+	for fn in fieldnames(StepValueArrays)
+		trgt_fn = getfield(step_vals_trgt, fn)
+		isnothing(trgt_fn) && continue
+		copyto!(trgt_fn, getfield(step_vals_src, fn))
+	end
+	return nothing
 end
 
 function StepValueArrays(x, fx)
@@ -169,6 +189,7 @@ function StepValueArrays(x, fx)
         zeros(T, nin),
         zeros(T, nin),
         zeros(T, nin),
+        zeros(T, nin),
         zeros(T, nout)
     )
 end
@@ -176,8 +197,8 @@ end
 struct LinearConstraints{LB, UB, ABEQ, ABINEQ}
     lb :: LB
     ub :: UB
-    Ab :: ABEQ
-    Ec :: ABINEQ
+    A_b :: ABEQ
+    E_c :: ABINEQ
 end
 
 @enum IT_STAT begin
@@ -189,6 +210,53 @@ end
 	FILTER_ADD = 2
 	ACCEPTABLE = 3
 	SUCCESSFUL = 4
+	CRITICAL_LOOP = 5
+end
+
+Base.@kwdef mutable struct IterationMeta{F}
+	it_index :: Int
+	Δ_pre :: F
+	Δ_post :: F
+
+	crit_val :: F
+	num_crit_loops :: Int
+
+	it_stat_pre :: IT_STAT
+	it_stat_post :: IT_STAT
+
+	point_has_changed :: Bool
+
+	vals_diff_vec :: Vector{F}
+	mod_vals_diff_vec :: Vector{F}
+
+	args_diff_len :: F
+	vals_diff_len :: F
+	mod_vals_diff_len :: F
+end
+
+function init_iter_meta(T, n_objfs, algo_opts)
+	return IterationMeta(;
+		it_index = 0,
+		Δ_pre = T(NaN),
+		Δ_post = T(algo_opts.delta_init),
+		crit_val = T(Inf),
+		num_crit_loops = 0,
+		it_stat_pre = INITIALIZATION,
+		it_stat_post = INITIALIZATION,
+		point_has_changed = true,
+		vals_diff_vec = fill(T(NaN), n_objfs),
+		mod_vals_diff_vec = fill(T(NaN), n_objfs),
+		args_diff_len = T(NaN),
+		vals_diff_len = T(NaN),
+		mod_vals_diff_len = T(NaN)
+	)
+end
+
+mutable struct CriticalityRoutineCache{MV, SV, SC, M}
+	mod_vals :: MV
+	step_vals :: SV
+	step_cache :: SC
+	mod :: M
 end
 
 #=
@@ -204,6 +272,7 @@ The iteration status already encodes much information:
 | FILTER_ADD        | 2     | yes                  | no             |
 | ACCEPTABLE        | 3     | yes                  | yes            |
 | SUCCESSFUL        | 4     | yes                  | yes or no [^6] |
+| CRITICAL_LOOP		| 5		| yes or no			   | yes
 
 [^1]: We interpret the result of the restoration procedure as a trial point.
 [^2]: Radius change in restoration iterations is up for debate.

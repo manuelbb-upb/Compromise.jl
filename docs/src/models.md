@@ -19,7 +19,7 @@ Additionally, we require information on the model variability
 and if we can build models for the scaled domain:
 
 ````julia
-depends_on_trust_region(::AbstractMOPSurrogate)::Bool=true
+depends_on_radius(::AbstractMOPSurrogate)::Bool=true
 supports_scaling(T::Type{<:AbstractMOPSurrogate})=NoScaling()
 ````
 
@@ -35,10 +35,20 @@ It is trained with the update method.
 
 ````julia
 function update_models!(
-    mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts; point_has_changed
+    mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts
 )
     return nothing
 end
+````
+
+If a model is radius-dependent,
+we also need a function to copy the parameters from a source model to a target model:
+
+````julia
+copy_model(mod::AbstractMOPSurrogate)=deepcopy(mod)
+copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=mod_trgt
+_copy_model(mod::AbstractMOPSurrogate)=depends_on_radius(mod) ? copy_model(mod) : mod
+_copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=depends_on_radius(mod_trgt) ? copyto_model!(mod_trgt, mod_src) : mod_trgt
 ````
 
 ## Evaluation
@@ -125,7 +135,7 @@ diff_nl_eq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=grads_nl_e
 diff_nl_ineq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=grads_nl_ineq_constraints!(Dy, mod, x)
 ````
 
-## Optionally, we can have evaluation and differentiation in one go:
+Optionally, we can have evaluation and differentiation in one go:
 
 ````julia
 function eval_and_grads_objectives!(y::RVec, Dy::RMat, mod::M, x::RVec) where {M<:AbstractMOPSurrogate}

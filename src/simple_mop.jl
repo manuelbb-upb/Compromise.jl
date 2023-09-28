@@ -173,14 +173,14 @@ struct TypedMOP{
     lb :: LB
     ub :: UB
 
-    Ec :: EC
-    Ab :: AB
+    E_c :: EC
+    A_b :: AB
 end
 
 # This initialization really is just a forwarding of all fields:
 function initialize(mop::MutableMOP, ξ0::RVec)
-    Ec = lin_eq_constraints(mop)
-    Ab = lin_ineq_constraints(mop)
+    E_c = lin_eq_constraints(mop)
+    A_b = lin_ineq_constraints(mop)
     return TypedMOP(
         mop.objectives,
         mop.nl_eq_constraints,
@@ -194,8 +194,8 @@ function initialize(mop::MutableMOP, ξ0::RVec)
         mop.mcfg_nl_ineq_constraints,
         mop.lb,
         mop.ub,
-        Ec,
-        Ab
+        E_c,
+        A_b
    )
 end
 
@@ -311,8 +311,8 @@ function lin_ineq_constraints(mop::MutableMOP)
 end
 
 # The `TypedMOP` stores tuples (of a matrix and a vector instead):
-lin_eq_constraints(mop::TypedMOP) = mop.Ec
-lin_ineq_constraints(mop::TypedMOP) = mop.Ab
+lin_eq_constraints(mop::TypedMOP) = mop.E_c
+lin_ineq_constraints(mop::TypedMOP) = mop.A_b
 
 # Because we store `AbstractNonlinearOperator`s, evaluation can simply be redirected:
 function eval_objectives!(y::RVec, mop::SimpleMOP, x::RVec)
@@ -359,10 +359,10 @@ for dim_func in (:dim_objectives, :dim_nl_eq_constraints, :dim_nl_ineq_constrain
 end
 
 # The model container is dependent on the trust-region if any of the models is:
-function depends_on_trust_region(mod::SimpleMOPSurrogate)
-    return CE.depends_on_trust_region(mod.mod_objectives) ||
-        CE.depends_on_trust_region(mod.mod_nl_eq_constraints) ||
-        CE.depends_on_trust_region(mod.mod_nl_ineq_constraints)
+function depends_on_radius(mod::SimpleMOPSurrogate)
+    return CE.depends_on_radius(mod.mod_objectives) ||
+        CE.depends_on_radius(mod.mod_nl_eq_constraints) ||
+        CE.depends_on_radius(mod.mod_nl_ineq_constraints)
 end
 
 # At the moment, I have not yet thought about what we would need to change for dynamic scaling:
@@ -443,15 +443,37 @@ end
 
 # The sub-models are trained separately:
 function update_models!(
-    mod::SimpleMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts; 
-    point_has_changed
+    mod::SimpleMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts;
 )
     @unpack x, fx, gx, hx = vals
     @unpack lb, ub = scaled_cons
+    log_level = algo_opts.log_level
     Δ_max = algo_opts.delta_max
 
-    update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; point_has_changed, Δ_max)
-    update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; point_has_changed, Δ_max)
-    update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; point_has_changed, Δ_max)
+    update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; Δ_max, log_level)
+    update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; Δ_max, log_level)
+    update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; Δ_max, log_level)
     return nothing
+end
+
+function copy_model(mod::SimpleMOPSurrogate)
+    return SimpleMOPSurrogate(
+        mod.objectives,
+        mod.nl_eq_constraints,
+        mod.nl_ineq_constraints,
+        mod.num_vars,
+        mod.dim_objectives,
+        mod.dim_nl_eq_constraints,
+        mod.dim_nl_ineq_constraints,
+        CE._copy_model(mod.mod_objectives),
+        CE._copy_model(mod.mod_nl_eq_constraints),
+        CE._copy_model(mod.mod_nl_ineq_constraints),
+    )
+end
+
+function copyto_model!(mod_trgt::SimpleMOPSurrogate, mod_src::SimpleMOPSurrogate)
+    CE._copyto_model!(mod_trgt.mod_objectives, mod_src.mod_objectives)
+    CE._copyto_model!(mod_trgt.mod_nl_eq_constraints, mod_src.mod_nl_eq_constraints)
+    CE._copyto_model!(mod_trgt.mod_nl_ineq_constraints, mod_src.mod_nl_ineq_constraints)
+    return mod_trgt
 end

@@ -10,7 +10,7 @@ end
 
 struct ExactModelConfig <: AbstractSurrogateModelConfig end
 
-CE.depends_on_trust_region(::ExactModel)=false
+CE.depends_on_radius(::ExactModel)=false
 CE.requires_grads(::Type{<:ExactModel})=true
 CE.requires_hessians(::Type{<:ExactModel})=false
 
@@ -29,6 +29,10 @@ function CE.model_op_and_grads!(y, Dy, surr::ExactModel, x)
 end
 CE.supports_partial_evaluation(::ExactModel)=false
 
+#=
+CE.copy_model(mod::ExactModel)=mod
+CE.copyto_model!(mod_trgt::ExactModel, mod_src::ExactModel)=mod_trgt
+=#
 export ExactModel, ExactModelConfig
 
 end#module

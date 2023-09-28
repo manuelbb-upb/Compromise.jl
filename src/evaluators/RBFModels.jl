@@ -7,6 +7,8 @@ using ElasticArrays
 import LinearAlgebra as LA
 using Parameters: @with_kw, @unpack
 
+import Logging: @logmsg, Info
+
 abstract type AbstractRBFKernel end
 
 # Concerning the shape parameter ``ε``, we follow the definitions in 
@@ -76,6 +78,9 @@ struct RBFDatabase{T}
     dim_x :: Int
     dim_y :: Int
 
+    ## `max_database_size` is a soft limit. in the criticality routine we don't want to delete
+    ## any points belonging to a prior model, so lock the corresponding entries and safe them
+    ## from deletion. We still allow up to `num_vars` additional entries...
     max_database_size :: Int
     chunk_size :: Int
     database_x :: ElasticArray{T, 2}
@@ -86,6 +91,8 @@ struct RBFDatabase{T}
     round1_flags :: Union{Nothing, Vector{Bool}}
 
     x_index :: Base.RefValue{Int}
+
+    locked_flags :: Vector{Bool}
 end
 
 ## helpers for `round1_flags`, which might be `nothing`
@@ -142,6 +149,54 @@ struct RBFModel{K, T} <: AbstractSurrogateModel
     coeff :: Matrix{T}
 end
 
+function CE.copy_model(mod::RBFModel)
+    return RBFModel(
+        mod.kernel, 
+        mod.shape_param,
+        mod.database,   # should be passed by reference, so that modifications to either model affect the other
+        copy(mod.point_indices),
+        mod.allow_nonlinear,
+        mod.max_points,
+        mod.search_factor,
+        mod.max_search_factor,
+        mod.th_qr,
+        mod.th_cholesky,
+        copy(mod.x0),
+        copy(mod.s),
+        copy(mod.Φ),
+        copy(mod.lb),
+        copy(mod.ub),
+        copy(mod.lb_max),
+        copy(mod.ub_max),
+        copy(mod.Y),
+        copy(mod.dists),
+        copy(mod.Z),
+        copy(mod.Pr),
+        copy(mod.Pr_xi),
+        copy(mod.LHS),
+        copy(mod.RHS),
+        copy(mod.coeff)
+    )
+end
+
+function CE.copyto_model!(mod_trgt::RBFModel, mod_src::RBFModel)
+    for fn in (
+        :allow_nonlinear, :max_points, :search_factor, 
+        :max_search_factor, :th_qr, :th_cholesky)
+        @assert getfield(mod_trgt, fn) == getfield(mod_src, fn)
+    end
+    for fn in (
+        #:point_indices, 
+        :x0, :s, :Φ, :lb, :ub, :lb_max, :ub_max, :Y, :dists, :Z, :Pr, :Pr_xi, :LHS, 
+        :RHS, :coeff
+    )
+        copyto!(getfield(mod_trgt, fn), getfield(mod_src, fn))
+    end 
+    empty!(mod_trgt.point_indices)
+    append!(mod_trgt.point_indices, mod_src.point_indices)
+    return nothing
+end
+
 function RBFDatabase(cfg::RBFConfig, dim_in, dim_out, T)
     min_points = dim_in + 1
 
@@ -175,13 +230,14 @@ function RBFDatabase(cfg::RBFConfig, dim_in, dim_out, T)
     database_flags_x = zeros(Bool, chunk_size)
     database_flags_y = zeros(Bool, chunk_size)
     point_flags = zeros(Bool, chunk_size)
+    locked_flags = copy(point_flags)
     round1_flags = cfg.allow_nonlinear ? zeros(Bool, chunk_size) : nothing
 
     x_index = Ref(0)
 
     return RBFDatabase(
         dim_in, dim_out, dat_size, chunk_size, database_x, database_y, database_flags_x, 
-        database_flags_y, point_flags, round1_flags, x_index)
+        database_flags_y, point_flags, round1_flags, x_index, locked_flags)
 end
 
 function trust_region_bounds!(lb, ub, x, Δ)
@@ -258,7 +314,7 @@ function intersect_box(x::X, z::Z, lb::L, ub::U) where {X, Z, L, U}
 end
 
 function grow_database!(rbf_database, force_chunk=0)
-    @unpack database_x, database_y, database_flags_x, database_flags_y, point_flags, round1_flags = rbf_database
+    @unpack database_x, locked_flags, database_y, database_flags_x, database_flags_y, point_flags, round1_flags = rbf_database
     @unpack chunk_size, max_database_size = rbf_database
    
     dim_in, current_size = size(database_x)
@@ -273,6 +329,7 @@ function grow_database!(rbf_database, force_chunk=0)
         append_zeros!(database_flags_x, new_chunk)
         append_zeros!(database_flags_y, new_chunk)
         append_zeros!(point_flags, new_chunk)
+        append_zeros!(locked_flags, new_chunk)
         append_zeros!(round1_flags, new_chunk)
         return current_size + 1
     end
@@ -280,10 +337,12 @@ function grow_database!(rbf_database, force_chunk=0)
 end
 
 function add_to_database!(rbf_database::RBFDatabase, x)
-    @unpack database_x, database_flags_x, point_flags = rbf_database
+    @unpack locked_flags, database_x, database_flags_x, point_flags = rbf_database
+    
     x_index = 0
     for (i, isused) = enumerate(database_flags_x)
         isused && continue
+        locked_flags[i] && continue
         x_index = i
         break 
     end
@@ -296,6 +355,7 @@ function add_to_database!(rbf_database::RBFDatabase, x)
             ## growing the database dit not work. overwrite existing result
             for (i, ismodpoint) = enumerate(point_flags)
                 ismodpoint && continue  # avoid throing out interpolation points
+                locked_flags[i] && continue # and points that are locked
                 x_index = i
                 break
             end
@@ -340,10 +400,12 @@ function find_poised_points!(
     ## mutated:
     Y, Z, database_x, database_flags_x, point_flags, point_indices, round1_flags, Pr, Pr_xi, lb, ub,
     ## not mutated
-    x, Δ, Δ_box, global_lb, global_ub, search_factor, th_qr, j0=0; norm_p = Inf
+    x, Δ, Δ_box, global_lb, global_ub, search_factor, th_qr, j0=0; 
+    norm_p = Inf, log_level = Info
 )
     dim_in = length(x)
     ## compute trust region box corners with enlarged radius
+    @logmsg log_level "\t\tRBF Construction: Trying to find samples for Δ=$Δ."
     trust_region_bounds!(lb, ub, x, search_factor*Δ_box, global_lb, global_ub)
 
     ## reset Z to identity matrix:
@@ -390,7 +452,7 @@ reset_flags!(flag_vec::Nothing)=nothing
 reset_flags!(flag_vec)=fill!(flag_vec, false)
 function update_rbf_model!(
     rbf, op, Δ, x, fx, global_lb=nothing, global_ub=nothing; 
-    Δ_max=Δ, x_is_new=true, norm_p=Inf
+    Δ_max=Δ, norm_p=Inf, log_level=Info
 )
     dim_in = length(x)
 
@@ -399,16 +461,19 @@ function update_rbf_model!(
 
     ## reset indicators of interpolation points
     @unpack database, point_indices = rbf
-    @unpack point_flags, round1_flags = database
+    @unpack locked_flags, point_flags, round1_flags = database
+    ## before, make sure that points of a prior model are not deleted from the database (in criticality routine)
+    copy!(locked_flags, point_flags)
+    ## now reset:
     reset_flags!(point_flags)
     reset_flags!(round1_flags)
     empty!(point_indices)
 
     ## make sure to include `x` as an interpolation point and put it into the database
-    copyto!(rbf.x0, x)
-    if x_is_new
+    if rbf.x0 != x
         rbf.database.x_index[] = add_to_database!(database, x, fx)
     end
+    copyto!(rbf.x0, x)
     x_index = rbf.database.x_index[]
     point_flags[x_index] = true
     push!(point_indices, x_index)
@@ -420,7 +485,7 @@ function update_rbf_model!(
     Y = @view(_Y[1:end-1, 2:dim_in+1])
     @unpack database_x, database_flags_x = database
     j = find_poised_points!(Y, Z, database_x, database_flags_x, point_flags, point_indices, round1_flags,
-        Pr, Pr_xi, lb, ub, x, Δ, Δ, global_lb, global_ub, search_factor, th_qr; norm_p)
+        Pr, Pr_xi, lb, ub, x, Δ, Δ, global_lb, global_ub, search_factor, th_qr; norm_p, log_level)
 
     ## if points are missing, look in maximum trust region
     @unpack max_search_factor, lb_max, ub_max = rbf
@@ -428,7 +493,7 @@ function update_rbf_model!(
     fully_linear = n_missing == 0
     if !fully_linear && rbf.allow_nonlinear
         j = find_poised_points!(Y, Z, database_x, database_flags_x, point_flags, point_indices, round1_flags,
-            Pr, Pr_xi, lb_max, ub_max, x, Δ, Δ_max, global_lb, global_ub, max_search_factor, th_qr, j; norm_p)
+            Pr, Pr_xi, lb_max, ub_max, x, Δ, Δ_max, global_lb, global_ub, max_search_factor, th_qr, j; norm_p, log_level)
         n_missing = dim_in - j
         can_be_linear = false
     else
@@ -464,7 +529,8 @@ function update_rbf_model!(
     ## add constant polynomial basis function to last row 
     rbf.Y[end, :] .= 1
     
-    find_more_points!(rbf, x)
+    @logmsg log_level "\t\tRBF Construction: Using samples $(point_indices). Looking for more."
+    find_more_points!(rbf, x, log_level)
     compute_coefficients!(rbf)
 end
 
@@ -491,19 +557,20 @@ function compute_coefficients!(rbf)
     return nothing
 end
 
-function find_more_points!(rbf, x)
+function find_more_points!(rbf, x, log_level)
     φ = kernel_func(rbf)
     @unpack database = rbf
     @unpack database_x, point_flags, database_flags_x = database
     @unpack Y, Φ, Pr_xi, dists, lb_max, ub_max, max_points, th_cholesky, point_indices = rbf
     npoints = dim_p = length(point_indices)
     return find_more_points!(Y, Φ, Pr_xi, dists, point_flags, point_indices, database_flags_x, 
-        x, lb_max, ub_max, φ, database_x, npoints, dim_p, max_points, th_cholesky)
+        x, lb_max, ub_max, φ, database_x, npoints, dim_p, max_points, th_cholesky, log_level)
 end
 
 function find_more_points!(
     Y, _Φ, Pr_xi, dists, point_flags, point_indices, database_flags_x,
-    x, lb, ub, φ, database_x, npoints, dim_p, max_points, th_chol
+    x, lb, ub, φ, database_x, npoints, dim_p, max_points, th_chol,
+    log_level
 )
     T = eltype(Y)
     @assert npoints == dim_p "This version does not yet support `npoints < `dim_p`."
@@ -585,7 +652,7 @@ function find_more_points!(
                 #src @show _Lxi_*_Lxi_' .- _ZΦZxi_
 
                 if τ_xi >= th_chol
-                    @info "adding point $i"
+                    @logmsg log_level "\t\tRBF Construction: Adding point $i from database."
                     point_flags[i] = true
                     push!(point_indices, i)
                     Y[1:end-1, j] .= Pr_xi
@@ -669,7 +736,7 @@ end
 end
 
 # ## Interface Implementation
-CE.depends_on_trust_region(::RBFModel)=true
+CE.depends_on_radius(::RBFModel)=true
 CE.requires_grads(::RBFConfig)=false
 CE.requires_hessians(::RBFConfig)=false
 
@@ -688,7 +755,7 @@ function CE.init_surrogate(cfg::RBFConfig, op, dim_in, dim_out, params, T)
         max(min_points, cfg.max_points)
     end
 
-    x0 = zeros(T, dim_in)
+    x0 = fill(T(NaN), dim_in)
     s = zeros(T, min_points)
 
     ## RBF Basis Matrix
@@ -772,9 +839,9 @@ end
 
 function CE.update!(
     rbf::RBFModel, op, Δ, x, fx, lb, ub; 
-    point_has_changed, Δ_max, kwargs...
+    Δ_max=Δ, log_level, kwargs...
 )
-    update_rbf_model!(rbf, op, Δ, x, fx, lb, ub; Δ_max, x_is_new=point_has_changed, norm_p=Inf)
+    update_rbf_model!(rbf, op, Δ, x, fx, lb, ub; Δ_max, log_level, norm_p=Inf)
 end
 
 #src function model_op_and_grads! end # TODO

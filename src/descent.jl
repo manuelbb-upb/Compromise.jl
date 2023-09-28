@@ -1,5 +1,45 @@
 const MOI = JuMP.MOI
 
+function compute_normal_step!(
+    ## modify these: 
+    step_cache::SC, n, xn,
+    ## assume `Δ` to be the current trust-region radius, θ to be constraint violation
+    Δ, θ,
+    ## use these arrays to set up linear or quadratic sub-problems:
+    ξ, x,                   ## scaled and unscaled iteration site
+    fx, hx, gx,             ## true objective, nonlinear equality and inequality constraint vectors (or nothing)
+    mod_fx, mod_hx, mod_gx, ## surrogate objective and constraint values
+    mod_Dfx, mod_Dhx, mod_Dgx, ## surrogate objective and constraint Jacobians
+    Eres, Ex, Ares, Ax,     ## scaled linear constraint residuals and lhs products
+    lb, ub, E_c, A_b,          ## scaled linear constraints
+    ## use `mod` to evaluate the surrogates in the scaled domain,
+    mod,
+    ) where SC<:AbstractStepCache
+    error("`compute_normal_step!` not defined for step cache of type $(SC).")
+end
+
+function compute_descent_step!(
+    ## modify these:
+    step_cache::SC, 
+    d, s, xs, mod_fxs,   ## descent direction, step vector, trial point, trial point surrogate values
+    ## assume `Δ` to be the current trust-region radius, θ to be constraint violation
+    Δ, θ,
+    ## use these arrays to set up linear or quadratic sub-problems:
+    ξ, x,                   ## scaled and unscaled iteration site
+    n, xn,                  ## normal step and temporary trial point
+    fx, hx, gx,             ## true objective, nonlinear equality and inequality constraint vectors (or nothing)
+    mod_fx, mod_hx, mod_gx, ## surrogate objective and constraint values
+    mod_Dfx, mod_Dhx, mod_Dgx, ## surrogate objective and constraint Jacobians
+    Eres, Ex, Ares, Ax,     ## scaled linear constraint residuals and lhs products
+    lb, ub, E_c, A_b,          ## scaled linear constraints
+    ## use `mod` to evaluate the surrogates in the scaled domain,
+    mod,
+    ## use `mop` and `scaler` to evaluate the problem in the unscaled domain
+    mop, scaler
+) where SC<:AbstractStepCache
+    error("`compute_descent_step!` not defined for step cache of type $(SC).")
+end
+#=
 """
     compute_normal_step(
         it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
@@ -14,20 +54,21 @@ const MOI = JuMP.MOI
   These should not be modified!
 """
 function compute_normal_step(
-    # iteration information
-    it_index, Δ, it_stat,
+    Δ, # radius to compute the normal step for, might be different from what is in `iter_meta`
     # objects to evaluate objectives, models and constraints
     mop, mod, scaler, lin_cons, scaled_cons,
     # caches for necessary arrays
     vals, vals_tmp, step_vals, mod_vals, 
     # other important building blocks
     filter,     # the filter used to drive feasibility
+    iter_meta,  # iteration information
     step_cache::SC, # an object defining step calculation and holding caches
     algo_opts;  # general algorithmic settings
 ) where SC <: AbstractStepCache
     return error("`compute_normal_step` not defined for step cache of type $(SC).")
 end
-
+=#
+#=
 """
     compute_descent_step(
         it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
@@ -45,22 +86,22 @@ end
   These should not be modified!
 """
 function compute_descent_step(
-    # iteration information
-    it_index, Δ, it_stat,
+    Δ, # radius to compute the normal step for, might be different from what is in `iter_meta`
     # objects to evaluate objectives, models and constraints
     mop, mod, scaler, lin_cons, scaled_cons,
     # caches for necessary arrays
     vals, vals_tmp, step_vals, mod_vals, 
     # other important building blocks
     filter,     # the filter used to drive feasibility
+    iter_meta,  # iteration information
     step_cache::SC, # an object defining step calculation and holding caches
     algo_opts;  # general algorithmic settings
 ) where SC <: AbstractStepCache
     return error("`compute_descent_step` not defined for step cache of type $(SC).")
 end
-
+=#
 @with_kw struct SteepestDescentConfig{
-    BT<:Real, RT<:Real, DN<:Real, NN<:Real
+    BT<:Real, RT<:Real, DN<:Real, NN<:Real, QPOPT
 } <: AbstractStepConfig
     
     backtracking_factor :: BT = 1//2
@@ -71,13 +112,16 @@ end
     descent_step_norm :: DN = Inf
     normal_step_norm :: NN = 2
 
+    qp_opt :: QPOPT = DEFAULT_QP_OPTIMIZER
+
     @assert 0 < backtracking_factor < 1 "`backtracking_factor` must be in (0,1)."
     @assert 0 < rhs_factor < 1 "`rhs_factor` must be in (0,1)."
     @assert descent_step_norm == Inf    # TODO enable other norms
     @assert normal_step_norm == 2 || normal_step_norm == Inf      # TODO enable other norms
 end
 
-Base.@kwdef struct SteepestDescentCache{T, DN, NN, EN, AN, HN, GN} <: AbstractStepCache
+Base.@kwdef struct SteepestDescentCache{
+    T, DN, NN, EN, AN, HN, GN, QPOPT} <: AbstractStepCache
     ## static information
     backtracking_factor :: T
     rhs_factor :: T
@@ -94,6 +138,23 @@ Base.@kwdef struct SteepestDescentCache{T, DN, NN, EN, AN, HN, GN} <: AbstractSt
     An :: AN        # A*n
     Hn :: HN        # ∇h(x)*n
     Gn :: GN        # ∇g(x)*n
+
+    qp_opt :: QPOPT
+end
+
+Base.copyto!(sc_trgt::AbstractStepCache, sc_src::AbstractStepCache)=error("Cannot copy descent caches.")
+function Base.copyto!(sc_trgt::SteepestDescentCache, sc_src::SteepestDescentCache)
+    for fn in (:backtracking_factor, :rhs_factor, :normalize_gradients, :strict_backtracking,
+        :descent_step_norm, :normal_step_norm, :qp_opt)
+        @assert getfield(sc_trgt, fn) == getfield(sc_src, fn)
+    end
+    for fn in (:fxn, :En, :An, :Hn, :Gn)
+        trgt_fn = getfield(sc_trgt, fn)
+        if !isnothing(trgt_fn)
+            copyto!(trgt_fn, getfield(sc_src, fn))
+        end
+    end
+    return nothing
 end
 
 undef_or_nothing(::Nothing, T=nothing)=nothing
@@ -125,7 +186,7 @@ function init_step_cache(
     return SteepestDescentCache(;
         backtracking_factor, rhs_factor, normalize_gradients, 
         strict_backtracking, descent_step_norm, normal_step_norm, 
-        fxn, En, An, Hn, Gn
+        fxn, En, An, Hn, Gn, cfg.qp_opt
     )
 end
 
@@ -148,28 +209,40 @@ function set_upper_bounds!(opt, x, ub)
     end
 end
 
-"Add the constraint `c + A * x .?= b` to opt and return a JuMP expression for `A*x`."
-function set_linear_constraints!(opt, c, x, A, b, ctype::Symbol)
-    Ax_expr = JuMP.@expression(opt, vec(x'A))
+"""
+    set_linear_constraints!(opt, affine_vec, var_vec, mat, rhs, ctype)
+
+Add linear (in-)equality constraints to JuMP model `opt`.
+* If `ctype` is `:eq`, then the constraints read
+  `affine_vec + mat * var_vec .== rhs`.
+* Otherwise, they read
+  `affine_vec + mat * var_vec .<= rhs`.
+
+This helper function returns a JuMP expression for the 
+matrix-vector-product `mat*var_vec`.
+"""
+function set_linear_constraints!(opt, affine_vec, var_vec, mat, rhs, ctype::Symbol)
+    lin_expr = JuMP.@expression(opt, vec(var_vec'mat))
     if ctype == :eq 
-        JuMP.@constraint(opt, c .+ Ax_expr .== b)
+        JuMP.@constraint(opt, affine_vec .+ lin_expr .== rhs)
     else
-        JuMP.@constraint(opt, c .+ Ax_expr .<= b)
+        JuMP.@constraint(opt, affine_vec .+ lin_expr .<= rhs)
     end
-    return Ax_expr
+    return lin_expr
 end
 
-# Helper for `LinearConstraints` if there are no linear constraints stored:
-function set_linear_constraints!(opt, c, x, Ab::Nothing, ctype::Symbol)
+# Helper for `LinearConstraints` if there aren't actually any linear constraints:
+function set_linear_constraints!(opt, affine_vec, var_vec, cons::Nothing, ctype::Symbol)
     return nothing
 end
 # Helper for `LinearConstraints` if there *are* linear constraints:
-function set_linear_constraints!(opt, c, x, (A, b)::Tuple, ctype::Symbol)
-    return set_linear_constraints!(opt, c, x, A, b, ctype)
+function set_linear_constraints!(opt, affine_vec, var_vec, (mat, rhs)::Tuple, ctype::Symbol)
+    return set_linear_constraints!(opt, affine_vec, var_vec, mat, rhs, ctype)
 end
 # Helper for surrogate models if there are no constraints stored
-# (`b` might be set to something that is not `nothing` by hand):
-function set_linear_constraints!(opt, c, x, A::Nothing, b, ctype::Symbol)
+# (if `mat` is nothing, then `affine_vec` is likely `nothing` as well)
+# (`rhs` might be set to something that is not `nothing` by hand):
+function set_linear_constraints!(opt, affine_vec, var_vec, mat::Nothing, rhs, ctype::Symbol)
     return nothing
 end
 
@@ -179,17 +252,33 @@ function read_linear_constraint_expression!(trgt_arr, src_ex)
     return nothing
 end
 
-function solve_normal_step_problem(
-    x, qp_opt, lb, ub, 
-    Ex, Ax, Ab, 
-    Ec, En, An, 
-    hx, Dhx, Hn, 
-    gx, Dgx, Gn;
+raw"""
+Using `qp_opt`, solve
+```math
+    \min_{n ∈ ℝⁿ} ‖n‖ₚ
+```
+subject to the following constraints:
+* if `lb` is not `nothing`, then ``lb ≤ x + n``,
+* if `ub` is not `nothing`, then ``x + n ≤ ub``,
+* if `E_c` is not `nothing`, but a matrix-vector-tuple, 
+  and `Ex` is not nothing, but a vector, ``Ex + E*n = c``,
+* if `A_b` is not `nothing`, but a matrix-vector-tuple, 
+  and `Ax` is not nothing, but a vector, ``Ax + A*n ≤ b``,
+* if `Dhx` is not `nothing`, but a matrix, ``h(x) + ∇h(x)*n = 0``,
+* if `Dgx` is not `nothing`, but a matrix, ``g(x) + ∇g(x)*n ≤ 0``.
+```
+"""
+function solve_normal_step_problem!(
+    En, An, Hn, Gn,
+    qp_opt, 
+    x, lb, ub, 
+    Ex, E_c, Ax, A_b,
+    hx, Dhx, gx, Dgx;
     step_norm = 2
 )
     n_vars = length(x)
         
-    opt = JuMP.Model( qp_opt )
+    opt = JuMP.Model(qp_opt)
     JuMP.set_silent(opt)
     #src JuMP.set_optimizer_attribute(itrn, "polish", true)
 
@@ -209,10 +298,10 @@ function solve_normal_step_problem(
     set_lower_bounds!(opt, xn, lb)  
     set_upper_bounds!(opt, xn, ub)
 
-    ## A * (x + n) .== b ⇔ Ax + A*n .== b
-    En_ex = set_linear_constraints!(opt, Ex, n, Ab, :eq)
+    ## E * (x + n) .== c ⇔ Ex + A*n .== c
+    En_ex = set_linear_constraints!(opt, Ex, n, E_c, :eq)
     ## A * (x + n) .<= b
-    An_ex = set_linear_constraints!(opt, Ax, n, Ec, :ineq)
+    An_ex = set_linear_constraints!(opt, Ax, n, A_b, :ineq)
 
     ## hx + ∇h(x) * n .== 0
     Hn_ex = set_linear_constraints!(opt, hx, n, Dhx, 0, :eq)
@@ -235,41 +324,64 @@ function solve_normal_step_problem(
     return JuMP.value.(n)
 end
 
-# Set `step_vals.n` and `step_vals.xn`.
 # In `step_cache`, 
 # * modify `En` and `An` to hold the vectors `E*n` and `A*n`, for the scaled linear 
 #   constraint matrices,
 # * modify `Hn` and `Gn` to hold the vectors `∇h(x)*n` and `∇g(x)*n` for the 
 #   hessians of the modelled constraint functions
+function compute_normal_step!(
+    step_cache::SteepestDescentCache, n, xn, Δ, θ, ξ, x, fx, hx, gx, 
+    mod_fx, mod_hx, mod_gx, mod_Dfx, mod_Dhx, mod_Dgx, 
+    Eres, Ex, Ares, Ax, lb, ub, E_c, A_b, mod
+)
+    ## initialize assuming a zero step
+    n .= 0
+    copyto!(xn, n)
+    if θ > 0
+        n .= solve_normal_step_problem!(
+            step_cache.En, step_cache.An, step_cache.Hn, step_cache.Gn, step_cache.qp_opt,
+            x, lb, ub, Ex, E_c, Ax, A_b, mod_hx, mod_Dhx, mod_gx, mod_Dgx;
+            step_norm=step_cache.normal_step_norm
+        )
+    end
+end
+#=
 function compute_normal_step(
-    it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, step_cache::SteepestDescentCache, algo_opts
+    Δ, mop, mod, scaler, lin_cons, scaled_cons,
+    vals, vals_tmp, step_vals, mod_vals, filter, iter_meta,
+    step_cache::SteepestDescentCache, algo_opts
 )
     @unpack x = vals
     @unpack xn, n = step_vals
     copyto!(xn, x)
     if vals.θ[] > 0
+        @logmsg algo_opts.log_level "ITERATION $(iter_meta.it_index): θ=$(vals.θ[]), computing normal step."
+
         @unpack Ax, Ex = vals
-        @unpack lb, ub, Ab, Ec = scaled_cons
+        @unpack lb, ub, A_b, E_c = scaled_cons
         @unpack hx, gx, Dhx, Dgx = mod_vals
         @unpack En, An, Hn, Gn = step_cache
         n .= solve_normal_step_problem(
             x, algo_opts.qp_opt, lb, ub, 
-            Ex, Ab, En,
-            Ax, Ec, An, 
+            Ex, A_b, En,
+            Ax, E_c, An, 
             hx, Dhx, Hn, gx, Dgx, Gn
         )
         @views xn .+= n
+
+        @logmsg algo_opts.log_level "\tComputed normal step of length $(LA.norm(n))."
     else
         fill!(n, 0)
     end 
+    copyto!(step_vals.s, n)
 
     return nothing
 end
+=#
 
 function solve_steepest_descent_problem(
     Δ, xn, Dfx, qp_opt, lb, ub,
-    Exn, Ab, Axn, Ec, Hxn, Dhx, Gxn, Dgx;
+    Exn, E_c, Axn, A_b, Hxn, Dhx, Gxn, Dgx;
     descent_step_norm, normalize_gradients
 )
     n_vars = length(xn)
@@ -300,8 +412,8 @@ function solve_steepest_descent_problem(
 
     ## A(x + n + d) ≤ b ⇔ A(x+n) + A*d <= b
     ## ⇒ c = A(x+n)
-    set_linear_constraints!(opt, Exn, d, Ec, :eq)
-    set_linear_constraints!(opt, Axn, d, Ab, :ineq)
+    set_linear_constraints!(opt, Exn, d, E_c, :eq)
+    set_linear_constraints!(opt, Axn, d, A_b, :ineq)
 
     ## hx + H(n + d) = 0 ⇔ (hx + Hn) + Hd = 0
     set_linear_constraints!(opt, Hxn, d, Dhx, 0, :eq)
@@ -321,36 +433,30 @@ function vec_sum!(a, b)
     return nothing
 end
 
-## set `step_vals.d`, `step_vals.xs` and `step_vals.fxs`
-## modify `step_cache` as needed.
-function compute_descent_step(
-    it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, step_cache::SteepestDescentCache, algo_opts
-) 
-    @unpack xn, d = step_vals
-    @unpack lb, ub, Ab, Ec = scaled_cons
-    @unpack Ex, Ax = vals
-    @unpack fx, hx, gx, Dfx, Dhx, Dgx = mod_vals
+function compute_descent_step!(
+    step_cache::SteepestDescentCache, d, s, xs, mod_fxs,
+    Δ, θ, ξ, x, n, xn, fx, hx, gx, mod_fx, mod_hx, mod_gx, mod_Dfx, mod_Dhx, mod_Dgx,
+    Eres, Ex, Ares, Ax, lb, ub, E_c, A_b, mod, mop, scaler
+)
     @unpack En, An, Hn, Gn, normalize_gradients, descent_step_norm = step_cache;
 
     ## for constraints like `A*x + A*n * A*d`, make `An` hold `A*x+A*n`.
     vec_sum!(En, Ex)
     vec_sum!(An, Ax)
     ## for constraints like `h(x) + ∇h(x)*(n + d)`, make `Hn` hold `h(x)+∇h(x)*n`.
-    vec_sum!(Hn, hx)
-    vec_sum!(Gn, gx)
+    vec_sum!(Hn, mod_hx)
+    vec_sum!(Gn, mod_gx)
     χ, _d = solve_steepest_descent_problem(
-        Δ, xn, Dfx, algo_opts.qp_opt, lb, ub, 
-        En, Ab, An, Ec, Hn, Dhx, Gn, Dgx;
+        Δ, xn, mod_Dfx, step_cache.qp_opt, lb, ub, 
+        En, E_c, An, A_b, Hn, mod_Dhx, Gn, mod_Dgx;
         descent_step_norm, normalize_gradients
     )
     
-    ## set `step_vals.d`, scale it in place, and set `xs` and `fxs` in backtracking
+    ## set `d`, scale it in place, and set `xs` and `mod_fxs` in backtracking
     copyto!(d, _d)
-    @unpack xs, fxs = step_vals
     @unpack fxn, backtracking_factor, rhs_factor, strict_backtracking = step_cache;
-    backtrack!(d, mod, xn, xs, fxn, fxs, χ, backtracking_factor, rhs_factor, Val(strict_backtracking))
-
+    backtrack!(d, mod, xn, xs, fxn, mod_fxs, χ, backtracking_factor, rhs_factor, Val(strict_backtracking))
+    @. s = n + d
     return χ
 end
 

@@ -8,6 +8,8 @@ import Parameters: @with_kw, @unpack
 # Everything in this module needs at least some linear algebra:
 import LinearAlgebra as LA
 
+import Logging: @logmsg, LogLevel
+
 # Re-export symbols from important sub-modules
 import Reexport: @reexport
 
@@ -39,6 +41,12 @@ include("filter.jl")
 include("descent.jl")
 # The restoration utilities:
 include("restoration.jl")
+# Trial point testing:
+include("trial.jl")
+# Criticality Routine has its own file too:
+include("criticality_routine.jl")
+# Stopping criteria:
+include("stopping.jl")
 
 # ### Internal Dependencies or Extensions
 # Import operator types and interface definitions:
@@ -124,17 +132,17 @@ function init_lin_cons(mop)
         error("Variable bounds unvalid.")
     end
 
-    Ab = lin_eq_constraints(mop)
-    Ec = lin_ineq_constraints(mop)
+    A_b = lin_eq_constraints(mop)
+    E_c = lin_ineq_constraints(mop)
 
-    return LinearConstraints(lb, ub, Ab, Ec)
+    return LinearConstraints(lb, ub, A_b, E_c)
 end
 
 function scale_lin_cons!(scaled_cons, scaler, lin_cons)
     scale!(scaled_cons.lb, scaler, lin_cons.lb)
     scale!(scaled_cons.ub, scaler, lin_cons.ub)
-    scale_eq!(scaled_cons.Ab, scaler, lin_cons.Ab)
-    scale_eq!(scaled_cons.Ec, scaler, lin_cons.Ec)
+    scale_eq!(scaled_cons.A_b, scaler, lin_cons.A_b)
+    scale_eq!(scaled_cons.E_c, scaler, lin_cons.E_c)
     return nothing
 end
 
@@ -149,7 +157,7 @@ function reset_lin_cons!((_A, _b)::Tuple, (A, b)::Tuple)
     return nothing
 end
 function reset_lin_cons!(scaled_cons::LinearConstraints, lin_cons::LinearConstraints)
-    for fn in (:lb, :ub, :Ab, :Ec)
+    for fn in (:lb, :ub, :A_b, :E_c)
         reset_lin_cons!(getfield(scaled_cons, fn), getfield(lin_cons, fn))
     end
     return nothing
@@ -256,6 +264,8 @@ function compatibility_test(n, algo_opts, Δ)
 end
 
 function accept_trial_point!(vals, vals_tmp)
+    vals.θ[] = vals_tmp.θ[]
+    vals.Φ[] = vals_tmp.Φ[]
     for fn in (:x, :ξ, :fx, :hx, :gx, :Ex, :Ax)
         src = getfield(vals_tmp, fn)
         isnothing(src) && continue
@@ -264,9 +274,26 @@ function accept_trial_point!(vals, vals_tmp)
     return nothing
 end
 
+function stopping_criteria(algo_opts)
+    return (
+        MaxIterStopping(algo_opts.max_iter),
+        MinimumRadiusStopping(algo_opts.stop_delta_min),
+        ArgsRelTolStopping(;tol=algo_opts.stop_xtol_rel),
+        ArgsAbsTolStopping(;tol=algo_opts.stop_xtol_abs),
+        ValsRelTolStopping(;tol=algo_opts.stop_ftol_rel),
+        ValsAbsTolStopping(;tol=algo_opts.stop_ftol_abs),
+        CritAbsTolStopping(;
+            crit_tol=algo_opts.stop_crit_tol_abs,
+            theta_tol=algo_opts.stop_theta_tol_abs
+        ),
+        MaxCritLoopsStopping(algo_opts.stop_max_crit_loops)
+    )
+end
+
 function optimize(
     MOP::AbstractMOP, ξ0::RVec;
-    algo_opts :: AlgorithmOptions = AlgorithmOptions()
+    algo_opts :: AlgorithmOptions = AlgorithmOptions(),
+    user_callback = NoUserCallback(),
 )
     @assert !isempty(ξ0) "Starting point array `x0` is empty."
     @assert dim_objectives(MOP) > 0 "Objective Vector dimension of problem is zero."
@@ -276,7 +303,7 @@ function optimize(
     T = precision(mop)
     n_vars = length(ξ0)
 
-    ## struct holding constant linear constraint informaton (lb, ub, Ab, Ec)
+    ## struct holding constant linear constraint informaton (lb, ub, A_b, E_c)
     ## set these first, because they are needed to initialize a scaler 
     ## if `algo_opts.scaler_cfg==:box`:
     lin_cons = init_lin_cons(mop)
@@ -303,46 +330,71 @@ function optimize(
  
     ## pre-allocate working arrays for normal and descent step calculation:
     step_vals = init_step_vals(vals)
-    step_cache = init_step_cache(SteepestDescentConfig(), vals, mod_vals)
+    step_cache = init_step_cache(algo_opts.step_config, vals, mod_vals)
+
+    crit_cache = CriticalityRoutineCache(
+        deepcopy(mod_vals),
+        deepcopy(step_vals),
+        deepcopy(step_cache),
+        _copy_model(mod)
+    )
 
     ## initialize empty filter
     filter = WeakFilter{T}()
 
     ## finally, compose information about the 0-th iteration for next_iterations:
-    Δ = T(algo_opts.delta_init)
-    it_index = 0
-    it_stat = INITIALIZATION
-    ret_code = CONTINUE
-    point_has_changed = true
-    radius_has_changed = true
-    for outer it_index=1:algo_opts.max_iter
-        ret_code != CONTINUE && break
-        it_stat, ret_code, point_has_changed, Δ_new = do_iteration(
-            it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
-            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
-            point_has_changed, radius_has_changed
+    iter_meta = init_iter_meta(T, dim_objectives(mop), algo_opts)
+    
+    ## prepare stopping
+    stop_crits = stopping_criteria(algo_opts)
+    stop_code = nothing
+    while true
+        !isnothing(stop_code) && break
+        stop_code = do_iteration!(      # assume `copyto_model!`, otherwise, `mod, stop_code = do_iteration!...`
+            iter_meta, mop, mod, scaler, lin_cons, scaled_cons, 
+            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, stop_crits, algo_opts,
+            user_callback
         )
-        radius_has_changed = Δ_new != Δ
-        Δ = Δ_new
     end
-    if ret_code == CONTINUE
-        ret_code = BUDGET
-    end
-    return vals, it_index, ret_code
+    return vals, stop_code
 end
 
-function do_iteration(
-    it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
-    point_has_changed, radius_has_changed
+function do_iteration!(
+    iter_meta, mop, mod, scaler, lin_cons, scaled_cons,
+    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, stop_crits, algo_opts,
+    user_callback
 )
     ## assumptions at the start of an iteration:
-    ## * `it_res` classifies the last iteration
     ## * `vals` holds valid values for the stored argument vector `x`.
     ## * If the models `mod` are valid for `vals`, then `mod_vals` are valid, too.
-    
-    @info """
-    ITERATION $(it_index).
+    Δ = iter_meta.Δ_post
+    radius_has_changed = Δ != iter_meta.Δ_pre
+    iter_meta.Δ_pre = Δ
+    it_stat = iter_meta.it_stat_pre = iter_meta.it_stat_post
+    iter_meta.it_index += 1
+    @unpack it_index = iter_meta
+
+    for stopping_criterion in stop_crits
+        if check_pre_iteration(stopping_criterion)
+            stop_code = _evaluate_stopping_criterion(
+                stopping_criterion, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
+                vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
+            )
+            !isnothing(stop_code) && return stop_code
+        end
+    end
+    if check_pre_iteration(user_callback)
+        stop_code = evaluate_stopping_criterion(
+            user_callback, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
+            vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
+        )
+        !isnothing(stop_code) && return stop_code
+    end
+
+    @logmsg algo_opts.log_level """\n
+    ###########################
+    #  ITERATION $(it_index).
+    ###########################
     Δ = $(Δ)
     θ = $(vals.θ[])
     x = $(vec2str(vals.ξ))
@@ -355,18 +407,30 @@ function do_iteration(
     ##   radius has not changed neither.
     models_valid = (
         it_stat == RESTORATION || 
-        !point_has_changed && !(depends_on_trust_region(mod) && radius_has_changed)
+        !iter_meta.point_has_changed && !(depends_on_radius(mod) && radius_has_changed)
     )
 
     if !models_valid
-        update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts; point_has_changed)
+        @logmsg algo_opts.log_level "ITERATION $(it_index): Updating Surrogates."
+        update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts)
         eval_and_diff_mod!(mod_vals, mod, vals.x)
 
-        compute_normal_step(
-            it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
-            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts
+        if vals.θ[] > 0
+            @logmsg algo_opts.log_level "ITERATION $(it_index): Computing a normal step."
+        end 
+
+        compute_normal_step!(
+            step_cache, step_vals.n, step_vals.xn, Δ, vals.θ[], 
+            vals.ξ, vals.x, vals.fx, vals.hx, vals.gx, 
+            mod_vals.fx, mod_vals.hx, mod_vals.gx, mod_vals.Dfx, mod_vals.Dhx, mod_vals.Dgx,
+            vals.Eres, vals.Ex, vals.Ares, vals.Ax, scaled_cons.lb, scaled_cons.ub, 
+            scaled_cons.E_c, scaled_cons.A_b, mod
         )
-        @info "For θ=$(vals.θ[]), computed normal step of length $(LA.norm(step_vals.n))."
+        #=
+        if vals.θ[] > 0
+            @logmsg algo_opts.log_level "ITERATION $(it_index): Found normal step $(vec2str(step_vals.n))."
+        end
+        =#
     end
 
     n = step_vals.n
@@ -374,90 +438,101 @@ function do_iteration(
 
     if !n_is_compatible
         ## Try to do a restoration
+        @logmsg algo_opts.log_level "ITERATION $(it_index): Normal step incompatible. Trying restoration."
         add_to_filter!(filter, vals.θ[], vals.Φ[])
         return do_restoration(
-            it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
-            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
+            mop, mod, scaler, scaled_cons,
+            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, iter_meta, algo_opts;
         )
     end
 
-    χ = compute_descent_step(
-        it_index, Δ, it_stat, mop, mod, scaler, lin_cons, scaled_cons,
-        vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts
+    @logmsg algo_opts.log_level "ITERATION $(it_index): Computing a descent step."
+    χ = compute_descent_step!(
+        step_cache, step_vals.d, step_vals.s, step_vals.xs, step_vals.fxs, 
+        Δ, vals.θ[], vals.ξ, vals.x, step_vals.n, step_vals.xn, vals.fx, vals.hx, vals.gx, 
+        mod_vals.fx, mod_vals.hx, mod_vals.gx, mod_vals.Dfx, mod_vals.Dhx, mod_vals.Dgx,
+        vals.Eres, vals.Ex, vals.Ares, vals.Ax, scaled_cons.lb, scaled_cons.ub, 
+        scaled_cons.E_c, scaled_cons.A_b, mod, mop, scaler
     )
-    
-    @unpack xs = step_vals
-    _fxs = step_vals.fxs        # surrogate objective values at `xs`
-    #src # TODO stopping based on χ
-    copyto!(vals_tmp.x, xs)
-    eval_mop!(vals_tmp, mop, scaler)
+    iter_meta.crit_val = χ
 
-    trial_point_fits_filter = is_acceptable(
-        filter, vals_tmp.θ[], vals_tmp.Φ[], vals.θ[], vals.Φ[])
-    
-    if trial_point_fits_filter
-        @unpack strict_acceptance_test, kappa_theta, psi_theta, nu_accept = algo_opts
-        objf_decrease, model_decrease = if strict_acceptance_test
-            vals.fx .- vals_tmp.fx, mod_vals.fx .- _fxs     # TODO pre-allocate caches
-        else
-            maximum(vals.fx) - maximum(vals_tmp.fx), maximum(mod_vals.fx) - maximum(_fxs)
-        end
-        rho = minimum( objf_decrease ./ model_decrease )
-        model_decrease_condition = all(model_decrease .>= kappa_theta * vals.θ[]^psi_theta)
-        succifient_decrease_condition = rho >= nu_accept
-    end
-
-    this_it_stat = if !trial_point_fits_filter
-        FILTER_FAIL
-    else
-        if model_decrease_condition
-            if !succifient_decrease_condition
-                INACCEPTABLE
-            else
-                @unpack nu_success = algo_opts
-                if rho < nu_success
-                    ACCEPTABLE
-                else
-                    SUCCESSFUL
-                end
-            end
-        else
-            if !succifient_decrease_condition
-                FILTER_ADD_SHRINK
-            else
-                FILTER_ADD
-            end
+    @logmsg algo_opts.log_level "\tχ=$(χ), length of descent step is $(LA.norm(step_vals.d))"
+    for stopping_criterion in stop_crits
+        if check_post_descent_step(stopping_criterion)
+            stop_code = _evaluate_stopping_criterion(
+                stopping_criterion, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
+                vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
+            )
+            !isnothing(stop_code) && return stop_code
         end
     end
-
-    if this_it_stat == FILTER_ADD || this_it_stat == FILTER_ADD_SHRINK
-        add_to_filter!(filter, vals_tmp.θ[], vals_tmp.Φ[])
+    if check_post_descent_step(user_callback)
+        stop_code = evaluate_stopping_criterion(
+            user_callback, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
+            vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
+        )
+        !isnothing(stop_code) && return stop_code
     end
-
-    point_has_changed = Int(this_it_stat) > 0
-    if point_has_changed
-        ## accept trial point
-        accept_trial_point!(vals, vals_tmp)
-    end
-
+    ## `χ` is the inexact criticality.
+    ## For the convergence analysis to work, we also have to have the Criticality Routine:
+    Δ, stop_code = criticality_routine(
+        iter_meta, mod, step_vals, mod_vals, step_cache, crit_cache,
+        mop, scaler, lin_cons, scaled_cons, vals, vals_tmp, stop_crits, algo_opts, 
+        user_callback
+    )
+    !isnothing(stop_code) && return stop_code
+    
+    ## test if trial point is acceptable for filter and set missing meta data in `iter_meta`:
+    this_it_stat = test_trial_point!(
+        mop, scaler, iter_meta, filter, vals, mod_vals, vals_tmp, step_vals, algo_opts)
+    
+    ## process trial point test results, order of operations IMPORTANT!
+    ## First, finalize `iter_meta`
+    iter_meta.point_has_changed = Int(this_it_stat) > 0
+    ## to this end, update trust region radius
     @unpack gamma_grow, gamma_shrink, gamma_shrink_much, delta_max = algo_opts
     _Δ = if this_it_stat == FILTER_ADD_SHRINK || this_it_stat == INACCEPTABLE
         gamma_shrink_much * Δ
-    elseif this_it_stat == ACCEPTABLE
+    elseif this_it_stat == ACCEPTABLE || this_it_stat == FILTER_FAIL
         gamma_shrink * Δ
     elseif this_it_stat == SUCCESSFUL
         min(gamma_grow * Δ, delta_max)
     else
         Δ
     end
+    iter_meta.Δ_post = _Δ
 
-    rcode = CONTINUE
-    if χ <= algo_opts.stop_crit_tol_abs && vals.θ[] <= algo_opts.stop_theta_tol_abs
-        rcode = CRITICAL
+    # Now, check stopping criteria.
+    # It has to happen here, so that the criteria have access to `vals` and `vals_tmp`.
+    for stopping_criterion in stop_crits
+        if check_post_iteration(stopping_criterion)
+            stop_code = _evaluate_stopping_criterion(
+                stopping_criterion, _Δ, mop, mod, scaler, lin_cons, scaled_cons, 
+                vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
+            )
+            !isnothing(stop_code) && return stop_code
+        end
     end
-    return this_it_stat, rcode, point_has_changed, _Δ
+    if check_post_iteration(user_callback)
+        stop_code = evaluate_stopping_criterion(
+            user_callback, _Δ, mop, mod, scaler, lin_cons, scaled_cons, 
+            vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
+        )
+        !isnothing(stop_code) && return stop_code
+    end
+    # Finally, change filter and values
+    if this_it_stat == FILTER_ADD || this_it_stat == FILTER_ADD_SHRINK
+        add_to_filter!(filter, vals_tmp.θ[], vals_tmp.Φ[])
+    end
+
+    if iter_meta.point_has_changed
+        ## accept trial point, mathematically ``xₖ₊₁ ← xₖ + sₖ``, pseudo-code `copyto!(vals, vals_tmp)`: 
+        accept_trial_point!(vals, vals_tmp)
+    end
+
+    return nothing
 end
 
-export optimize
+export optimize, AlgorithmOptions
 
 end
