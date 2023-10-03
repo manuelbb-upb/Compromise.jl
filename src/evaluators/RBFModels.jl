@@ -2,6 +2,7 @@ module RBFModels
 
 using ..Compromise.CompromiseEvaluators
 const CE = CompromiseEvaluators
+import ..Compromise: @serve
 
 using ElasticArrays
 import LinearAlgebra as LA
@@ -381,15 +382,31 @@ end
 
 function evaluate!(rbf_database, op)
     @unpack database_x, database_y, database_flags_x, database_flags_y = rbf_database
+    budget = typemax(Int)
+    if CE.is_counted(op)
+        t = CE.max_calls(op)
+        if t isa Tuple
+            _t = first(t)
+            if !isnothing(_t)
+                budget = _t - first(CE.num_calls(op))
+            end
+        end
+    end
+
     ## find those entries, where `x` is set, but `y` is missing
-    ## TODO in case of parallelization, get rid of the for loop
+    ## TODO in case of parallelization, get rid of the for loop(s)
     for (i, xset) = enumerate(database_flags_x)
         if xset
             if !database_flags_y[i]
+                if budget <= 0
+                    return "RBF Training: No sampling budget. Aborting."
+                end
                 x = @view(database_x[:, i])
                 y = @view(database_y[:, i])
-                eval_op!(y, op, x)
+                #src #delete eval_op!(y, op, x)
+                @serve func_vals!(y, op, x)
                 database_flags_y[i] = true
+                budget -= 1
             end
         end
     end
@@ -521,7 +538,7 @@ function update_rbf_model!(
             Y[:, j] .= z
         end
     end
-    evaluate!(database, op)
+    @serve evaluate!(database, op)
     fully_linear = can_be_linear
     
     @assert j == dim_in    ## just to be sure

@@ -200,14 +200,14 @@ function init_vals(mop, scaler, ξ0)
     Eres = deepcopy(Ex)
     Ares = deepcopy(Ax)
 
-    ## set values by evaluating all functions
-    θ, Φ = eval_mop!(fx, hx, gx, Eres, Ex, Ares, Ax, mop, ξ)
-
     ## constraint violation and filter value
-    θ = Ref(T(θ))
-    Φ = Ref(T(Φ))
+    θ = Ref(zero(T))
+    Φ = Ref(zero(T))
 
-    return ValueArrays(ξ, x, fx, hx, gx, Eres, Ex, Ares, Ax, θ, Φ)
+    ## set values by evaluating all functions
+    mod_code = eval_mop!(fx, hx, gx, Eres, Ex, Ares, Ax, θ, Φ, mop, ξ)
+
+    return ValueArrays(ξ, x, fx, hx, gx, Eres, Ex, Ares, Ax, θ, Φ), mod_code
 end
 
 function init_step_vals(vals)
@@ -225,29 +225,25 @@ function init_model_vals(mod, n_vars)
     return SurrogateValueArrays(fx, hx, gx, Dfx, Dhx, Dgx)
 end
 
-function eval_mop!(fx, hx, gx, Eres, Ex, Ares, Ax, mop, ξ)
-    objectives!(fx, mop, ξ)
-    nl_eq_constraints!(hx, mop, ξ)
-    nl_ineq_constraints!(gx, mop, ξ)
+function eval_mop!(fx, hx, gx, Eres, Ex, Ares, Ax, θref, Φref, mop, ξ)
+    @serve objectives!(fx, mop, ξ)
+    @serve nl_eq_constraints!(hx, mop, ξ)
+    @serve nl_ineq_constraints!(gx, mop, ξ)
     lin_eq_constraints!(Eres, Ex, mop, ξ)
     lin_ineq_constraints!(Ares, Ax, mop, ξ)
 
-    θ = constraint_violation(hx, gx, Eres, Ares)
-    Φ = maximum(fx) # TODO this depends on the type of filter, but atm there is only WeakFilter
+    θref[] = constraint_violation(hx, gx, Eres, Ares)
+    Φref[] = maximum(fx) # TODO this depends on the type of filter, but atm there is only WeakFilter
 
-    return θ, Φ
+    return nothing
 end
 
 function eval_mop!(vals, mop, scaler)
     ## evaluate problem at unscaled site
-    @unpack ξ, x, fx, hx, gx, Eres, Ex, Ax, Ares = vals
+    @unpack ξ, x, fx, hx, gx, Eres, Ex, Ax, Ares, θ, Φ = vals
     
     unscale!(ξ, scaler, x)
-    θ, Φ = eval_mop!(fx, hx, gx, Eres, Ex, Ares, Ax, mop, ξ)
-
-    vals.θ[] = θ
-    vals.Φ[] = Φ
-    return nothing
+    return eval_mop!(fx, hx, gx, Eres, Ex, Ares, Ax, θ, Φ, mop, ξ)
 end
 
 function compatibility_test_rhs(c_delta, c_mu, mu, Δ)
@@ -317,7 +313,9 @@ function optimize(
 
     ## caches for working arrays x, fx, hx, gx, Ex, Ax, …
     ## (perform 1 evaluation to set values already)
-    vals = init_vals(mop, scaler, ξ0)
+    vals, vals_code = init_vals(mop, scaler, ξ0)
+    !isnothing(vals_code) && return vals, GenericStopping(vals_code, algo_opts.log_level)
+
     vals_tmp = deepcopy(vals)
  
     ## pre-allocate surrogates `mod`
@@ -376,19 +374,17 @@ function do_iteration!(
 
     for stopping_criterion in stop_crits
         if check_pre_iteration(stopping_criterion)
-            stop_code = _evaluate_stopping_criterion(
+            @serve _evaluate_stopping_criterion(
                 stopping_criterion, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
                 vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
             )
-            !isnothing(stop_code) && return stop_code
         end
     end
     if check_pre_iteration(user_callback)
-        stop_code = evaluate_stopping_criterion(
+        @serve evaluate_stopping_criterion(
             user_callback, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
             vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
         )
-        !isnothing(stop_code) && return stop_code
     end
 
     @logmsg algo_opts.log_level """\n
@@ -412,8 +408,10 @@ function do_iteration!(
 
     if !models_valid
         @logmsg algo_opts.log_level "ITERATION $(it_index): Updating Surrogates."
-        update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts)
-        eval_and_diff_mod!(mod_vals, mod, vals.x)
+        update_code = update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts)
+        !isnothing(update_code) && return GenericStopping(update_code, algo_opts.log_level)
+        mod_code = eval_and_diff_mod!(mod_vals, mod, vals.x)
+        !isnothing(mod_code) && return GenericStopping(mod_code, algo_opts.log_level)
 
         if vals.θ[] > 0
             @logmsg algo_opts.log_level "ITERATION $(it_index): Computing a normal step."
@@ -447,31 +445,31 @@ function do_iteration!(
     end
 
     @logmsg algo_opts.log_level "ITERATION $(it_index): Computing a descent step."
-    χ = compute_descent_step!(
-        step_cache, step_vals.d, step_vals.s, step_vals.xs, step_vals.fxs, 
+    cd_code = compute_descent_step!(
+        step_cache, step_vals.d, step_vals.s, step_vals.xs, step_vals.fxs, step_vals.crit_ref,
         Δ, vals.θ[], vals.ξ, vals.x, step_vals.n, step_vals.xn, vals.fx, vals.hx, vals.gx, 
         mod_vals.fx, mod_vals.hx, mod_vals.gx, mod_vals.Dfx, mod_vals.Dhx, mod_vals.Dgx,
         vals.Eres, vals.Ex, vals.Ares, vals.Ax, scaled_cons.lb, scaled_cons.ub, 
         scaled_cons.E_c, scaled_cons.A_b, mod, mop, scaler
     )
+    χ = step_vals.crit_ref[]
     iter_meta.crit_val = χ
-
     @logmsg algo_opts.log_level "\tχ=$(χ), length of descent step is $(LA.norm(step_vals.d))"
+    !isnothing(cd_code) && return GenericStopping(cd_code, algo_opts.log_level)
+
     for stopping_criterion in stop_crits
         if check_post_descent_step(stopping_criterion)
-            stop_code = _evaluate_stopping_criterion(
+            @serve _evaluate_stopping_criterion(
                 stopping_criterion, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
                 vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
             )
-            !isnothing(stop_code) && return stop_code
         end
     end
     if check_post_descent_step(user_callback)
-        stop_code = evaluate_stopping_criterion(
+        @serve evaluate_stopping_criterion(
             user_callback, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
             vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
         )
-        !isnothing(stop_code) && return stop_code
     end
     ## `χ` is the inexact criticality.
     ## For the convergence analysis to work, we also have to have the Criticality Routine:
@@ -483,8 +481,10 @@ function do_iteration!(
     !isnothing(stop_code) && return stop_code
     
     ## test if trial point is acceptable for filter and set missing meta data in `iter_meta`:
-    this_it_stat = test_trial_point!(
+    trial_code = test_trial_point!(
         mop, scaler, iter_meta, filter, vals, mod_vals, vals_tmp, step_vals, algo_opts)
+    !isnothing(trial_code) && return GenericStopping(trial_code, algo_opts.log_level)
+    this_it_stat = iter_meta.it_stat_post
     
     ## process trial point test results, order of operations IMPORTANT!
     ## First, finalize `iter_meta`
@@ -506,19 +506,17 @@ function do_iteration!(
     # It has to happen here, so that the criteria have access to `vals` and `vals_tmp`.
     for stopping_criterion in stop_crits
         if check_post_iteration(stopping_criterion)
-            stop_code = _evaluate_stopping_criterion(
+            @serve _evaluate_stopping_criterion(
                 stopping_criterion, _Δ, mop, mod, scaler, lin_cons, scaled_cons, 
                 vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
             )
-            !isnothing(stop_code) && return stop_code
         end
     end
     if check_post_iteration(user_callback)
-        stop_code = evaluate_stopping_criterion(
+        @serve evaluate_stopping_criterion(
             user_callback, _Δ, mop, mod, scaler, lin_cons, scaled_cons, 
             vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
         )
-        !isnothing(stop_code) && return stop_code
     end
     # Finally, change filter and values
     if this_it_stat == FILTER_ADD || this_it_stat == FILTER_ADD_SHRINK

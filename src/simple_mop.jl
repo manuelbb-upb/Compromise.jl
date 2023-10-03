@@ -29,6 +29,12 @@ struct ScaledOperator{O, S, XI, D, H} <: AbstractNonlinearOperatorNoParams
     Hy :: H
 end
 
+CE.is_counted(sop::ScaledOperator)=CE.is_counted(sop.op)
+CE.num_calls(sop::ScaledOperator)=CE.num_calls(sop.op)
+CE.max_calls(sop::ScaledOperator)=CE.max_calls(sop.op)
+CE.set_num_calls!(sop::ScaledOperator, vals::Tuple{Int,Int,Int})=CE.set_num_calls!(sop.op, vals)
+CE.enforce_max_calls(sop::ScaledOperator) = CE.enforce_max_calls(sop.op)
+
 # Consider ``f: ℝ^n → ℝ^m`` and the unscaling map ``u: ℝ^n → ℝ^n``.
 # By the chain rule we have ``∇(f∘u)(x) = ∇f(ξ)*T``, where ``T`` is 
 # the Jacobian of ``u``.
@@ -68,30 +74,31 @@ end
 # the unscaled site and a re-scaling of the gradients:
 function CE.eval_grads!(Dy, sop::ScaledOperator, x)
     unscale!(sop.ξ, sop.scaler, x)
-    eval_grads!(sop.Dy, sop.op, sop.ξ)
+    r = eval_grads!(sop.Dy, sop.op, sop.ξ)
     scale_grads!(Dy, sop)
-    return nothing
+    return r
 end
 # We don't have to unscale twice when evaluating and differntiating:
 function CE.eval_op_and_grads!(y, Dy, sop::ScaledOperator, x)
     unscale!(sop.ξ, sop.scaler, x)
-    eval_op_and_grads!(y, sop.Dy, sop.op, sop.ξ)
+    r = eval_op_and_grads!(y, sop.Dy, sop.op, sop.ξ)
     scale_grads!(Dy, so)
-    return nothing
+    return r
 end
+
 # The procedure is similar for Hessians:
 function CE.eval_hessians!(H, sop::ScaledOperator, x)
     unscale!(sop.ξ, sop.scaler, x)
-    eval_hessians!(H, sop.op, sop.ξ)
+    r = eval_hessians!(H, sop.op, sop.ξ)
     scale_hessians!(H, sop)
-    return nothing
+    return r
 end
 function CE.eval_op_and_grads_and_hessians!(y, Dy, H, sop, x)
     unscale!(sop.ξ, sop.scaler, x)
-    eval_op_and_grads_and_hessians!(y, sop.Dy, H, sop.op, sop.ξ)
+    r = eval_op_and_grads_and_hessians!(y, sop.Dy, H, sop.op, sop.ξ)
     scale_grads!(Dy, sop)
     scale_hessians!(H, sop)
-    return nothing
+    return r
 end
 
 # ## `SimpleMOP`
@@ -215,65 +222,123 @@ parse_mcfg(::Nothing)=parse_mcfg(:exact)
 
 # Add function is the backend for the helper functions `add_objectives!` etc.
 """
-    add_function!(func_field, mop, op, model; dim_out, backend=NoBackend())
+    add_function!(func_field, mop, op, model_cfg; dim_out, backend=NoBackend())
 
-Add the operator `op` to `mop` at `func_field` and use model configuration `model`.
+Add the operator `op` to `mop` at `func_field` and use model configuration `model_cfg`.
 Keyword argument `dim_out::Int` is mandatory.
 E.g., `add_function!(:objectives, mop, op, :rbf; dim_out=2)` adds `op`
 as the bi-valued objective to `mop`.
 """
 function add_function!(
     func_field::Symbol, mop::MutableMOP, op::AbstractNonlinearOperator, 
-    model::Union{AbstractSurrogateModelConfig, Nothing, Symbol}=nothing;
-    dim_out::Int, backend=NoBackend()
+    model_cfg::Union{AbstractSurrogateModelConfig, Nothing, Symbol}=nothing;
+    dim_out::Int
 )
 
     setfield!(mop, func_field, op)
     setfield!(mop, Symbol("dim_", func_field), dim_out)
 
-    mod = parse_mcfg(model)
+    mod = parse_mcfg(model_cfg)
     setfield!(mop, Symbol("mcfg_", func_field), mod)
     return nothing
 end
 
-# Allow for adding basic `Function`s instead of operators:
-function add_function!(
-    func_field::Symbol, mop::MutableMOP, func::Function,
-    model::Union{AbstractSurrogateModelConfig, Nothing, Symbol}=nothing; 
-    dim_out::Int, backend=NoBackend(), func_iip::Bool=false
-)   
-    op = NonlinearFunction(; func, func_iip, backend)
-    return add_function!(func_field, mop, op, model; dim_out)
-end
-
-# Define methods to allow hand-crafted gradient functions:
-function add_function!(
-    func_field::Symbol, mop::MutableMOP, func::Function, grads::Function,
-    model::Union{AbstractSurrogateModelConfig, Nothing, Symbol}=nothing;
-    dim_out::Int, backend=NoBackend(), func_iip=false, grads_iip=false
-)
-    op = NonlinearFunction(; func, grads, func_iip, grads_iip, backend)
-    return add_function!(func_field, mop, op, model; dim_out) 
-end
-function add_function!(
-    func_field::Symbol, mop::MutableMOP, func::Function, grads::Function,
-    func_and_grads::Function,
-    model::Union{AbstractSurrogateModelConfig, Nothing, Symbol}=nothing;
-    dim_out::Int, backend=NoBackend(), func_iip=false, grads_iip=false, func_and_grads_iip=false
-)
-    op = NonlinearFunction(; 
-        func, grads, func_and_grads, func_iip, grads_iip, func_and_grads_iip, backend)
-    return add_function!(func_field, mop, op, model; dim_out) 
-end
-
-#src #TODO allow for passing Hessians...
 # We now generate the derived helper functions `add_objectives!`,
-# `add_nl_ineq_constraints!` and `add_nl_eq_constraints!`:
-for fntype in (:objectives, :nl_eq_constraints, :nl_ineq_constraints)
+# `add_nl_ineq_constraints!` and `add_nl_eq_constraints!`.
+# Here, we additionally allow for `Function`s to be used instead of `NonlinearFunction`s.
+function add_objectives!(mop, args...; kwargs...) end
+function add_nl_eq_constraints!(mop, args...; kwargs...) end
+function add_nl_ineq_constraints!(mop, args...; kwargs...) end
+
+for (fntype, typenoun) in (
+    (:objectives, "objectives"),
+    (:nl_eq_constraints, "nonlinear equality constraints"),
+    (:nl_ineq_constraints, "nonlinear inequality constraints")
+)
     add_fn = Symbol("add_", fntype, "!")
-    @eval function $(add_fn)(args...; kwargs...)
-        return add_function!($(Meta.quot(fntype)), args...; kwargs...)
-    end
+    @eval begin
+        function $(add_fn)(
+            mop::MutableMOP, op::NonlinearFunction, model_cfg=nothing; dim_out::Int)
+            return add_function!($(Meta.quot(fntype)), mop, op, model_cfg; dim_out)
+        end#function
+        
+        """
+            $($(add_fn))(mop::MutableMOP, func, model_cfg=nothing; 
+                dim_out::Int, kwargs...)
+
+        Set function `func` to return the $($(typenoun)) vector of `mop`.
+        Argument `model_cfg` is optional and specifies the surrogate models for `func`.
+        Can be `nothing`, a Symbol (`:exact`, `:rbf`, `taylor1`, `taylor2`), or an
+        `AbstractSurrogateModelConfig` object.
+
+        All functions can be in-place, see keyword arguments `func_iip`.
+        
+        Keyword argument `dim_out` is mandatory and corresponds to the length of the result
+        vector.
+        The other `kwargs...` are passed to the inner `AbstractNonlinearOperator` as is.
+        For options and defaults see [`Compromise.NonlinearParametricFunction`](@ref).
+        """
+        function $(add_fn)(
+            mop::MutableMOP, func::Function, model_cfg=nothing; dim_out::Int, kwargs...
+        )
+            op = NonlinearFunction(; func, kwargs...)
+            return add_function!($(Meta.quot(fntype)), mop, op, model_cfg; dim_out)
+        end
+
+        # Define methods to allow hand-crafted gradient functions without keyword
+        # arguments:
+        #src #TODO allow for passing Hessians...
+
+        """
+            $($(add_fn))(mop::MutableMOP, func, grads, model_cfg=nothing; 
+                dim_out::Int, kwargs...)
+
+        Set function `func` to return the $($(typenoun)) vector of `mop`.
+        Argument `model_cfg` is optional and specifies the surrogate models for `func`.
+        Can be `nothing`, a Symbol (`:exact`, `:rbf`, `taylor1`, `taylor2`), or an
+        `AbstractSurrogateModelConfig` object.
+        `grads` should be a function mapping a vector to the transposed jacobian of `func`.
+        
+        All functions can be in-place, see keyword arguments `func_iip` and `grads_iip`.
+        
+        Keyword argument `dim_out` is mandatory and corresponds to the length of the result
+        vector.
+        The other `kwargs...` are passed to the inner `AbstractNonlinearOperator` as is.
+        For options and defaults see [`Compromise.NonlinearParametricFunction`](@ref).
+        """
+        function $(add_fn)(
+            mop::MutableMOP, func::Function, grads::Function, model_cfg=nothing; dim_out::Int, kwargs...
+        )
+            return $(add_fn)(mop, func, model_cfg; dim_out, grads, kwargs...)
+        end
+    
+        """
+            $($(add_fn))(mop::MutableMOP, func, grads, func_and_grads, model_cfg=nothing; 
+                dim_out::Int, kwargs...)
+
+        Set function `func` to return the $($(typenoun)) vector of `mop`.
+        Argument `model_cfg` is optional and specifies the surrogate models for `func`.
+        Can be `nothing`, a Symbol (`:exact`, `:rbf`, `taylor1`, `taylor2`), or an
+        `AbstractSurrogateModelConfig` object.
+        `grads` should be a function mapping a vector to the transposed jacobian of `func`,
+        while `func_and_grads` returns a primal vector and the gradients at the same time.
+        
+        All functions can be in-place, see keyword arguments `func_iip`, `grads_iip` and 
+        `func_and_grads_iip`.
+        
+        Keyword argument `dim_out` is mandatory and corresponds to the length of the result
+        vector.
+        The other `kwargs...` are passed to the inner `AbstractNonlinearOperator` as is.
+        For options and defaults see [`Compromise.NonlinearParametricFunction`](@ref).
+        """
+        function $(add_fn)(
+            mop::MutableMOP, func::Function, grads::Function, func_and_grads::Function, 
+            model_cfg=nothing; 
+            dim_out::Int, kwargs...
+        )
+            return $(add_fn)(mop, func, model_cfg; dim_out, grads, func_and_grads, kwargs...)
+        end
+    end#@eval
 end
 
 # ### Interface Implementation
@@ -316,13 +381,16 @@ lin_ineq_constraints(mop::TypedMOP) = mop.A_b
 
 # Because we store `AbstractNonlinearOperator`s, evaluation can simply be redirected:
 function eval_objectives!(y::RVec, mop::SimpleMOP, x::RVec)
-    return eval_op!(y, mop.objectives, x)
+    @serve CE.check_num_calls(mop.objectives, 1; force=true)
+    return func_vals!(y, mop.objectives, x)
 end
 function eval_nl_eq_constraints!(y::RVec, mop::SimpleMOP, x::RVec)
-    return eval_op!(y, mop.nl_eq_constraints, x)
+    @serve CE.check_num_calls(mop.nl_eq_constraints, 1; force=true)
+    return func_vals!(y, mop.nl_eq_constraints, x)
 end
 function eval_nl_ineq_constraints!(y::RVec, mop::SimpleMOP, x::RVec)
-    return eval_op!(y, mop.nl_ineq_constraints, x)
+    @serve CE.check_num_calls(mop.nl_ineq_constraints, 1; force=true)
+    return func_vals!(y, mop.nl_ineq_constraints, x)
 end
 
 # ## Surrogate Modelling of `SimpleMOP`
@@ -450,9 +518,9 @@ function update_models!(
     log_level = algo_opts.log_level
     Δ_max = algo_opts.delta_max
 
-    update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; Δ_max, log_level)
-    update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; Δ_max, log_level)
-    update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; Δ_max, log_level)
+    @serve update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; Δ_max, log_level)
+    @serve update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; Δ_max, log_level)
+    @serve update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; Δ_max, log_level)
     return nothing
 end
 

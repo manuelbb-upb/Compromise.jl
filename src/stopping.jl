@@ -192,3 +192,13 @@ function evaluate_stopping_criterion(
 end
 
 struct InfeasibleStopping <: AbstractStoppingCriterion end
+
+struct GenericStopping{F} <: AbstractStoppingCriterion 
+    ret :: F
+end
+
+function GenericStopping(ret, log_level)
+    @logmsg log_level "$(ret)"
+    return GenericStopping(ret)
+end
+
