@@ -42,12 +42,14 @@ unscale!(ξ::Nothing, scaler::AbstractAffineScaler, x::Nothing) = nothing
 end
 scale_eq!(::Nothing, scaler::AbstractAffineScaler, ::Nothing)=nothing
 
-struct IdentityScaler <: AbstractConstantAffineScaler end
+struct IdentityScaler <: AbstractConstantAffineScaler 
+    dim :: Int
+end
 
 scale!(x::RVec, scaler::IdentityScaler, ξ::RVec)=copyto!(x, ξ)
 unscale!(ξ::RVec, scaler::IdentityScaler, x::RVec)=copyto!(ξ, x)
-scaling_matrix(scaler::IdentityScaler) = LA.I(length(ξ))
-unscaling_matrix(scaler::IdentityScaler) = LA.I(length(x))
+scaling_matrix(scaler::IdentityScaler) = LA.I(scaler.dim)
+unscaling_matrix(scaler::IdentityScaler) = LA.I(scaler.dim)
 
 ## ξ = Tx + b
 ## x = T⁻¹(ξ - b) = T⁻¹ξ - T⁻¹b
@@ -65,10 +67,10 @@ unscaling_matrix(scaler::AffineVarScaler)=scaler.Tinv
 scaling_offset(scaler::AffineVarScaler)=scaler.b
 unscaling_offset(scaler::AffineVarScaler)=scaler.binv
 
-init_box_scaler(lb, ub)=IdentityScaler()
-function init_box_scaler(lb::RVec, ub::RVec)
+init_box_scaler(lb, ub, dim)=IdentityScaler(dim)
+function init_box_scaler(lb::RVec, ub::RVec, dim)
     if any(isinf.(lb)) || any(isinf.(ub))
-        return init_box_scaler(nothing, nothing)
+        return init_box_scaler(nothing, nothing, dim)
     end
 
     ## set up a min-max scaler

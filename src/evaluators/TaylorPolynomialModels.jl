@@ -108,7 +108,7 @@ function CE.model_grads!(Dy, tp::TaylorPolynomial2, x)
     @views for i = axes(H, 3)
         ## (assuming symmetric Hessians here)
         Hi = H[:, :, i]
-        LA.mul!(Dy[:, i], Hi, Δx, 2, 1)   
+        LA.mul!(Dy[:, i], Hi, Δx, 1, 1)   
     end
     return nothing
 end
@@ -131,14 +131,13 @@ function CE.model_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
     HΔx = tp.xtmp
     @views for i = axes(H, 3)
         Hi = H[:, :, i]
-        LA.mul!(HΔx, Hi, Δx, 0.5, 0)
+        LA.mul!(HΔx, Hi, Δx, 1, 0)
 
         ## 1) add Hessian term to value `y[i]`
-        y[i] += Δx'HΔx
+        y[i] += 0.5 * Δx'HΔx
 
         ## 2) add Hessian terms to gradients `Dy[:, i]`
         ## (assuming symmetric Hessians here)
-        HΔx .*= 4
         Dy[:, i] .+= HΔx
     end
 
@@ -147,7 +146,7 @@ end
 
 function CE.update!(tp::TaylorPolynomial1, op, Δ, x, fx, lb, ub; kwargs...)
     if tp.x0 != x || any(isnan.(tp.x0))
-        @serve CE.check_num_calls(op, 1; force=true)
+        @serve CE.check_num_calls(op, (1,2); force=true)
         copyto!(tp.x0, x)
         #src eval_op_and_grads!(tp.fx, tp.Dfx, op, x)
         func_vals_and_grads!(tp.fx, tp.Dfx, op, x)
@@ -157,7 +156,7 @@ end
 function CE.update!(tp::TaylorPolynomial2, op, Δ, x, fx, lb, ub; kwargs...)
     tp1 = tp.tp
     if tp1.x0 != x || any(isnan.(tp1.x0))
-        @serve CE.check_num_calls(op, (1,2); force=true)
+        @serve CE.check_num_calls(op, (1,2,3); force=true)
         copyto!(tp1.x0, x)
         #src eval_op_and_grads_and_hessians!(tp1.fx, tp1.Dfx, tp.Hfx, op, x)
         func_vals_and_grads_and_hessians!(tp1.fx, tp1.Dfx, tp.Hfx, op, x)

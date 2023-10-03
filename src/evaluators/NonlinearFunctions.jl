@@ -206,7 +206,7 @@ function CE.eval_op_and_grads_and_hessians!(y, Dy, H, op::NonlinearParametricFun
             op.func_and_grads_and_hessians(y, Dy, H, x, p)
         else
             @debug "Allocating temporary output arrays for `eval_op_and_grads_and_hessians!`."
-            _y, _Dy, _H = op.func_and_grads(x, p)
+            _y, _Dy, _H = op.func_and_grads_and_hessians(x, p)
             y .= _y
             Dy .= _Dy
             H .= _H

@@ -1,6 +1,69 @@
 using Compromise
 using Test
 
+@testset "Taylor Polynomials deg 2" begin
+    tcfg = TaylorPolynomialConfig(;degree=2)
+    function func(x)
+        return [
+            sum( (x .- 1).^2 ),
+            sum( (x .+ 1).^2 ),
+        ]
+    end
+
+    function grads(x)
+        return 2 .* hcat( x .- 1, x .+ 1 )
+    end
+
+    function hessians(x)
+        n = length(x)
+        H = zeros(eltype(x), n, n, 2)
+        for l in [1,2]
+            for i=1:n
+                H[i, i, l] = 2
+            end
+        end
+        return H
+    end
+
+    op = Compromise.NonlinearFunction(;func, grads, hessians)
+    tp = Compromise.init_surrogate(tcfg, op, 2, 2, nothing, Float64)
+
+    x = rand(2)
+    y = zeros(2)
+    Compromise.eval_op!(y, op, x)
+    Compromise.update!(tp, op, nothing, x, y, nothing, nothing)
+    z = zeros(2)
+    Compromise.model_op!(z, tp, x)
+
+    @test y == z
+
+    Dy = zeros(2,2)
+    Compromise.model_grads!(Dy, tp, x)
+    @test Dy == grads(x)
+
+    Dy .= 0
+    y .= 0
+    Compromise.model_op_and_grads!(y, Dy, tp, x)
+    @test y == func(x)
+    @test Dy == grads(x)
+
+    Hy = zeros(2,2,2)
+    Dy .= 0
+    y .= 0
+    Compromise.eval_op_and_grads_and_hessians!(y, Dy, Hy, op, x)
+    @test y == func(x)
+    @test Dy == grads(x)
+    @test Hy == hessians(x)
+
+    Hy = zeros(2,2,2)
+    Dy .= 0
+    y .= 0
+    Compromise.func_vals_and_grads_and_hessians!(y, Dy, Hy, op, x)
+    @test y == func(x)
+    @test Dy == grads(x)
+    @test Hy == hessians(x)
+end
+
 @testset "Stopping Criteria" begin
     function setup_mop()
         mop = MutableMOP(;num_vars=2)
@@ -213,6 +276,17 @@ end
         return 2 .* hcat( x .- 1, x .+ 1 )
     end
 
+    function hess_objectives_function(x)
+        n = length(x)
+        H = zeros(eltype(x), n, n, 2)
+        for l in [1,2]
+            for i=1:n
+                H[i, i, l] = 2
+            end
+        end
+        return H
+    end
+
     mop = MutableMOP(;num_vars=2)
     add_objectives!(
         mop, objective_function, grads_objectives_function, :exact; 
@@ -309,18 +383,6 @@ end
     final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
     @test fn_counter[] == 10
     @test stop_code isa Compromise.GenericStopping
-
-    
-    function hess_objectives_function(x)
-        n = length(x)
-        H = zeros(eltype(x), n, n, 2)
-        for l in [1,2]
-            for i=1:n
-                H[i, i, l] = 2
-            end
-        end
-        return H
-    end
     
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -340,11 +402,11 @@ end
     
     mop = MutableMOP(;num_vars=2)
     add_objectives!(
-        mop, objective_function, grads_objectives_function, hess_objectives_function, :taylor2; 
+        mop, objective_function, grads_objectives_function, :taylor2; 
         dim_out=2, max_func_calls=10, enforce_max_calls=false,
         hessians=hess_objectives_function, hessians_iip=false
     )
     final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
-    @test_broken fn_counter[] == 10
+    @test fn_counter[] == 10
     @test stop_code isa Compromise.GenericStopping
 end

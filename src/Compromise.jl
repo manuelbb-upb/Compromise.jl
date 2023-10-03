@@ -110,19 +110,19 @@ var_bounds_valid(lb::Nothing, ub::RVec)=!(any(isequal(-Inf), ub))
 var_bounds_valid(lb::RVec, ub::Nothing)=!(any(isequal(Inf), lb))
 var_bounds_valid(lb::RVec, ub::RVec)=all(lb .<= ub)
 
-function init_scaler(scaler_cfg::Symbol, mod_type, lin_cons)
-    return init_scaler(Val(scaler_cfg), mod_type, lin_cons)
+function init_scaler(scaler_cfg::Symbol, mod_type, lin_cons, dim)
+    return init_scaler(Val(scaler_cfg), mod_type, lin_cons, dim)
 end
 
-function init_scaler(::Val{:box}, mod_type, lin_cons)
+function init_scaler(::Val{:box}, mod_type, lin_cons, dim)
     if supports_scaling(mod_type) isa AbstractAffineScalingIndicator
         @unpack lb, ub = lin_cons
-        return init_box_scaler(lb, ub)
+        return init_box_scaler(lb, ub, dim)
     end
     @warn "Problem structure does not support scaling according to `scaler_cfg=:box`. Proceeding without."
-    return IdentityScaler()    
+    return IdentityScaler(dim)    
 end
-init_scaler(::Val{:none}, mod_type, lin_cons) = IdentityScaler()
+init_scaler(::Val{:none}, mod_type, lin_cons, dim) = IdentityScaler(dim)
 
 function init_lin_cons(mop)
     lb = lower_var_bounds(mop)
@@ -306,7 +306,7 @@ function optimize(
 
     ## initialize a scaler according to configuration
     mod_type = model_type(mop)
-    scaler = init_scaler(algo_opts.scaler_cfg, mod_type, lin_cons)
+    scaler = init_scaler(algo_opts.scaler_cfg, mod_type, lin_cons, n_vars)
     ## whenever the scaler changes, we have to re-scale the linear constraints
     scaled_cons = deepcopy(lin_cons)
     update_lin_cons!(scaled_cons, scaler, lin_cons)
