@@ -3,13 +3,13 @@
 dim_objectives(::AbstractMOPSurrogate)::Int=0            # mandatory
 dim_nl_eq_constraints(::AbstractMOPSurrogate)::Int=0     # optional
 dim_nl_ineq_constraints(::AbstractMOPSurrogate)::Int=0   # optional</code></pre><p>Additionally, we require information on the model variability and if we can build models for the scaled domain:</p><pre><code class="language-julia hljs">depends_on_radius(::AbstractMOPSurrogate)::Bool=true
-supports_scaling(T::Type{&lt;:AbstractMOPSurrogate})=NoScaling()</code></pre><h2 id="Construction"><a class="docs-heading-anchor" href="#Construction">Construction</a><a id="Construction-1"></a><a class="docs-heading-anchor-permalink" href="#Construction" title="Permalink"></a></h2><p>Define a function to return a model for some MOP. The model does not yet have to be trained.</p><pre><code class="language-julia hljs">init_models(mop::AbstractMOP, n_vars, scaler)::AbstractMOPSurrogate=nothing</code></pre><p>It is trained with the update method.</p><pre><code class="language-julia hljs">function update_models!(
+supports_scaling(T::Type{&lt;:AbstractMOPSurrogate})=NoScaling()</code></pre><h2 id="Construction"><a class="docs-heading-anchor" href="#Construction">Construction</a><a id="Construction-1"></a><a class="docs-heading-anchor-permalink" href="#Construction" title="Permalink"></a></h2><p>Define a function to return a model for some MOP. The model does not yet have to be trained.</p><pre><code class="language-julia hljs">init_models(mop::AbstractMOP, n_vars, scaler)::AbstractMOPSurrogate=nothing</code></pre><p>It is trained with the update method <code>update_models!</code>.</p><div class="admonition is-info"><header class="admonition-header">Note</header><div class="admonition-body"><p>This method should always return <code>nothing</code>, <strong>unless</strong> you want to stop the algorithm. Every other return value stops the algoritm and  <code>GenericStopping(ret_val)</code> is returned as the stop code. The constructor of <code>GenericStopping</code> logs the <code>ret_val</code>, so you could return a string explaining the reason for stopping.</p></div></div><pre><code class="language-julia hljs">function update_models!(
     mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts
 )
     return nothing
 end</code></pre><p>If a model is radius-dependent, we also need a function to copy the parameters from a source model to a target model:</p><pre><code class="language-julia hljs">copy_model(mod::AbstractMOPSurrogate)=deepcopy(mod)
 copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=mod_trgt</code></pre><p>These internal helpers are derived:</p><pre><code class="language-julia hljs">_copy_model(mod::AbstractMOPSurrogate)=depends_on_radius(mod) ? copy_model(mod) : mod
-_copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=depends_on_radius(mod_trgt) ? copyto_model!(mod_trgt, mod_src) : mod_trgt</code></pre><h2 id="Evaluation"><a class="docs-heading-anchor" href="#Evaluation">Evaluation</a><a id="Evaluation-1"></a><a class="docs-heading-anchor-permalink" href="#Evaluation" title="Permalink"></a></h2><p>Evaluation of nonlinear objective models requires the following method. <code>x</code> will be from the scaled domain, but if a model does not support scaling, then internally the <code>IdentityScaler()</code> is used:</p><pre><code class="language-julia hljs">function eval_objectives!(y::RVec, mod::M, x::RVec) where {M&lt;:AbstractMOPSurrogate}
+_copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=depends_on_radius(mod_trgt) ? copyto_model!(mod_trgt, mod_src) : mod_trgt</code></pre><h2 id="Evaluation"><a class="docs-heading-anchor" href="#Evaluation">Evaluation</a><a id="Evaluation-1"></a><a class="docs-heading-anchor-permalink" href="#Evaluation" title="Permalink"></a></h2><div class="admonition is-info"><header class="admonition-header">Note</header><div class="admonition-body"><p>All evaluation and differentiation methods that you see below should always return <code>nothing</code>, <strong>unless</strong> you want to stop early. Then return something else, for example a string.</p></div></div><p>Evaluation of nonlinear objective models requires the following method. <code>x</code> will be from the scaled domain, but if a model does not support scaling, then internally the <code>IdentityScaler()</code> is used:</p><pre><code class="language-julia hljs">function eval_objectives!(y::RVec, mod::M, x::RVec) where {M&lt;:AbstractMOPSurrogate}
     error(&quot;`eval_objectives!(y, mod, x) not implemented for mod of type $(M).&quot;)
 end</code></pre><p>If there are constraints, these have to be defined as well:</p><pre><code class="language-julia hljs">function eval_nl_eq_constraints!(y::RVec, mod::M, x::RVec) where {M&lt;:AbstractMOPSurrogate}
     error(&quot;`eval_nl_eq_constraints!(y, mod, x) not implemented for mod of type $(M).&quot;)
@@ -66,27 +66,27 @@ vals_diff_nl_eq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RV
 vals_diff_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=eval_and_grads_nl_ineq_constraints!(y, Dy, mod, x)</code></pre><p>Here is what is called later on:</p><pre><code class="language-julia hljs">&quot;Evaluate the models `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`.&quot;
 function eval_mod!(mod_vals, mod, x)
     @unpack fx, hx, gx = mod_vals
-    objectives!(fx, mod, x)
-    nl_eq_constraints!(hx, mod, x)
-    nl_ineq_constraints!(hx, mod, x)
+    @serve objectives!(fx, mod, x)
+    @serve nl_eq_constraints!(hx, mod, x)
+    @serve nl_ineq_constraints!(hx, mod, x)
     return nothing
 end
 
 &quot;Evaluate the model gradients of `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`.&quot;
 function diff_mod!(mod_vals, mod, x)
     @unpack Dfx, Dhx, Dgx = mod_vals
-    diff_objectives!(Dfx, mod, x)
-    diff_nl_eq_constraints!(Dhx, mod, x)
-    diff_nl_ineq_constraints!(hx, mod, x)
+    @serve diff_objectives!(Dfx, mod, x)
+    @serve diff_nl_eq_constraints!(Dhx, mod, x)
+    @serve diff_nl_ineq_constraints!(hx, mod, x)
     return nothing
 end
 
 &quot;Evaluate and differentiate `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`.&quot;
 function eval_and_diff_mod!(mod_vals, mod, x)
     @unpack fx, hx, gx, Dfx, Dhx, Dgx = mod_vals
-    vals_diff_objectives!(fx, Dfx, mod, x)
-    vals_diff_nl_eq_constraints!(hx, Dhx, mod, x)
-    vals_diff_nl_ineq_constraints!(gx, Dgx, mod, x)
+    @serve vals_diff_objectives!(fx, Dfx, mod, x)
+    @serve vals_diff_nl_eq_constraints!(hx, Dhx, mod, x)
+    @serve vals_diff_nl_ineq_constraints!(gx, Dgx, mod, x)
     return nothing
 end</code></pre><h3 id="Gradient-Pre-Allocation"><a class="docs-heading-anchor" href="#Gradient-Pre-Allocation">Gradient Pre-Allocation</a><a id="Gradient-Pre-Allocation-1"></a><a class="docs-heading-anchor-permalink" href="#Gradient-Pre-Allocation" title="Permalink"></a></h3><p>We also would like to have pre-allocated gradient arrays ready:</p><pre><code class="language-julia hljs">function prealloc_objectives_grads(mod::AbstractMOPSurrogate, n_vars)
     T = precision(mod)
@@ -108,4 +108,4 @@ for (dim_func, prealloc_func) in (
             return nothing
         end
     end
-end</code></pre><div class="admonition is-info"><header class="admonition-header">Note</header><div class="admonition-body"><p>For nonlinear subproblem solvers it might be desirable to have partial evaluation and differentiation functions. Also, out-of-place functions could be useful for external nonlinear tools, but I don&#39;t need them yet. Defining the latter methods would simply call <code>prealloc_XXX</code> first and then use some in-place-functions.</p></div></div><hr/><p><em>This page was generated using <a href="https://github.com/fredrikekre/Literate.jl">Literate.jl</a>.</em></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../mop/">« AbstractMOP Interface</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.24 on <span class="colophon-date" title="Thursday 28 September 2023 12:37">Thursday 28 September 2023</span>. Using Julia version 1.9.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+end</code></pre><div class="admonition is-info"><header class="admonition-header">Note</header><div class="admonition-body"><p>For nonlinear subproblem solvers it might be desirable to have partial evaluation and differentiation functions. Also, out-of-place functions could be useful for external nonlinear tools, but I don&#39;t need them yet. Defining the latter methods would simply call <code>prealloc_XXX</code> first and then use some in-place-functions.</p></div></div><hr/><p><em>This page was generated using <a href="https://github.com/fredrikekre/Literate.jl">Literate.jl</a>.</em></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../mop/">« AbstractMOP Interface</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 0.27.24 on <span class="colophon-date" title="Wednesday 4 October 2023 10:04">Wednesday 4 October 2023</span>. Using Julia version 1.9.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
