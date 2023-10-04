@@ -13,3 +13,22 @@ end
 
 promote_modulo_nothing(T1, ::Type{Nothing})=T1
 promote_modulo_nothing(T1, T2)=Base.promote_type(T1, eltype(T2))
+macro serve(ex)
+	ret_val = gensym()
+	return quote
+		$(ret_val) = $(ex)
+		if !isnothing($(ret_val))
+			return $(ret_val)
+		end
+	end |> esc
+end
+
+macro exit(ex)
+	ret_val = gensym()
+	return quote
+		$(ret_val) = $(ex)
+		if !isnothing($(ret_val))
+			break
+		end
+	end |> esc
+end

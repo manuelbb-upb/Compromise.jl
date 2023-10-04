@@ -62,11 +62,21 @@ compute the derivatives if the relevant field `isnothing`.
     func_and_grads_and_hessians :: FGH = nothing
     backend :: B = NoBackend()
 
-    func_iip :: Bool = true # true -> func!(y, x, p), false -> y = func(x, p)
-    grads_iip :: Bool = true # true -> grads!(Dy, x, p), false -> Dy = grads(x, p)
-    hessians_iip :: Bool = true # true -> hessians!(H, x, p), false -> H = hessians(x, p)
+    func_iip :: Bool = false # true -> func!(y, x, p), false -> y = func(x, p)
+    grads_iip :: Bool = false # true -> grads!(Dy, x, p), false -> Dy = grads(x, p)
+    hessians_iip :: Bool = false # true -> hessians!(H, x, p), false -> H = hessians(x, p)
     func_and_grads_iip :: Bool = grads_iip  # true -> func_and_grads!(y, Dy, x, p), false -> y, Dy = func_and_grads(x, p)
     func_and_grads_and_hessians_iip :: Bool = hessians_iip # true -> func_and_grads_and_hessians!(y, Dy, H, x, p), false -> y, Dy, H = func_and_grads_and_hessians(x, p)
+
+    num_func_calls :: Base.RefValue{Int} = Ref(0)
+    num_grad_calls :: Base.RefValue{Int} = Ref(0)
+    num_hess_calls :: Base.RefValue{Int} = Ref(0)
+
+    max_func_calls :: Union{Int, Nothing} = nothing
+    max_grad_calls :: Union{Int, Nothing} = nothing
+    max_hess_calls :: Union{Int, Nothing} = nothing
+
+    enforce_max_calls :: Bool = true
 end
 
 function CE.provides_grads(op::NonlinearParametricFunction)
@@ -77,12 +87,38 @@ function CE.provides_hessians(op::NonlinearParametricFunction)
         !(op.backend isa NoBackend)
 end
 
+CE.is_counted(::Nothing)=false
+CE.is_counted(op::NonlinearParametricFunction)=true
+function CE.num_calls(op::NonlinearParametricFunction)
+    return (
+        op.num_func_calls[],
+        op.num_grad_calls[],
+        op.num_hess_calls[]
+    )
+end
+function CE.set_num_calls!(op::NonlinearParametricFunction, vals::Tuple{Int,Int,Int})
+    op.num_func_calls[]=0
+    op.num_grad_calls[]=0
+    op.num_hess_calls[]=0
+    return nothing
+end
+function CE.max_calls(op::NonlinearParametricFunction)
+    return (
+        op.max_func_calls,
+        op.max_grad_calls,
+        op.max_hess_calls
+    )
+end
+
+CE.enforce_max_calls(op::NonlinearParametricFunction)=op.enforce_max_calls
+
 function CE.eval_op!(y, op::NonlinearParametricFunction, x, p)
     if op.func_iip 
         op.func(y, x, p)
     else
         y .= op.func(x, p)
     end
+    op.num_func_calls[]+=1
     return nothing
 end
 
@@ -105,6 +141,7 @@ function CE.eval_grads!(Dy, op::NonlinearParametricFunction, x, p)
     else
         ad_grads!(Dy, op.backend, op.func, x, p, Val(op.func_iip))
     end
+    op.num_grad_calls[]+=1
     return nothing
 end
 
@@ -129,9 +166,14 @@ function CE.eval_hessians!(H, op::NonlinearParametricFunction, x, p)
     else
         ad_hessians!(H, op.backend, op.func, x, p, Val(op.func_iip))
     end
+
+    op.num_hess_calls[]+=1
+
+    return nothing
 end
 
 function CE.eval_op_and_grads!(y, Dy, op::NonlinearParametricFunction, x, p)
+    inc_counter = false
     if !isnothing(op.func_and_grads)
         if op.func_and_grads_iip
             op.func_and_grads(y, Dy, x, p)
@@ -141,32 +183,49 @@ function CE.eval_op_and_grads!(y, Dy, op::NonlinearParametricFunction, x, p)
             y .= _y
             Dy .= _Dy
         end
+        inc_counter = true
     elseif !isnothing(op.grads)
         eval_op!(y, op, x, p)
         eval_grads!(Dy, op, x, p)
     else
         ad_op_and_grads!(y, Dy, op.backend, op.func, x, p, Val(op.func_iip))
+        inc_counter = true
+    end
+    
+    if inc_counter
+        op.num_func_calls[]+=1
+        op.num_grad_calls[]+=1
     end
     return nothing
 end
 
 function CE.eval_op_and_grads_and_hessians!(y, Dy, H, op::NonlinearParametricFunction, x, p)
+    inc_couter = false
     if !isnothing(op.func_and_grads_and_hessians)
         if op.func_and_grads_and_hessians_iip
             op.func_and_grads_and_hessians(y, Dy, H, x, p)
         else
             @debug "Allocating temporary output arrays for `eval_op_and_grads_and_hessians!`."
-            _y, _Dy, _H = op.func_and_grads(x, p)
+            _y, _Dy, _H = op.func_and_grads_and_hessians(x, p)
             y .= _y
             Dy .= _Dy
             H .= _H
         end
+        inc_couter = true
     elseif !isnothing(op.hessians)
         eval_op_and_grads!(y, Dy, op, x, p)
         eval_hessians!(H, op, x, p)
     else
         ad_op_and_grads_and_hessians!(y, Dy, H, op.backend, op.func, x, p, Val(op.func_iip))
+        inc_couter = true
     end
+
+    if inc_couter
+        op.num_func_calls[]+=1
+        op.num_grad_calls[]+=1
+        op.num_hess_calls[]+=1
+    end
+    
     return nothing
 end
 
@@ -257,6 +316,11 @@ macro forward(call_ex)
 end
 
 @forward CE.supports_partial_evaluation(op::NonlinearFunction)
+@forward CE.is_counted(op::NonlinearFunction)
+@forward CE.num_calls(op::NonlinearFunction)
+@forward CE.max_calls(op::NonlinearFunction)
+@forward CE.enforce_max_calls(op::NonlinearFunction)
+@forward CE.set_num_calls!(op::NonlinearFunction)
 @forward CE.provides_grads(op::NonlinearFunction)
 @forward CE.provides_hessians(op::NonlinearFunction)
 @forward CE.eval_op!(y, op::NonlinearFunction, x)
@@ -264,6 +328,11 @@ end
 @forward CE.eval_hessians!(H, op::NonlinearFunction, x)
 @forward CE.eval_op_and_grads!(y, Dy, op::NonlinearFunction, x)
 @forward CE.eval_op_and_grads_and_hessians!(y, Dy, H, op::NonlinearFunction, x)
+@forward CE.func_vals!(y, op::NonlinearFunction, x; outputs=nothing)
+@forward CE.func_grads!(Dy, op::NonlinearFunction, x; outputs=nothing)
+@forward CE.func_vals_and_grads!(y, Dy, op::NonlinearFunction, x; outputs=nothing)
+@forward CE.func_hessians!(H, op::NonlinearFunction, x; outputs=nothing)
+@forward CE.func_vals_and_grads_and_hessians!(y, Dy, H, op::NonlinearFunction, x; outputs=nothing)
 
 export AbstractAutoDiffBackend, NoBackend
 export ad_grads!, ad_hessians!, ad_op_and_grads!, ad_op_and_grads_and_hessians!

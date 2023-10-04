@@ -41,8 +41,10 @@ function restoration_objective(mop, scaler, scaled_cons)
 
         ξr = similar(xr)
         unscale!(ξr, scaler, xr)
-        nl_eq_constraints!(hx, mop, ξr)
-        nl_ineq_constraints!(gx, mop, ξr)
+        r_eq = nl_eq_constraints!(hx, mop, ξr)
+        !isnothing(r_eq) && error(string(r_eq))
+        r_ineq = nl_ineq_constraints!(gx, mop, ξr)
+        !isnothing(r_ineq) && error(string(r_ineq))
         lin_cons!(Eres, Ex, scaled_cons.A_b, xr)
         lin_cons!(Ares, Ax, scaled_cons.E_c, xr)
         
@@ -84,7 +86,8 @@ function postproccess_restoration(
     ##  we have to set `vals` eventually. in case of unsuccessfull restoration, we have to 
     ##  abort anyways)
     copyto!(vals.x, xr_opt)
-    eval_mop!(vals, mop, scaler)
+    mop_code = eval_mop!(vals, mop, scaler)
+    !isnothing(mop_code) && return GenericStopping(mop_code, algo_opts.log_level)
 
     Δ = iter_meta.Δ_pre
 

@@ -22,6 +22,7 @@ function compute_descent_step!(
     ## modify these:
     step_cache::SC, 
     d, s, xs, mod_fxs,   ## descent direction, step vector, trial point, trial point surrogate values
+    crit_ref,               ## reference to criticality value
     ## assume `Δ` to be the current trust-region radius, θ to be constraint violation
     Δ, θ,
     ## use these arrays to set up linear or quadratic sub-problems:
@@ -434,7 +435,7 @@ function vec_sum!(a, b)
 end
 
 function compute_descent_step!(
-    step_cache::SteepestDescentCache, d, s, xs, mod_fxs,
+    step_cache::SteepestDescentCache, d, s, xs, mod_fxs, crit_ref,
     Δ, θ, ξ, x, n, xn, fx, hx, gx, mod_fx, mod_hx, mod_gx, mod_Dfx, mod_Dhx, mod_Dgx,
     Eres, Ex, Ares, Ax, lb, ub, E_c, A_b, mod, mop, scaler
 )
@@ -451,13 +452,13 @@ function compute_descent_step!(
         En, E_c, An, A_b, Hn, mod_Dhx, Gn, mod_Dgx;
         descent_step_norm, normalize_gradients
     )
-    
+    crit_ref[] = χ
     ## set `d`, scale it in place, and set `xs` and `mod_fxs` in backtracking
     copyto!(d, _d)
     @unpack fxn, backtracking_factor, rhs_factor, strict_backtracking = step_cache;
-    backtrack!(d, mod, xn, xs, fxn, mod_fxs, χ, backtracking_factor, rhs_factor, Val(strict_backtracking))
+    r = backtrack!(d, mod, xn, xs, fxn, mod_fxs, χ, backtracking_factor, rhs_factor, Val(strict_backtracking))
     @. s = n + d
-    return χ
+    return r
 end
 
 function backtrack!(
@@ -472,9 +473,9 @@ function backtrack!(
     rhs = χ * rhs_factor
 
     ## evaluate objectives at `xn` and trial point `xs`
-    objectives!(fxn, mod, xn)
     xs .= xn .+ d
-    objectives!(fxs, mod, xs)
+    @serve objectives!(fxn, mod, xn)
+    @serve objectives!(fxs, mod, xs)
 
     ## avoid re-computation of maximum for non-strict test:
     _fxn = strict_backtracking ? fxn : maximum(fxn)
@@ -488,7 +489,7 @@ function backtrack!(
 
         ## reset trial point and compute objectives
         xs .= xn .+ d
-        objectives!(fxs, mod, xs)
+        @serve objectives!(fxs, mod, xs)
     end
     return nothing
 end

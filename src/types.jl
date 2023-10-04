@@ -169,14 +169,17 @@ struct StepValueArrays{T}
 	s :: Vector{T}
     xs :: Vector{T}
     fxs :: Vector{T}
+	crit_ref :: Base.RefValue{T}
 end
 
 function Base.copyto!(step_vals_trgt::StepValueArrays, step_vals_src::StepValueArrays)
 	for fn in fieldnames(StepValueArrays)
+		fn == :crit_ref && continue
 		trgt_fn = getfield(step_vals_trgt, fn)
 		isnothing(trgt_fn) && continue
 		copyto!(trgt_fn, getfield(step_vals_src, fn))
 	end
+	step_vals_trgt.crit_ref[] = step_vals_src.crit_ref[]
 	return nothing
 end
 
@@ -190,7 +193,8 @@ function StepValueArrays(x, fx)
         zeros(T, nin),
         zeros(T, nin),
         zeros(T, nin),
-        zeros(T, nout)
+        zeros(T, nout),
+		Ref(T(Inf))
     )
 end
 

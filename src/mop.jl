@@ -77,6 +77,12 @@ dim_lin_eq_constraints(mop::AbstractMOP)=dim_lin_constraints(lin_eq_constraints(
 dim_lin_ineq_constraints(mop::AbstractMOP)=dim_lin_constraints(lin_ineq_constraints(mop))
 
 # ## Evaluation
+
+# !!! note
+#     All evaluation and differentiation methods that you see below should always 
+#     return `nothing`, **unless** you want to stop early.
+#     Then return something else, for example a string.
+
 # Evaluation of nonlinear objective functions requires the following method:
 function eval_objectives!(y::RVec, mop::M, x::RVec) where {M<:AbstractMOP}
     error("`eval_objectives!(y, mop, x) not implemented for mop of type $(M).")

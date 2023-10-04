@@ -9,7 +9,7 @@ function test_trial_point!(
     
     # Use `vals_tmp` to hold the true values at `xs`:
     copyto!(vals_tmp.x, xs)
-    eval_mop!(vals_tmp, mop, scaler)
+    @serve eval_mop!(vals_tmp, mop, scaler)
 
     # To test the trial point against the filter, extract
     # current values and trial point values
@@ -70,5 +70,5 @@ function test_trial_point!(
     iter_meta.vals_diff_len = LA.norm(iter_meta.vals_diff_vec)
     iter_meta.mod_vals_diff_len = LA.norm(iter_meta.mod_vals_diff_vec)
 
-    return iter_meta.it_stat_post
+    return nothing
 end

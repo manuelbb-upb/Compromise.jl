@@ -49,8 +49,16 @@ function criticality_routine(
             @logmsg log_level "\tCRITICALITY LOOP $(j+1)."
             Δj *= crit_alpha 
             if depends_on_radius(modj)
-                update_models!(modj, Δj, mop, scaler, vals, scaled_cons, algo_opts)
-                eval_and_diff_mod!(mod_valsj, modj, vals.x)
+                _stop_code = update_models!(modj, Δj, mop, scaler, vals, scaled_cons, algo_opts)
+                if !isnothing(_stop_code)
+                    stop_code = GenericStopping(_stop_code, log_level)
+                    break
+                end
+                _stop_code = eval_and_diff_mod!(mod_valsj, modj, vals.x)
+                if !isnothing(_stop_code)
+                    stop_code = GenericStopping(_stop_code, log_level)
+                    break
+                end
                 compute_normal_step!(
                     step_cachej, step_valsj.n, step_valsj.xn, Δj, vals.θ[], 
                     vals.ξ, vals.x, vals.fx, vals.hx, vals.gx, 
@@ -62,18 +70,24 @@ function criticality_routine(
             if !compatibility_test(step_valsj.n, algo_opts, Δj)
                 break
             end
-            χ = compute_descent_step!(
+            _stop_code = compute_descent_step!(
                 step_cachej, step_valsj.d, step_valsj.s, step_valsj.xs, step_valsj.fxs, 
+                step_valsj.crit_ref,
                 Δj, θ, vals.ξ, vals.x, step_valsj.n, step_valsj.xn, vals.fx, vals.hx, vals.gx, 
                 mod_valsj.fx, mod_valsj.hx, mod_valsj.gx, mod_valsj.Dfx, mod_valsj.Dhx, mod_valsj.Dgx,
                 vals.Eres, vals.Ex, vals.Ares, vals.Ax, scaled_cons.lb, scaled_cons.ub, 
                 scaled_cons.E_c, scaled_cons.A_b, modj, mop, scaler
             )
+            χ = step_valsj.crit_ref[]
             Δ = Δj
             copyto!(step_cache, step_cachej)
             copyto!(step_vals, step_valsj)
             copyto!(mod_vals, mod_valsj)
             _copyto_model!(mod, modj)        # check if this is non-allocating
+            if !isnothing(_stop_code)
+                stop_code = GenericStopping(_stop_code, log_level)
+                break
+            end
             for stopping_criterion in stop_crits
                 if check_post_crit_loop(stopping_criterion)
                     stop_code = _evaluate_stopping_criterion(

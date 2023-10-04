@@ -22,7 +22,14 @@ supports_scaling(T::Type{<:AbstractMOPSurrogate})=NoScaling()
 # Define a function to return a model for some MOP.
 # The model does not yet have to be trained.
 init_models(mop::AbstractMOP, n_vars, scaler)::AbstractMOPSurrogate=nothing
-# It is trained with the update method.
+# It is trained with the update method `update_models!`.
+#
+# !!! note
+#     This method should always return `nothing`, **unless** you want to stop the algorithm.
+#     Every other return value stops the algoritm and  `GenericStopping(ret_val)` is returned
+#     as the stop code.
+#     The constructor of `GenericStopping` logs the `ret_val`, so you could return a string
+#     explaining the reason for stopping.
 function update_models!(
     mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts
 )
@@ -38,6 +45,12 @@ _copy_model(mod::AbstractMOPSurrogate)=depends_on_radius(mod) ? copy_model(mod) 
 _copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=depends_on_radius(mod_trgt) ? copyto_model!(mod_trgt, mod_src) : mod_trgt
 
 # ## Evaluation
+
+# !!! note
+#     All evaluation and differentiation methods that you see below should always 
+#     return `nothing`, **unless** you want to stop early.
+#     Then return something else, for example a string.
+
 # Evaluation of nonlinear objective models requires the following method.
 # `x` will be from the scaled domain, but if a model does not support scaling, 
 # then internally the `IdentityScaler()` is used:
@@ -125,27 +138,27 @@ vals_diff_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::
 "Evaluate the models `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
 function eval_mod!(mod_vals, mod, x)
     @unpack fx, hx, gx = mod_vals
-    objectives!(fx, mod, x)
-    nl_eq_constraints!(hx, mod, x)
-    nl_ineq_constraints!(hx, mod, x)
+    @serve objectives!(fx, mod, x)
+    @serve nl_eq_constraints!(hx, mod, x)
+    @serve nl_ineq_constraints!(hx, mod, x)
     return nothing
 end
 
 "Evaluate the model gradients of `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
 function diff_mod!(mod_vals, mod, x)
     @unpack Dfx, Dhx, Dgx = mod_vals
-    diff_objectives!(Dfx, mod, x)
-    diff_nl_eq_constraints!(Dhx, mod, x)
-    diff_nl_ineq_constraints!(hx, mod, x)
+    @serve diff_objectives!(Dfx, mod, x)
+    @serve diff_nl_eq_constraints!(Dhx, mod, x)
+    @serve diff_nl_ineq_constraints!(hx, mod, x)
     return nothing
 end
 
 "Evaluate and differentiate `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
 function eval_and_diff_mod!(mod_vals, mod, x)
     @unpack fx, hx, gx, Dfx, Dhx, Dgx = mod_vals
-    vals_diff_objectives!(fx, Dfx, mod, x)
-    vals_diff_nl_eq_constraints!(hx, Dhx, mod, x)
-    vals_diff_nl_ineq_constraints!(gx, Dgx, mod, x)
+    @serve vals_diff_objectives!(fx, Dfx, mod, x)
+    @serve vals_diff_nl_eq_constraints!(hx, Dhx, mod, x)
+    @serve vals_diff_nl_ineq_constraints!(gx, Dgx, mod, x)
     return nothing
 end
 
