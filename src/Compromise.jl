@@ -424,11 +424,11 @@ function do_iteration!(
             vals.Eres, vals.Ex, vals.Ares, vals.Ax, scaled_cons.lb, scaled_cons.ub, 
             scaled_cons.E_c, scaled_cons.A_b, mod
         )
-        #=
+        
         if vals.θ[] > 0
-            @logmsg algo_opts.log_level "ITERATION $(it_index): Found normal step $(vec2str(step_vals.n))."
+            @logmsg algo_opts.log_level "ITERATION $(it_index): Found normal step $(vec2str(step_vals.n)). Hence xn=$(vec2str(step_vals.xn))."
         end
-        =#
+        
     end
 
     n = step_vals.n
@@ -454,7 +454,8 @@ function do_iteration!(
     )
     χ = step_vals.crit_ref[]
     iter_meta.crit_val = χ
-    @logmsg algo_opts.log_level "\tχ=$(χ), length of descent step is $(LA.norm(step_vals.d))"
+    
+    @logmsg algo_opts.log_level "\t Criticality χ=$(χ), ‖d‖₂=$(LA.norm(step_vals.d)), ‖s‖₂=$(LA.norm(step_vals.s))."
     !isnothing(cd_code) && return GenericStopping(cd_code, algo_opts.log_level)
 
     for stopping_criterion in stop_crits
