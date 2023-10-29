@@ -417,12 +417,15 @@ function find_poised_points!(
     ## mutated:
     Y, Z, database_x, database_flags_x, point_flags, point_indices, round1_flags, Pr, Pr_xi, lb, ub,
     ## not mutated
-    x, Δ, Δ_box, global_lb, global_ub, search_factor, th_qr, j0=0; 
+    x, 
+    Δ,      # actual trust-region radius, used to compute the pivot value
+    Δ_box,  # unscaled radius of the sampling box; is scaled by search_factor to define the sampling region
+    global_lb, global_ub, search_factor, th_qr, j0=0; 
     norm_p = Inf, log_level = Info
 )
     dim_in = length(x)
+    
     ## compute trust region box corners with enlarged radius
-    @logmsg log_level "\t\tRBF Construction: Trying to find samples for Δ=$Δ."
     trust_region_bounds!(lb, ub, x, search_factor*Δ_box, global_lb, global_ub)
 
     ## reset Z to identity matrix:
@@ -434,6 +437,11 @@ function find_poised_points!(
     proj_th = (th_qr * Δ)^2
     j = j0
     _Z = @view(Z[:,:])
+    
+    @logmsg log_level """
+    \tRBF Construction: 
+    \t                 Would like $(dim_in - j) points in box of radius θ*Δ=$(search_factor*Δ_box). 
+    \t                 Pivot value is $(proj_th)."""
     @views for i = reverse(axes(database_x, 2))
         !database_flags_x[i] && continue  # not a point in the database
         point_flags[i] && continue        # point already considered an interpolation point
@@ -546,7 +554,8 @@ function update_rbf_model!(
     ## add constant polynomial basis function to last row 
     rbf.Y[end, :] .= 1
     
-    @logmsg log_level "\t\tRBF Construction: Using samples $(point_indices). Looking for more."
+    #@logmsg log_level "\tRBF Construction: Using samples $(point_indices). Looking for more."
+    @logmsg log_level "\tRBF Construction: Using samples $(point_indices)."
     find_more_points!(rbf, x, log_level)
     compute_coefficients!(rbf)
 end
@@ -592,6 +601,9 @@ function find_more_points!(
     T = eltype(Y)
     @assert npoints == dim_p "This version does not yet support `npoints < `dim_p`."
     if npoints < max_points
+        @logmsg log_level """
+        \tRBF Construction: 
+        \t                 Looking for additional points."""
         ## Finally, look for additional points in `lb_max`, `ub_max`...
         φ = build_rbf_matrix!(_Φ, dists, φ, database_x, point_indices)
         Φ = @view _Φ[1:npoints, 1:npoints]
@@ -669,7 +681,7 @@ function find_more_points!(
                 #src @show _Lxi_*_Lxi_' .- _ZΦZxi_
 
                 if τ_xi >= th_chol
-                    @logmsg log_level "\t\tRBF Construction: Adding point $i from database."
+                    @logmsg log_level "\tRBF Construction: Adding point $i from database."
                     point_flags[i] = true
                     push!(point_indices, i)
                     Y[1:end-1, j] .= Pr_xi
@@ -691,10 +703,8 @@ function find_more_points!(
 					    -(v_xi'Linv'Linv)./τ_xi     1/τ_xi
 				    ]
 
-                    Z = @view(Q_xi[:, dim_p+1:end])
-                    
-                    
-                end
+                    Z = @view(Q_xi[:, dim_p+1:end]) 
+                end# if τ_x >= th_chol
             end
         end
     end

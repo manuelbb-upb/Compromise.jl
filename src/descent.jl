@@ -337,13 +337,14 @@ function compute_normal_step!(
 )
     ## initialize assuming a zero step
     n .= 0
-    copyto!(xn, n)
+    copyto!(xn, x)
     if θ > 0
         n .= solve_normal_step_problem!(
             step_cache.En, step_cache.An, step_cache.Hn, step_cache.Gn, step_cache.qp_opt,
             x, lb, ub, Ex, E_c, Ax, A_b, mod_hx, mod_Dhx, mod_gx, mod_Dgx;
             step_norm=step_cache.normal_step_norm
         )
+        xn .+= n 
     end
 end
 #=
@@ -423,7 +424,7 @@ function solve_steepest_descent_problem(
     JuMP.optimize!(opt)
     _d = JuMP.value.(d)  # this allocation should be negligible
     #src @show d_norm = LA.norm(_d, descent_step_norm)
-    # srcχ = iszero(d_norm) ? d_norm : @show(-JuMP.value(β))/d_norm
+    #srcχ = iszero(d_norm) ? d_norm : @show(-JuMP.value(β))/d_norm
     χ = abs(JuMP.value(β) * LA.norm(_d, descent_step_norm))
     return χ, _d
 end
