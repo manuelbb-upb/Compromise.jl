@@ -15,14 +15,17 @@ NLopt = "76087f3c-5699-56af-9a33-bf431cd00edd"
 Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 Requires = "ae029012-a4dd-5104-9daa-d747884805df"
-SparseArrayKit = "a9a3c162-d163-4c15-8926-b8794fbefed2"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
-[compat]
-julia = "1"
+[weakdeps]
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+Requires = "ae029012-a4dd-5104-9daa-d747884805df"
 
 [extensions]
 ForwardDiffBackendExt = "ForwardDiff"
+
+[compat]
+julia = "1"
 
 [extras]
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
@@ -30,7 +33,3 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
 test = ["Test", "ForwardDiff"]
-
-[weakdeps]
-ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
-Requires = "ae029012-a4dd-5104-9daa-d747884805df"

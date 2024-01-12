@@ -59,11 +59,9 @@ include("evaluators/NonlinearFunctions.jl")
 using .NonlinearFunctions
 
 # Import the optional extension `ForwardDiffBackendExt`, if `ForwardDiff` is available:
-if !isdefined(Base, :get_extension)
-    using Requires
-end
 
 @static if !isdefined(Base, :get_extension)
+    using Requires
     function __init__()
         @require ForwardDiff="f6369f11-7733-5829-9624-2563aa707210" begin
             include("../ext/ForwardDiffBackendExt/ForwardDiffBackendExt.jl")
@@ -79,7 +77,7 @@ function ForwardDiffBackend()
         if isdefined(@__MODULE__, :ForwardDiffBackendExt)
             return ForwardDiffBackendExt.ForwardDiffBackend()
         end
-            return nothing
+        return nothing
     else
         m = Base.get_extension(@__MODULE__, :ForwardDiffBackendExt)
         return isnothing(m) ? m : m.ForwardDiffBackend()
