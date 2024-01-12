@@ -51,56 +51,56 @@ abstract type AbstractStepCache end
     max_iter :: Int = 500
 
     "Stop if the trust region radius is reduced to below `stop_delta_min`."
-	stop_delta_min = eps(Float64)
+	stop_delta_min :: Float64 = eps(Float64)
 
 	"Stop if the trial point ``xₜ`` is accepted and ``‖xₜ - x‖≤ δ‖x‖``."
-	stop_xtol_rel = -Inf
+	stop_xtol_rel :: Float64 = -Inf
 	"Stop if the trial point ``xₜ`` is accepted and ``‖xₜ - x‖≤ ε``."
-	stop_xtol_abs = -Inf
+	stop_xtol_abs :: Float64 = -Inf
 	"Stop if the trial point ``xₜ`` is accepted and ``‖f(xₜ) - f(x)‖≤ δ‖f(x)‖``."
-	stop_ftol_rel = -Inf
+	stop_ftol_rel :: Float64 = -Inf
 	"Stop if the trial point ``xₜ`` is accepted and ``‖f(xₜ) - f(x)‖≤ ε``."
-	stop_ftol_abs = -Inf
+	stop_ftol_abs :: Float64 = -Inf
 
 	"Stop if for the approximate criticality it holds that ``χ̂(x) <= ε`` and for the feasibility that ``θ <= δ``."
-	stop_crit_tol_abs = eps(Float64)
+	stop_crit_tol_abs :: Float64 = eps(Float64)
 	"Stop if for the approximate criticality it holds that ``χ̂(x) <= ε`` and for the feasibility that ``θ <= δ``."
-	stop_theta_tol_abs = eps(Float64)
+	stop_theta_tol_abs :: Float64 = eps(Float64)
 	
 	"Stop after the criticality routine has looped `stop_max_crit_loops` times."
-	stop_max_crit_loops = 1
+	stop_max_crit_loops :: Int = 1
 
 	# criticality test thresholds
-	eps_crit = 0.1
-	eps_theta = 0.1
-	crit_B = 1000
-	crit_M = 3000
-	crit_alpha = 0.5
+	eps_crit :: Float64 = 0.1
+	eps_theta :: Float64 = 0.1
+	crit_B :: Float64 = 1000
+	crit_M :: Float64 = 3000
+	crit_alpha :: Float64 = 0.5
 	
 	# initialization
-	delta_init = 0.5
-	delta_max = 2^5 * delta_init
+	delta_init :: Float64 = 0.5
+	delta_max :: Float64 = 2^5 * delta_init
 
 	# trust region updates
-	gamma_shrink_much = 0.1 	# 0.1 is suggested by Fletcher et. al. 
-	gamma_shrink = 0.5 			# 0.5 is suggested by Fletcher et. al. 
-	gamma_grow = 2.0 			# 2.0 is suggested by Fletcher et. al. 
+	gamma_shrink_much :: Float64= 0.1 	# 0.1 is suggested by Fletcher et. al. 
+	gamma_shrink :: Float64 = 0.5 			# 0.5 is suggested by Fletcher et. al. 
+	gamma_grow :: Float64 = 2.0 			# 2.0 is suggested by Fletcher et. al. 
 
 	# acceptance test 
-	strict_acceptance_test = true
-	nu_accept = 0.01 			# 1e-2 is suggested by Fletcher et. al. 
-	nu_success = 0.9 			# 0.9 is suggested by Fletcher et. al. 
+	strict_acceptance_test :: Bool = true
+	nu_accept :: Float64 = 0.01 			# 1e-2 is suggested by Fletcher et. al. 
+	nu_success :: Float64 = 0.9 			# 0.9 is suggested by Fletcher et. al. 
 	
 	# compatibilty parameters
-	c_delta = 0.7 				# 0.7 is suggested by Fletcher et. al. 
-	c_mu = 100.0 				# 100 is suggested by Fletcher et. al.
-	mu = 0.01 					# 0.01 is suggested by Fletcher et. al.
+	c_delta :: Float64 = 0.7 				# 0.7 is suggested by Fletcher et. al. 
+	c_mu :: Float64 = 100.0 				# 100 is suggested by Fletcher et. al.
+	mu :: Float64 = 0.01 					# 0.01 is suggested by Fletcher et. al.
 
 	# model decrease / constraint violation test
-	kappa_theta = 1e-4 			# 1e-4 is suggested by Fletcher et. al. 
-	psi_theta = 2.0
+	kappa_theta :: Float64 = 1e-4 			# 1e-4 is suggested by Fletcher et. al. 
+	psi_theta :: Float64 = 2.0
 
-	nlopt_restoration_algo = :LN_COBYLA
+	nlopt_restoration_algo :: Symbol = :LN_COBYLA
 
     scaler_cfg :: Symbol = :box
 

@@ -46,7 +46,7 @@ function criticality_routine(
                 !isnothing(stop_code) && break
             end
             !isnothing(stop_code) && break
-            @logmsg log_level "\tCRITICALITY LOOP $(j+1)."
+            @logmsg log_level "\tCRITICALITY LOOP $(j+1), Δ=$Δj, Mχ=$(crit_M * χ)."
             Δj *= crit_alpha 
             if depends_on_radius(modj)
                 _stop_code = update_models!(modj, Δj, mop, scaler, vals, scaled_cons, algo_opts)
