@@ -98,7 +98,7 @@ nl_ineq_function!(y, x) = y[1] = 1 - sum(x.^2)
 # ### Excursion: RBF Kernels
 # By default, a cubic kernel is used, if we use the `:rbf`
 # option with `add_nl_ineq_constraints!`.
-# To use the Gaussian kernel `φ_ε(r) = \\exp(-(εr)^2)`` 
+# To use the Gaussian kernel ``φ_ε(r) = \\exp(-(εr)^2)`` 
 # with fixed shape paramater `10`, do
 # ```julia
 # rbf_config = RBFConfig(; kernel=GaussianKernel(10))
@@ -141,7 +141,7 @@ using ForwardDiff
 # Now, `ForwardDiffBackend` should be available:
 diff_backend = ForwardDiffBackend()
 
-# Setup the problem:
+# Set up the problem:
 mop = MutableMOP(2)
 add_objectives!(mop, objective_function, :exact;
     func_iip=false, dim_out=2, backend=diff_backend

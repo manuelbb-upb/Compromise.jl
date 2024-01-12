@@ -67,10 +67,7 @@ function objective_grads(x)
     df11 = df21 = 2 * (x[1] - 2)
     df12 = 2 * (x[2] - 1)
     df22 = 2 * (x[2] + 1)
-    return [ 
-        df11 df21; 
-        df12 df22 
-    ]
+    return [ df11 df21; df12 df22 ]
 end
 ````
 
@@ -114,7 +111,7 @@ radial basis function (RBF) models.
 ### Excursion: RBF Kernels
 By default, a cubic kernel is used, if we use the `:rbf`
 option with `add_nl_ineq_constraints!`.
-To use the Gaussian kernel `φ_ε(r) = \\exp(-(εr)^2)``
+To use the Gaussian kernel ``φ_ε(r) = \\exp(-(εr)^2)``
 with fixed shape paramater `10`, do
 ```julia
 rbf_config = RBFConfig(; kernel=GaussianKernel(10))
@@ -175,7 +172,7 @@ Now, `ForwardDiffBackend` should be available:
 diff_backend = ForwardDiffBackend()
 ````
 
-Setup the problem:
+Set up the problem:
 
 ````julia
 mop = MutableMOP(2)

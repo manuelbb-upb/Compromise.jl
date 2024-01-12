@@ -50,7 +50,53 @@ for details.
 supports_partial_evaluation(op::AbstractNonlinearOperator) = false
 ````
 
+Stopping based on the number of evaluations is surprisingly hard if we don't
+want to give up most of the flexibility and composability of Operators and(/in) Problems
+and models.
+To implement such a stopping mechanism, we would like the operator to
+count the number of evaluations.
+
+````julia
+is_counted(op::AbstractNonlinearOperator)=false
+````
+
+If `is_counted` returns true, we assume that we can safely call
+`num_calls` and get a 3-tuple of values:
+the number of function evaluations, gradient evaluations and Hessian evaluations:
+
+````julia
+num_calls(op::AbstractNonlinearOperator)::Tuple{Int, Int, Int}=nothing
+````
+
+In addition, there should be a method to (re-)set the counters:
+
+````julia
+set_num_calls!(op::AbstractNonlinearOperator,vals::Tuple{Int,Int,Int})=nothing
+````
+
+Stopping based on the number of evaluations is so fundamental, I make it
+part of the interface:
+
+````julia
+max_calls(op::AbstractNonlinearOperator)::Union{Nothing,NTuple{3, Union{Int,Nothing}}}=nothing
+````
+
+If you have `enforce_max_calls` return `true`, then we automatically check the number of
+evaluations (or differentiation calls).
+You then don't have to implement this yourself in `eval_op!` etc.
+
+````julia
+enforce_max_calls(op::AbstractNonlinearOperator)=true
+````
+
+!!! note
+    Whether or not `max_calls` is respected depends on the implementation of
+    `AbstractMOPSurrogate` or the implementation of `update!` for `AbstractSurrogateModel`...
+
 ### Methods for `AbstractNonlinearOperatorWithParams`
+!!! note
+    The evaluation methods should respect `is_counted` and internally increase any counters.
+
 The methods below should be implemented to evaluate parameter dependent operators:
 
 ````julia
@@ -80,9 +126,12 @@ The combined forward-function `eval_op_and_grads!` is derived from `eval_op!` an
 `eval_grads!`, but can be customized easily:
 
 ````julia
+# helper macro `@serve` instead of `return`
+import ..Compromise: @serve
+
 function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x, p)
-    eval_op!(y, val, x, p)
-    eval_grads!(Dy, val, x, p)
+    @serve eval_op!(y, val, x, p)
+    @serve eval_grads!(Dy, val, x, p)
     return nothing
 end
 ````
@@ -117,8 +166,8 @@ but can be customized easily:
 
 ````julia
 function eval_op_and_grads!(y, Dy, H, op::AbstractNonlinearOperatorWithParams, x, p)
-    eval_op_and_grads!(Dy, y, op, x, p)
-    eval_hessians!(H, val, x, p)
+    @serve eval_op_and_grads!(Dy, y, op, x, p)
+    @serve eval_hessians!(H, val, x, p)
     return nothing
 end
 ````
@@ -138,16 +187,16 @@ function partial_grads!(Dy, op::AbstractNonlinearOperatorWithParams, x, p, outpu
     return error("Partial Jacobian not implemented.")
 end
 function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
-    partial_op!(y, op, x, p, outputs)
-    partial_grads!(Dy, op, x, p, outputs)
+    @serve partial_op!(y, op, x, p, outputs)
+    @serve partial_grads!(Dy, op, x, p, outputs)
     return nothing
 end
 function partial_hessians!(H, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
     return error("Partial Hessians not implemented.")
 end
 function partial_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
-    partial_op_and_grads!(y, Dy, op, x, p, outputs)
-    partial_hessians!(H, op, x, p, outputs)
+    @serve partial_op_and_grads!(y, Dy, op, x, p, outputs)
+    @serve partial_hessians!(H, op, x, p, outputs)
     return nothing
 end
 ````
@@ -159,36 +208,58 @@ By implementing the parametric-interface for `AbstractNonlinearOperatorNoParams`
 they work out-of-the box for non-paremetric operators, too:
 
 ````julia
-function func_vals!(y, op::AbstractNonlinearOperator, x, p, outputs=nothing)
+function check_num_calls(op, ind; force::Bool=enforce_max_calls(op))
+    !is_counted(op) && return nothing
+    !force && return nothing
+    max_call_tuple = max_calls(op)
+    isnothing(max_call_tuple) && return nothing
+    ncalls = num_calls(op)
+    for i=ind
+        ni = ncalls[i]
+        mi = max_call_tuple[i]
+        isnothing(mi) && continue
+        if ni >= mi
+            return "Maximum evaluation count reached, order=$(i-1), evals $(ni) >= $(mi)."
+        end
+    end
+    return nothing
+end
+
+function func_vals!(y, op::AbstractNonlinearOperator, x, p; outputs=nothing)
+    @serve check_num_calls(op, 1)
     if !isnothing(outputs) && supports_partial_evaluation(op)
-        partial_op!(y, op, x, p, outputs)
+        return partial_op!(y, op, x, p, outputs)
     end
     return eval_op!(y, op, x, p)
 end
-function func_grads!(Dy, op::AbstractNonlinearOperator, x, p, outputs=nothing)
+function func_grads!(Dy, op::AbstractNonlinearOperator, x, p; outputs=nothing)
+    @serve check_num_calls(op, 2)
     if !isnothing(outputs) && supports_partial_evaluation(op)
-        partial_grads!(Dy, op, x, p, outputs)
+        return partial_grads!(Dy, op, x, p, outputs)
     end
     return eval_grads!(Dy, op, x, p)
 end
-function func_vals_and_grads!(y, Dy, op::AbstractNonlinearOperator, x, p, outputs=nothing)
+function func_vals_and_grads!(y, Dy, op::AbstractNonlinearOperator, x, p; outputs=nothing)
+    @serve check_num_calls(op, (1,2))
     if !isnothing(outputs) && supports_partial_evaluation(op)
-        partial_op_and_grads!(y, Dy, op, x, p, outputs)
+        return partial_op_and_grads!(y, Dy, op, x, p, outputs)
     end
     return eval_op_and_grads!(y, Dy, op, x, p)
 end
-function func_hessians!(H, op::AbstractNonlinearOperator, x, p, outputs=nothing)
+function func_hessians!(H, op::AbstractNonlinearOperator, x, p; outputs=nothing)
+    @serve check_num_calls(op, 3)
     if !isnothing(outputs) && supports_partial_evaluation(op)
-        partial_hessians!(H, op, x, p, outputs)
+        return partial_hessians!(H, op, x, p, outputs)
     end
     return eval_hessians!(H, op, x, p)
 end
 function func_vals_and_grads_and_hessians!(
-    y, Dy, H, op::AbstractNonlinearOperator, x, p, outputs=nothing)
+    y, Dy, H, op::AbstractNonlinearOperator, x, p; outputs=nothing)
+    @serve check_num_calls(op, (1,2,3))
     if !isnothing(outputs) && supports_partial_evaluation(op)
-        partial_op_and_grads_and_hessians!(y, Dy, H, op, x, p, outputs)
+        return partial_op_and_grads_and_hessians!(y, Dy, H, op, x, p, outputs)
     end
-    eval_op_and_grads_and_hessians!(y, Dy, H, op, x, p)
+    return eval_op_and_grads_and_hessians!(y, Dy, H, op, x, p)
 end
 ````
 
@@ -214,8 +285,8 @@ Optional, derived method for values and gradients:
 
 ````julia
 function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x)
-    eval_op!(y, op, x)
-    eval_grads!(Dy, op, x)
+    @serve eval_op!(y, op, x)
+    @serve eval_grads!(Dy, op, x)
     return nothing
 end
 ````
@@ -227,8 +298,8 @@ function eval_hessians!(H, op::AbstractNonlinearOperatorNoParams, x)
     return error("No implementation of `eval_hessians!` for operator $op.")
 end
 function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorNoParams, x)
-    eval_op_and_grads!(y, Dy, op, x)
-    eval_hessians!(H, op, x)
+    @serve eval_op_and_grads!(y, Dy, op, x)
+    @serve eval_hessians!(H, op, x)
     return nothing
 end
 ````
@@ -244,40 +315,17 @@ function partial_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x, outputs)
     return error("Partial Jacobian not implemented.")
 end
 function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x, outputs)
-    partial_op!(y, op, x, outputs)
-    partial_grads!(Dy, op, x, outputs)
+    @serve partial_op!(y, op, x, outputs)
+    @serve partial_grads!(Dy, op, x, outputs)
     return nothing
 end
 function partial_hessians!(H, op::AbstractNonlinearOperatorNoParams, x, outputs)
     return error("Partial Hessians not implemented.")
 end
 function partial_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorNoParams, x, outputs)
-    partial_op_and_grads!(y, Dy, op, x, outputs)
-    partial_hessians!(H, op, x, outputs)
+    @serve partial_op_and_grads!(y, Dy, op, x, outputs)
+    @serve partial_hessians!(H, op, x, outputs)
     return nothing
-end
-````
-
-The safe-guarded methods simply forward to the parametric versions and pass `nothing`
-parameters:
-
-````julia
-function func_vals!(y, op::AbstractNonlinearOperatorNoParams, x, outputs=nothing)
-    return func_vals!(y, op, x, nothing, outputs)
-end
-function func_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x, outputs=nothing)
-    return func_grads!(Dy, op, x, nothing, outputs)
-end
-function func_vals_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x, outputs=nothing)
-    return func_vals_and_grads!(y, Dy, op, x, nothing, outputs)
-end
-function func_hessians!(H, op::AbstractNonlinearOperatorNoParams, x, outputs=nothing)
-    return func_hessians!(H, op, x, nothing, outputs)
-end
-function func_vals_and_grads_and_hessians!(
-    y, Dy, H, op::AbstractNonlinearOperatorNoParams, x, outputs=nothing
-)
-    return func_vals_and_grads_and_hessians!(y, Dy, H, op, x, nothing, outputs)
 end
 ````
 
@@ -322,6 +370,29 @@ function partial_op_and_grads_and_hessians!(
     y, Dy, H, op::AbstractNonlinearOperatorNoParams, x, p, outputs
 )
     return partial_op_and_grads_and_hessians!(y, Dy, H, op, x, outputs)
+end
+````
+
+The safe-guarded methods can now simply forward to the parametric versions
+and pass `nothing` parameters:
+
+````julia
+function func_vals!(y, op::AbstractNonlinearOperator, x; outputs=nothing)
+    return func_vals!(y, op, x, nothing; outputs)
+end
+function func_grads!(Dy, op::AbstractNonlinearOperator, x; outputs=nothing)
+    return func_grads!(Dy, op, x, nothing; outputs)
+end
+function func_vals_and_grads!(y, Dy, op::AbstractNonlinearOperator, x; outputs=nothing)
+    return func_vals_and_grads!(y, Dy, op, x, nothing; outputs)
+end
+function func_hessians!(H, op::AbstractNonlinearOperator, x; outputs=nothing)
+    return func_hessians!(H, op, x, nothing; outputs)
+end
+function func_vals_and_grads_and_hessians!(
+    y, Dy, H, op::AbstractNonlinearOperator, x; outputs=nothing
+)
+    return func_vals_and_grads_and_hessians!(y, Dy, H, op, x, nothing; outputs)
 end
 ````
 
@@ -570,6 +641,7 @@ export AbstractSurrogateModel, AbstractSurrogateModelConfig
 export supports_partial_evaluation, provides_grads, provides_hessians, requires_grads, requires_hessians
 export func_vals!, func_grads!, func_hessians!, func_vals_and_grads!, func_vals_and_grads_and_hessians!
 export eval_op!, eval_grads!, eval_hessians!, eval_op_and_grads!, eval_op_and_grads_and_hessians!
+export func_vals!, func_grads!, func_vals_and_grads!, func_vals_and_grads_and_hessians!
 export model_op!, model_grads!, model_op_and_grads!
 export init_surrogate, update!
 

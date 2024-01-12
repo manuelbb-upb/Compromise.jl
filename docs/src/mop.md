@@ -95,6 +95,12 @@ dim_lin_ineq_constraints(mop::AbstractMOP)=dim_lin_constraints(lin_ineq_constrai
 ````
 
 ## Evaluation
+
+!!! note
+    All evaluation and differentiation methods that you see below should always
+    return `nothing`, **unless** you want to stop early.
+    Then return something else, for example a string.
+
 Evaluation of nonlinear objective functions requires the following method:
 
 ````julia
