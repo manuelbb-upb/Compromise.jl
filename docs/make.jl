@@ -51,6 +51,7 @@ makedocs(;
         "(Dev) Notes" => "dev_notes.md",
         "Interfaces" => ["CompromiseEvaluators.md", "mop.md", "models.md"],
     ],
+    warnonly = true, # TODO be more strict about this
 )
 
 deploydocs(;

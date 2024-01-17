@@ -1,5 +1,5 @@
 ```@meta
-EditURL = "<unknown>/docs/literate_src/README.jl"
+EditURL = "../literate_src/README.jl"
 ```
 
 # Compromise.jl

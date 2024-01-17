@@ -24,7 +24,7 @@ using Parameters: @with_kw
 
 # ## Wrapper for Parametric Functions
 
-"""
+@doc """
     NonlinearParametricFunction(; 
         func, grads=nothing, hessians=nothing, 
         func_and_grads=nothing, func_and_grads_and_hessians=nothing,
@@ -53,7 +53,6 @@ flags indicate the following signatures:
 Alternatively (or additionally), an `AbstractAutoDiffBackend` can be passed to 
 compute the derivatives if the relevant field `isnothing`.
 """
-
 @with_kw struct NonlinearParametricFunction{F, G, H, FG, FGH, B} <: AbstractNonlinearOperatorWithParams
     func :: F
     grads :: G = nothing
