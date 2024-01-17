@@ -57,7 +57,7 @@ const CE = CompromiseEvaluators
 # Import wrapper types to make user-provided functions conform to the operator interface:
 include("evaluators/NonlinearFunctions.jl")
 using .NonlinearFunctions
-
+import .NonlinearFunctions: NonlinearParametricFunction
 # Import the optional extension `ForwardDiffBackendExt`, if `ForwardDiff` is available:
 
 using Requires

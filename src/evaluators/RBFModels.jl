@@ -2,7 +2,7 @@ module RBFModels
 
 using ..Compromise.CompromiseEvaluators
 const CE = CompromiseEvaluators
-import ..Compromise: @serve
+import ..Compromise: @serve, DEFAULT_PRECISION
 
 using ElasticArrays
 import LinearAlgebra as LA
@@ -297,7 +297,9 @@ function intersect_intervals(l1, r1, l2, r2, T=typeof(l1))
 end
 
 function intersect_box(x::X, z::Z, lb::L, ub::U) where {X, Z, L, U}
-    T = Base.promote_eltype(X, Z, L, U)
+    _T = Base.promote_eltype(X, Z, L, U)
+    T = _T <: AbstractFloat ? _T : DEFAULT_PRECISION
+
     σ_min, σ_max = T(-Inf), T(Inf)
     for (xi, zi, lbi, ubi) = zip(x, z, lb, ub)    
         ## x + σ * z <= ub

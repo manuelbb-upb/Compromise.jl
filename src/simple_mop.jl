@@ -276,7 +276,7 @@ for (fntype, typenoun) in (
         Keyword argument `dim_out` is mandatory and corresponds to the length of the result
         vector.
         The other `kwargs...` are passed to the inner `AbstractNonlinearOperator` as is.
-        For options and defaults see [`Compromise.NonlinearParametricFunction`](@ref).
+        For options and defaults see [`NonlinearParametricFunction`](@ref).
         """
         function $(add_fn)(
             mop::MutableMOP, func::Function, model_cfg=nothing; dim_out::Int, kwargs...
@@ -304,7 +304,7 @@ for (fntype, typenoun) in (
         Keyword argument `dim_out` is mandatory and corresponds to the length of the result
         vector.
         The other `kwargs...` are passed to the inner `AbstractNonlinearOperator` as is.
-        For options and defaults see [`Compromise.NonlinearParametricFunction`](@ref).
+        For options and defaults see [`NonlinearParametricFunction`](@ref).
         """
         function $(add_fn)(
             mop::MutableMOP, func::Function, grads::Function, model_cfg=nothing; dim_out::Int, kwargs...
@@ -329,7 +329,7 @@ for (fntype, typenoun) in (
         Keyword argument `dim_out` is mandatory and corresponds to the length of the result
         vector.
         The other `kwargs...` are passed to the inner `AbstractNonlinearOperator` as is.
-        For options and defaults see [`Compromise.NonlinearParametricFunction`](@ref).
+        For options and defaults see [`NonlinearParametricFunction`](@ref).
         """
         function $(add_fn)(
             mop::MutableMOP, func::Function, grads::Function, func_and_grads::Function, 

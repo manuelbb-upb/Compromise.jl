@@ -12,5 +12,5 @@ Random Doc-Strings:
 ```
 
 ```@autodocs
-Modules = [Compromise]
+Modules = [Compromise.NonlinearFunctions, Compromise,]
 ```
