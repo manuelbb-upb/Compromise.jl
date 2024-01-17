@@ -19,7 +19,6 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [weakdeps]
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
-Requires = "ae029012-a4dd-5104-9daa-d747884805df"
 
 [extensions]
 ForwardDiffBackendExt = "ForwardDiff"
