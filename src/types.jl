@@ -45,9 +45,17 @@ abstract type AbstractStepConfig end
 abstract type AbstractStepCache end
 
 # ## AlgorithmOptions
+"""
+	AlgorithmOptions(; kwargs...)
+
+Configure the optimization by passing keyword arguments:
+$(TYPEDFIELDS)
+"""
 @with_kw struct AlgorithmOptions{SC}
+	"Control verbosity by setting a min. level for `@logmsg`."
 	log_level :: LogLevel = LogLevel(0)
 
+	"Maximum number of iterations."
     max_iter :: Int = 500
 
     "Stop if the trust region radius is reduced to below `stop_delta_min`."
@@ -71,41 +79,60 @@ abstract type AbstractStepCache end
 	stop_max_crit_loops :: Int = 1
 
 	# criticality test thresholds
+	"Lower bound for criticality before entering Criticality Routine."
 	eps_crit :: Float64 = 0.1
+	"Lower bound for feasibility before entering Criticality Routine."
 	eps_theta :: Float64 = 0.1
+	"At the end of the Criticality Routine the radius is possibly set to `crit_B * χ`."
 	crit_B :: Float64 = 1000
+	"Criticality Routine runs until `Δ ≤ crit_M * χ`."
 	crit_M :: Float64 = 3000
+	"Trust region shrinking factor in criticality loops."
 	crit_alpha :: Float64 = 0.5
 	
 	# initialization
+	"Initial trust region radius."
 	delta_init :: Float64 = 0.5
+	"Maximum trust region radius."
 	delta_max :: Float64 = 2^5 * delta_init
 
 	# trust region updates
-	gamma_shrink_much :: Float64= 0.1 	# 0.1 is suggested by Fletcher et. al. 
+	"Most severe trust region reduction factor."
+	gamma_shrink_much :: Float64= 0.1 	    # 0.1 is suggested by Fletcher et. al. 
+	"Trust region reduction factor."
 	gamma_shrink :: Float64 = 0.5 			# 0.5 is suggested by Fletcher et. al. 
+	"Trust region enlargement factor."
 	gamma_grow :: Float64 = 2.0 			# 2.0 is suggested by Fletcher et. al. 
 
 	# acceptance test 
+	"Whether to require *all* objectives to be reduced or not."
 	strict_acceptance_test :: Bool = true
+	"Acceptance threshold."
 	nu_accept :: Float64 = 0.01 			# 1e-2 is suggested by Fletcher et. al. 
+	"Success threshold."
 	nu_success :: Float64 = 0.9 			# 0.9 is suggested by Fletcher et. al. 
 	
 	# compatibilty parameters
+	"Factor for normal step compatibility test. The smaller `c_delta`, the stricter the test."
 	c_delta :: Float64 = 0.7 				# 0.7 is suggested by Fletcher et. al. 
+	"Factor for normal step compatibility test. The smaller `c_mu`, the stricter the test for small radii."
 	c_mu :: Float64 = 100.0 				# 100 is suggested by Fletcher et. al.
+	"Exponent for normal step compatibility test. The larger `mu`, the stricter the test for small radii."
 	mu :: Float64 = 0.01 					# 0.01 is suggested by Fletcher et. al.
 
 	# model decrease / constraint violation test
+	"Factor in the model decrease condition."
 	kappa_theta :: Float64 = 1e-4 			# 1e-4 is suggested by Fletcher et. al. 
+	"Exponent (for constraint violation) in the model decrease condition."
 	psi_theta :: Float64 = 2.0
 
-	nlopt_restoration_algo :: Symbol = :LN_COBYLA
-
+	"Configuration to determine variable scaling (if model supports it). Either `:box` or `:none`."
     scaler_cfg :: Symbol = :box
 
+	"Configuration object for descent and normal step computation."
     step_config :: SC = SteepestDescentConfig()
 
+	"NLopt algorithm symbol for restoration phase."
     nl_opt :: Symbol = :LN_COBYLA
 
     @assert scaler_cfg == :box || scaler_cfg == :none

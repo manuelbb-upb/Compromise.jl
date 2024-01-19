@@ -7,6 +7,8 @@ module Compromise
 import Parameters: @with_kw, @unpack
 # Everything in this module needs at least some linear algebra:
 import LinearAlgebra as LA
+# Automatically annotated docstrings:
+using DocStringExtensions
 
 import Logging: @logmsg, LogLevel
 
