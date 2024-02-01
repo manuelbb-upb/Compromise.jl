@@ -84,5 +84,5 @@ function init_box_scaler(lb::RVec, ub::RVec, dim)
     Tinv = LA.Diagonal(w)
     binv = lb
 
-    return AffineVarScalar(T, Tinv, b, binv)
+    return AffineVarScaler(T, Tinv, b, binv)
 end
