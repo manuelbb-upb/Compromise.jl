@@ -281,8 +281,13 @@ for (fntype, typenoun) in (
         function $(add_fn)(
             mop::MutableMOP, func::Function, model_cfg=nothing; dim_out::Int, kwargs...
         )
-            op = NonlinearFunction(; func, kwargs...)
-            return add_function!($(Meta.quot(fntype)), mop, op, model_cfg; dim_out)
+            if dim_out > 0
+                op = NonlinearFunction(; func, kwargs...)
+                return add_function!($(Meta.quot(fntype)), mop, op, model_cfg; dim_out)
+            else
+                @warn "`dim_out` must be positive. Not adding function to problem."
+                return nothing
+            end
         end
 
         # Define methods to allow hand-crafted gradient functions without keyword
