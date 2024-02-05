@@ -121,6 +121,8 @@ end
     @assert normal_step_norm == 2 || normal_step_norm == Inf      # TODO enable other norms
 end
 
+@batteries SteepestDescentConfig selfconstructor=false
+
 Base.@kwdef struct SteepestDescentCache{
     T, DN, NN, EN, AN, HN, GN, QPOPT} <: AbstractStepCache
     ## static information

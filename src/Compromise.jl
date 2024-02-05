@@ -15,6 +15,9 @@ import Logging: @logmsg, LogLevel
 # Re-export symbols from important sub-modules
 import Reexport: @reexport
 
+# Make our types base equality on field value equality:
+import StructHelpers: @batteries
+
 # With the external dependencies available, we can include global type definitions and constants:
 include("types.jl")
 include("utils.jl")
