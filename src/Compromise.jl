@@ -318,6 +318,7 @@ function optimize(
     ## (perform 1 evaluation to set values already)
     vals, vals_code = init_vals(mop, scaler, ξ0)
     !isnothing(vals_code) && return vals, GenericStopping(vals_code, algo_opts.log_level)
+    project_into_box!(vals.x, scaled_cons)
 
     vals_tmp = deepcopy(vals)
  

@@ -2,7 +2,7 @@ module RBFModels
 
 using ..Compromise.CompromiseEvaluators
 const CE = CompromiseEvaluators
-import ..Compromise: @serve, DEFAULT_PRECISION
+import ..Compromise: @serve, DEFAULT_PRECISION, project_into_box!
 
 using ElasticArrays
 import LinearAlgebra as LA
@@ -540,6 +540,7 @@ function update_rbf_model!(
             end
             z .*= σ
             Pr_xi .= x .+ z     # ignoring the name, use `Pr_xi` as a temporary cache
+            project_into_box!(Pr_xi, global_lb, global_ub)
             xi_index = add_to_database!(database, Pr_xi)
             point_flags[xi_index] = true
             push!(point_indices, xi_index)
