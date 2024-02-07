@@ -478,7 +478,7 @@ function backtrack!(
     ## evaluate objectives at `xn` and trial point `xs`
     xs .= xn .+ d
     project_into_box!(xs, lb, ub)
-    d .= xs .- d
+    d .= xs .- xn
     @serve objectives!(fxn, mod, xn)
     @serve objectives!(fxs, mod, xs)
 
@@ -493,9 +493,9 @@ function backtrack!(
         d .*= backtracking_factor
 
         ## reset trial point and compute objectives
-        xs .= xn .+ d
+        xs .= xn .+ d       # d = xs - xn
         project_into_box!(xs, lb, ub)
-        d .= xs .- d
+        d .= xs .- xn
         @serve objectives!(fxs, mod, xs)
     end
     return nothing
