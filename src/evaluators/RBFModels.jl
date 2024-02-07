@@ -535,8 +535,9 @@ function update_rbf_model!(
             z = @view(Z[:, i])
             σ = intersect_box(x, z, lb, ub)
             if abs(σ) < Δ * th_qr
-                @warn "Incompatible Box constraints for RBF models. Stepping outside."
-                σ = sign(σ) * Δ * th_qr
+                _σ = sign(σ) * Δ * th_qr
+                @warn "Incompatible Box constraints for RBF models. Enlarging σ from $σ to $_σ."
+                σ = _σ
             end
             z .*= σ
             Pr_xi .= x .+ z     # ignoring the name, use `Pr_xi` as a temporary cache
@@ -581,7 +582,13 @@ function compute_coefficients!(rbf)
     B = @view(RHS[1:npoints+dim_p, :])
     B .= 0
     B[1:npoints, :] .= transpose(@view(database_y[:, point_indices]))
-    coeff[1:npoints+dim_p, :] .= A\B
+    try
+        ## until https://github.com/JuliaLang/julia/pull/52957 is main, we have to try-catch 
+        coeff[1:npoints+dim_p, :] .= A\B
+    catch
+        _A = LA.qr(A, LA.ColumnNorm())
+        coeff[1:npoints+dim_p, :] .= _A\B
+    end
 
     return nothing
 end
