@@ -70,7 +70,7 @@ end
 
 # With the above chain-rule functions, it is now easy to implement the 
 # complete operator interface for `ScaledOperator`.
-# Taking gradients requires unscaling of the variables, differntiation at 
+# Taking gradients requires unscaling of the variables, differentiation at 
 # the unscaled site and a re-scaling of the gradients:
 function CE.eval_grads!(Dy, sop::ScaledOperator, x)
     unscale!(sop.ξ, sop.scaler, x)
@@ -78,11 +78,11 @@ function CE.eval_grads!(Dy, sop::ScaledOperator, x)
     scale_grads!(Dy, sop)
     return r
 end
-# We don't have to unscale twice when evaluating and differntiating:
+# We don't have to unscale twice when evaluating and differentiating:
 function CE.eval_op_and_grads!(y, Dy, sop::ScaledOperator, x)
     unscale!(sop.ξ, sop.scaler, x)
     r = eval_op_and_grads!(y, sop.Dy, sop.op, sop.ξ)
-    scale_grads!(Dy, so)
+    scale_grads!(Dy, sop)
     return r
 end
 

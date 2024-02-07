@@ -24,7 +24,7 @@ function unscale!(ξ, scaler::AbstractAffineScaler, x)
     Tinv = unscaling_matrix(scaler)
     tinv = unscaling_offset(scaler)
     LA.mul!(ξ, Tinv, x)
-    @views x .+= tinv
+    @views ξ .+= tinv
     return nothing
 end
 

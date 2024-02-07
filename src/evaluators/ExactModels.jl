@@ -12,8 +12,8 @@ end
 struct ExactModelConfig <: AbstractSurrogateModelConfig end
 
 CE.depends_on_radius(::ExactModel)=false
-CE.requires_grads(::Type{<:ExactModel})=true
-CE.requires_hessians(::Type{<:ExactModel})=false
+CE.requires_grads(::ExactModelConfig)=true
+CE.requires_hessians(::ExactModelConfig)=false
 
 function CE.init_surrogate(::ExactModelConfig, op, dim_in, dim_out, params, T)
     return ExactModel(op, params)

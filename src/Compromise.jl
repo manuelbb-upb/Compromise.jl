@@ -26,8 +26,10 @@ include("utils.jl")
 # At some point, the choice of solver is meant to be configurable, with different
 # extensions to choose from:
 import JuMP     # LP and QP modelling for descent and normal steps
-import COSMO    # actual QP solver
-const DEFAULT_QP_OPTIMIZER=COSMO.Optimizer
+#src import COSMO    # actual QP solver
+#src const DEFAULT_QP_OPTIMIZER=COSMO.Optimizer
+import HiGHS
+const DEFAULT_QP_OPTIMIZER=HiGHS.Optimizer
 # For restoration we currently use `NLopt`. This is also meant to become 
 # configurable...
 import NLopt

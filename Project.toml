@@ -4,10 +4,10 @@ authors = ["Manuel Berkemeier <manuelbb@mail.uni-paderborn.de> and contributors"
 version = "0.0.1"
 
 [deps]
-COSMO = "1e616198-aa4e-51ec-90a2-23f7fbd31d8d"
 Dictionaries = "85a47980-9c8c-11e8-2b9f-f7ca1fa99fb4"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 ElasticArrays = "fdbdab4c-e67f-52f5-8c3f-e7b388dad3d4"
+HiGHS = "87dc4568-4c63-4d18-b0c0-bb2238e4078b"
 JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
 LazyArrays = "5078a376-72f3-5289-bfd5-ec5146d43c02"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"

@@ -71,8 +71,8 @@ end
 
 const TaylorPoly = Union{TaylorPolynomial1, TaylorPolynomial2}
 CE.depends_on_radius(::TaylorPoly)=false
-CE.requires_grads(::Type{<:TaylorPoly})=true
-CE.requires_hessians(tp::Type{TaylorPolynomial2})=true
+CE.requires_hessians(cfg::TaylorPolynomialConfig)=(cfg.degree>=2)
+CE.requires_grads(::TaylorPolynomialConfig)=true
 
 function CE.model_op!(y, tp::TaylorPolynomial1, x)
     Δx = tp.Δx
