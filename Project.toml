@@ -17,6 +17,7 @@ Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 Requires = "ae029012-a4dd-5104-9daa-d747884805df"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+StructHelpers = "4093c41a-2008-41fd-82b8-e3f9d02b504f"
 
 [weakdeps]
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"

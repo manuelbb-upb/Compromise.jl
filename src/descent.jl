@@ -121,6 +121,8 @@ end
     @assert normal_step_norm == 2 || normal_step_norm == Inf      # TODO enable other norms
 end
 
+@batteries SteepestDescentConfig selfconstructor=false
+
 Base.@kwdef struct SteepestDescentCache{
     T, DN, NN, EN, AN, HN, GN, QPOPT} <: AbstractStepCache
     ## static information
@@ -457,13 +459,13 @@ function compute_descent_step!(
     ## set `d`, scale it in place, and set `xs` and `mod_fxs` in backtracking
     copyto!(d, _d)
     @unpack fxn, backtracking_factor, rhs_factor, strict_backtracking = step_cache;
-    r = backtrack!(d, mod, xn, xs, fxn, mod_fxs, χ, backtracking_factor, rhs_factor, Val(strict_backtracking))
+    r = backtrack!(d, mod, xn, xs, fxn, mod_fxs, lb, ub, χ, backtracking_factor, rhs_factor, Val(strict_backtracking))
     @. s = n + d
     return r
 end
 
 function backtrack!(
-    d, mod, xn, xs, fxn, fxs, χ, backtracking_factor, rhs_factor, strict_backtracking_val :: Val{strict_backtracking}
+    d, mod, xn, xs, fxn, fxs, lb, ub, χ, backtracking_factor, rhs_factor, strict_backtracking_val :: Val{strict_backtracking}
 ) where strict_backtracking
     ## initialize stepsize `σ=1`
     T = eltype(d)
@@ -475,6 +477,8 @@ function backtrack!(
 
     ## evaluate objectives at `xn` and trial point `xs`
     xs .= xn .+ d
+    project_into_box!(xs, lb, ub)
+    d .= xs .- d
     @serve objectives!(fxn, mod, xn)
     @serve objectives!(fxs, mod, xs)
 
@@ -490,6 +494,8 @@ function backtrack!(
 
         ## reset trial point and compute objectives
         xs .= xn .+ d
+        project_into_box!(xs, lb, ub)
+        d .= xs .- d
         @serve objectives!(fxs, mod, xs)
     end
     return nothing

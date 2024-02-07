@@ -32,3 +32,24 @@ macro exit(ex)
 		end
 	end |> esc
 end
+
+function project_into_box!(x, lb, ub)
+	project_into_lower_bounds!(x, lb)
+	project_into_upper_bounds!(x, ub)
+end
+
+project_into_lower_bounds!(x, ::Nothing)=nothing
+project_into_lower_bounds!(x, lb)=begin
+	x .= max.(x, lb)
+	nothing
+end
+project_into_upper_bounds!(x, ::Nothing)=nothing
+project_into_upper_bounds!(x, ub)=begin
+	x .= min.(x, ub)
+	nothing
+end
+
+function project_into_box!(x, lin_cons::LinearConstraints)
+	project_into_lower_bounds!(x, lin_cons.lb)
+	project_into_upper_bounds!(x, lin_cons.ub)
+end

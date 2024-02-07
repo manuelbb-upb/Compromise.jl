@@ -139,6 +139,9 @@ $(TYPEDFIELDS)
     @assert string(nl_opt)[2] == 'N' "Restoration algorithm must be derivative free."
 end
 
+## to be sure that equality is based on field values:
+@batteries AlgorithmOptions selfconstructor=false
+
 # ## General Array Containers 
 
 "A struct holding values computed for or derived from an `AbstractMOP`."

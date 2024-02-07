@@ -15,6 +15,9 @@ import Logging: @logmsg, LogLevel
 # Re-export symbols from important sub-modules
 import Reexport: @reexport
 
+# Make our types base equality on field value equality:
+import StructHelpers: @batteries
+
 # With the external dependencies available, we can include global type definitions and constants:
 include("types.jl")
 include("utils.jl")
@@ -315,6 +318,7 @@ function optimize(
     ## (perform 1 evaluation to set values already)
     vals, vals_code = init_vals(mop, scaler, ξ0)
     !isnothing(vals_code) && return vals, GenericStopping(vals_code, algo_opts.log_level)
+    project_into_box!(vals.x, scaled_cons)
 
     vals_tmp = deepcopy(vals)
  
