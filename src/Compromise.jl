@@ -210,9 +210,9 @@ function init_vals(mop, scaler, ξ0)
     Φ = Ref(zero(T))
 
     ## set values by evaluating all functions
-    mod_code = eval_mop!(fx, hx, gx, Eres, Ex, Ares, Ax, θ, Φ, mop, ξ)
+    #mod_code = eval_mop!(fx, hx, gx, Eres, Ex, Ares, Ax, θ, Φ, mop, ξ)
 
-    return ValueArrays(ξ, x, fx, hx, gx, Eres, Ex, Ares, Ax, θ, Φ), mod_code
+    return ValueArrays(ξ, x, fx, hx, gx, Eres, Ex, Ares, Ax, θ, Φ)#, mod_code
 end
 
 function init_step_vals(vals)
@@ -318,9 +318,12 @@ function optimize(
 
     ## caches for working arrays x, fx, hx, gx, Ex, Ax, …
     ## (perform 1 evaluation to set values already)
-    vals, vals_code = init_vals(mop, scaler, ξ0)
-    !isnothing(vals_code) && return vals, GenericStopping(vals_code, algo_opts.log_level)
+    vals = init_vals(mop, scaler, ξ0)
+    
     project_into_box!(vals.x, scaled_cons)
+    unscale!(vals.ξ, scaler, vals.x)
+    vals_code = eval_mop!(vals, mop, scaler)
+    !isnothing(vals_code) && return vals, GenericStopping(vals_code, algo_opts.log_level)
 
     vals_tmp = deepcopy(vals)
  

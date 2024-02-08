@@ -442,8 +442,7 @@ function find_poised_points!(
     
     @logmsg log_level """
     \tRBF Construction: 
-    \t                 Would like $(dim_in - j) points in box of radius θ*Δ=$(search_factor*Δ_box). 
-    \t                 Pivot value is $(proj_th)."""
+    \t\t\tWould like $(dim_in - j) points in box of radius θ*Δ=$(search_factor*Δ_box). Pivot value is $(proj_th)."""
     @views for i = reverse(axes(database_x, 2))
         !database_flags_x[i] && continue  # not a point in the database
         point_flags[i] && continue        # point already considered an interpolation point
@@ -543,6 +542,7 @@ function update_rbf_model!(
             Pr_xi .= x .+ z     # ignoring the name, use `Pr_xi` as a temporary cache
             project_into_box!(Pr_xi, global_lb, global_ub)
             xi_index = add_to_database!(database, Pr_xi)
+            @logmsg log_level "\t\t\tRequesting new values for index $(xi_index)."
             point_flags[xi_index] = true
             push!(point_indices, xi_index)
 
