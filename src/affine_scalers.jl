@@ -45,6 +45,7 @@ scale_eq!(::Nothing, scaler::AbstractAffineScaler, ::Nothing)=nothing
 struct IdentityScaler <: AbstractConstantAffineScaler 
     dim :: Int
 end
+@batteries IdentityScaler
 
 scale!(x::RVec, scaler::IdentityScaler, ξ::RVec)=copyto!(x, ξ)
 unscale!(ξ::RVec, scaler::IdentityScaler, x::RVec)=copyto!(ξ, x)
@@ -61,6 +62,7 @@ struct AffineVarScaler{
     b :: bType1
     binv :: bType2
 end
+@batteries AffineVarScaler
 
 scaling_matrix(scaler::AffineVarScaler)=scaler.T
 unscaling_matrix(scaler::AffineVarScaler)=scaler.Tinv

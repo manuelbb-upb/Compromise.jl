@@ -75,6 +75,21 @@ apply_kernel_derivative(kernel::InverseMultiQuadricKernel, r, ε) = let esq=ε^2
     ## TODO `max_evals` (soft limit on maximum number of evaluations)
 end
 
+
+## helpers for `round1_flags`, which might be `nothing`
+setflag!(flag_vec::Nothing, i, v)=nothing
+function setflag!(flag_vec, i, v)
+    flag_vec[i] = v
+end
+
+istrue(flag_vec::Nothing, i)=false
+istrue(flag_vec, i)=flag_vec[i]
+
+append_zeros!(flag_vec::Nothing, chunk_size)=nothing
+function append_zeros!(flag_vec, chunk_size)
+    append!(flag_vec, zeros(Bool, chunk_size))
+end
+
 struct RBFDatabase{T}
     dim_x :: Int
     dim_y :: Int
@@ -94,20 +109,6 @@ struct RBFDatabase{T}
     x_index :: Base.RefValue{Int}
 
     locked_flags :: Vector{Bool}
-end
-
-## helpers for `round1_flags`, which might be `nothing`
-setflag!(flag_vec::Nothing, i, v)=nothing
-function setflag!(flag_vec, i, v)
-    flag_vec[i] = v
-end
-
-istrue(flag_vec::Nothing, i)=false
-istrue(flag_vec, i)=flag_vec[i]
-
-append_zeros!(flag_vec::Nothing, chunk_size)=nothing
-function append_zeros!(flag_vec, chunk_size)
-    append!(flag_vec, zeros(Bool, chunk_size))
 end
 
 struct RBFModel{K, T} <: AbstractSurrogateModel
@@ -209,7 +210,7 @@ function RBFDatabase(cfg::RBFConfig, dim_in, dim_out, T)
         ## When is `(dim_in + 1) * N >= 10^9/(sizeof(T)*dim_in)`?
         ## If `dim_in^2 + dim_in >= 10^9/(sizeof(T)*N)`...
         ## That is, there are many variables...
-        max(min_points, min(min_points*100, round(Int, 10^9/(sizeof(T)*dim_in))))
+        max(min_points, round(Int, 10^9/(sizeof(T)*dim_in)))
     else
         if cfg.database_size < min_points
             @warn "There is not enough storage in the database, so we are using $(min_points) columns."
