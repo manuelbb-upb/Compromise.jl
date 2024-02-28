@@ -1,6 +1,8 @@
 using Compromise
 using Test
 
+include("rbfs.jl")
+
 @testset  "SteepestDescentConfig" begin
     for backtracking_factor in (-1.0, -1//2, 0, 1f0, 2)
         @test_throws AssertionError Compromise.SteepestDescentConfig(;

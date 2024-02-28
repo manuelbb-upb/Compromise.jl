@@ -23,6 +23,9 @@ abstract type AbstractNonlinearOperator end
 abstract type AbstractNonlinearOperatorWithParams <: AbstractNonlinearOperator end
 abstract type AbstractNonlinearOperatorNoParams <: AbstractNonlinearOperator end
 
+const Vec = AbstractVector
+const Mat = AbstractMatrix
+
 # ### Common Methods
 # Both, `AbstractNonlinearOperatorWithParams` and `AbstractNonlinearOperatorNoParams`
 # have methods like `eval_op!`.
@@ -80,8 +83,17 @@ enforce_max_calls(op::AbstractNonlinearOperator)=true
 Evaluate the operator `op` at variable vector `x` with parameters `p`
 and mutate the target vector `y` to contain the result.
 """
-function eval_op!(y, op::AbstractNonlinearOperatorWithParams, x, p)
+function eval_op!(y::Vec, op::AbstractNonlinearOperatorWithParams, x::Vec, p)
     return error("No implementation of `eval_op!` for operator $op.")
+end
+
+# Optional Parallel Evaluation:
+function eval_op!(Y::AbstractMatrix, op::AbstractNonlinearOperatorWithParams, X::AbstractMatrix, p)
+    for (x, y) = zip(eachcol(X), eachcol(Y))
+        c = eval_op!(y, op, x)
+        !isnothing(c) && return c
+    end
+    return nothing 
 end
 
 """
@@ -175,14 +187,34 @@ function check_num_calls(op, ind; force::Bool=enforce_max_calls(op))
     isnothing(max_call_tuple) && return nothing
     ncalls = num_calls(op)
     for i=ind
-        ni = ncalls[i]
         mi = max_call_tuple[i]
         isnothing(mi) && continue
+        ni = ncalls[i]
         if ni >= mi
             return "Maximum evaluation count reached, order=$(i-1), evals $(ni) >= $(mi)."
         end
     end
     return nothing
+end
+
+# The same logic can be used to query the remaining evaluation budget:
+function budget_num_calls(op, ind; force=enforce_max_calls(op))
+    !is_counted(op) && return nothing
+    !force && return nothing
+    max_call_tuple = max_calls(op)
+    isnothing(max_call_tuple) && return nothing
+    ncalls = num_calls(op)
+    budget_vec = Vector{Union{Int, Nothing}}(undef, length(ind))
+    for i=ind
+        mi = max_call_tuple[i]
+        if isnothing(mi)
+            budget_vec[i] = nothing
+            continue
+        end
+        ni = ncalls[i]
+        budget_vec[i] = mi-ni
+    end
+    return budget_vec
 end
 
 function func_vals!(y, op::AbstractNonlinearOperator, x, p; outputs=nothing)
@@ -232,11 +264,19 @@ end
 # This also makes writing extensions a tiny bit easier.
 
 #src The below methods have been written by ChatGPT according to what is above:
-function eval_op!(y, op::AbstractNonlinearOperatorNoParams, x)
+function eval_op!(y::Vec, op::AbstractNonlinearOperatorNoParams, x::Vec)
     return error("No implementation of `eval_op!` for operator $op.")
 end
 function eval_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x)
     return error("No implementation of `eval_grads!` for operator $op.")
+end
+# Optional Parallel Evaluation:
+function eval_op!(Y::Mat, op::AbstractNonlinearOperatorWithParams, X::Mat)
+    for (x, y) = zip(eachcol(X), eachcol(Y))
+        c = eval_op!(y, op, x)
+        !isnothing(c) && return c
+    end
+    return nothing 
 end
 # Optional, derived method for values and gradients:
 function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x)
@@ -279,7 +319,7 @@ end
 # To also be able to use non-parametric operators in the more general setting, 
 # implement the parametric-interface:
 
-function eval_op!(y, op::AbstractNonlinearOperatorNoParams, x, p)
+function eval_op!(y::Vec, op::AbstractNonlinearOperatorNoParams, x::Vec, p)
     return eval_op!(y, op, x)
 end
 function eval_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x, p)
@@ -463,7 +503,7 @@ end
 # ### Evaluation
 # In place evaluation and differentiation, similar to `AbstractNonlinearOperatorNoParams`.
 # Mandatory:
-function model_op!(y, surr::AbstractSurrogateModel, x)
+function model_op!(y::Vec, surr::AbstractSurrogateModel, x::Vec)
     return nothing
 end
 # Mandatory:
@@ -487,6 +527,17 @@ end
 function model_op_and_grads!(y, Dy, surr::AbstractSurrogateModel, x, outputs)
     model_op!(y, surr, x, outputs)
     model_grads!(y, surr, x, outputs)
+    return nothing
+end
+
+# #### Optional Parallel Evaluation
+function model_op!(Y::Mat, surr::AbstractSurrogateModel, X::Mat)
+    for (x, y) = zip(eachcol(X), eachcol(Y))
+        c = model_op!(y, surr, x)
+        if !isnothing(c)
+            return c
+        end
+    end
     return nothing
 end
 

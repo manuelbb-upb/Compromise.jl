@@ -19,7 +19,7 @@ function CE.init_surrogate(::ExactModelConfig, op, dim_in, dim_out, params, T)
     return ExactModel(op, params)
 end
 
-function CE.model_op!(y, surr::ExactModel, x)
+function CE.model_op!(y::AbstractVector, surr::ExactModel, x::AbstractVector)
     #eval_op!(y, surr.op, x, surr.params)
     # if `surr.op` has enforce_max_calls==true then func_vals checks for max_calls
     # if it does not, we could/should do it here...

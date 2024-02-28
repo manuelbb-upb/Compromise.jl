@@ -11,6 +11,7 @@ import LinearAlgebra as LA
 using DocStringExtensions
 
 import Logging: @logmsg, LogLevel
+import Printf: @sprintf
 
 # Re-export symbols from important sub-modules
 import Reexport: @reexport
@@ -93,7 +94,7 @@ end
 export ForwardDiffBackend
 
 # Import Radial Basis Function surrogates:
-include("evaluators/RBFModels.jl")
+include("evaluators/RBFModels/RBFModels.jl")
 @reexport using .RBFModels
 
 # Taylor Polynomial surrogates:

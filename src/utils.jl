@@ -53,3 +53,57 @@ function project_into_box!(x, lin_cons::LinearConstraints)
 	project_into_lower_bounds!(x, lin_cons.lb)
 	project_into_upper_bounds!(x, lin_cons.ub)
 end
+
+const SUPERSCRIPT_DICT = Base.ImmutableDict(
+	0 => "⁰",
+	1 => "¹",
+	2 => "²",
+	3 => "³",
+	4 => "⁴",
+	5 => "⁵",
+	6 => "⁶",
+	7 => "⁷",
+	8 => "⁸",
+	9 => "⁹"
+)
+
+const SUBSCRIPT_DICT = Base.ImmutableDict(
+	0 => "₀",
+	1 => "₁",
+	2 => "₂",
+	3 => "₃",
+	4 => "₄",
+	5 => "₅",
+	6 => "₆",
+	7 => "₇",
+	8 => "₈",
+	9 => "₉"
+)
+
+function supscript(num::Integer)
+	return join((SUPERSCRIPT_DICT[i] for i in reverse(digits(num))), "")
+end
+function subscript(num::Integer)
+	return join((SUBSCRIPT_DICT[i] for i in reverse(digits(num))), "")
+end
+
+function pretty_row_vec(
+	x::AbstractVector;
+	cutoff=80
+)
+	repr_str = "["
+	lenx = length(x)
+	for (i, xi) in enumerate(x)
+		xi_str = @sprintf("%.2e", xi)
+		if length(repr_str) + length(xi_str) >= cutoff
+			repr_str *= "..."
+			break
+		end
+		repr_str *= xi_str
+		if i < lenx
+			repr_str *= ", "
+		end
+	end
+	repr_str *= "]"
+	return repr_str
+end

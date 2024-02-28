@@ -111,7 +111,7 @@ end
 
 CE.enforce_max_calls(op::NonlinearParametricFunction)=op.enforce_max_calls
 
-function CE.eval_op!(y, op::NonlinearParametricFunction, x, p)
+function CE.eval_op!(y::AbstractVector, op::NonlinearParametricFunction, x::AbstractVector, p)
     if op.func_iip 
         op.func(y, x, p)
     else
@@ -322,7 +322,7 @@ end
 @forward CE.set_num_calls!(op::NonlinearFunction)
 @forward CE.provides_grads(op::NonlinearFunction)
 @forward CE.provides_hessians(op::NonlinearFunction)
-@forward CE.eval_op!(y, op::NonlinearFunction, x)
+@forward CE.eval_op!(y::VecOrMat, op::NonlinearFunction, x::VecOrMat)
 @forward CE.eval_grads!(Dy, op::NonlinearFunction, x)
 @forward CE.eval_hessians!(H, op::NonlinearFunction, x)
 @forward CE.eval_op_and_grads!(y, Dy, op::NonlinearFunction, x)

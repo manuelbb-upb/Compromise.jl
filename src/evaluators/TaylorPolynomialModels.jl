@@ -84,7 +84,7 @@ function CE.model_op!(y, tp::TaylorPolynomial1, x)
     return nothing
 end
 
-function CE.model_op!(y, tp::TaylorPolynomial2, x)
+function CE.model_op!(y::AbstractVector, tp::TaylorPolynomial2, x::AbstractVector)
     model_op!(y, tp.tp, x)
     Δx = tp.tp.Δx
     H = tp.Hfx
