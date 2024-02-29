@@ -65,7 +65,7 @@ end
 @views function CE.model_op!(y::AbstractVector, rbf::RBFModel, x::AbstractVector)
     Φ, Π, x_in, centers, cφ, cπ, ε, n_X = prepare_eval_buffers(rbf, x)
 
-    return _rbf_eval!(
+    _rbf_eval!(
         vec2col(y), Φ, Π, x_in, centers, cφ, cπ, ε;
         DIM_x = rbf.dim_x,
         DIM_y = rbf.dim_y,
@@ -74,17 +74,19 @@ end
         DIM_π = rbf.dim_π,
         DIM_φ = n_X
     )
+    return nothing
 end
 
 function CE.model_grads!(Dy, rbf::RBFModel, x)
     _, _, x_in, centers, cφ, cπ, ε, _ = prepare_eval_buffers(rbf, x)
     Δx = @view rbf.buffers.v1[1:rbf.dim_x]
-    return _rbf_diff!(
+    _rbf_diff!(
         Dy, Δx, x_in, centers, cφ, cπ, ε;
         KERNEL = rbf.kernel,
         POLY_DEG = rbf.poly_deg,
         DIM_π = rbf.dim_π,
     )
+    return nothing
 end
 
 function CE.init_surrogate(
@@ -95,7 +97,7 @@ function CE.init_surrogate(
     @unpack (
         kernel, search_factor, max_search_factor, th_qr, th_cholesky, max_points, 
         database_size, database_chunk_size, enforce_fully_linear, poly_deg, 
-        shape_parameter_function
+        shape_parameter_function, sampling_factor, max_sampling_factor,
     ) = cfg
     if require_fully_linear
         enforce_fully_linear = require_fully_linear
@@ -103,7 +105,8 @@ function CE.init_surrogate(
     return rbf_init_model(
         dim_in, dim_out, poly_deg, delta_max, kernel, shape_parameter_function, 
         database_size, database_chunk_size, max_points, enforce_fully_linear, 
-        search_factor, max_search_factor, th_qr, th_cholesky, T
+        search_factor, max_search_factor, sampling_factor, max_sampling_factor, 
+        th_qr, th_cholesky, T
     )
 end
 
@@ -113,28 +116,28 @@ function CE.update!(
 )
     update_rbf_model!(rbf, op, Δ, x, fx, lb, ub; log_level, norm_p=Inf)
 end
-#=
-function CE.copy_model(mod::RBFModel)
-    return error("TODO")
+
+function CE.copy_model(rbf::RBFModel)
+    @unpack dim_x, dim_y, dim_π, min_points, max_points, delta_max, poly_deg, kernel = rbf
+    @unpack shape_parameter_function, enforce_fully_linear, search_factor = rbf
+    @unpack max_search_factor, sampling_factor, max_sampling_factor, th_qr, th_cholesky = rbf
+    return RBFModel(;
+        dim_x, dim_y, dim_π, min_points, max_points, delta_max, poly_deg, kernel,
+        shape_parameter_function, enforce_fully_linear, search_factor, max_search_factor,
+        th_qr, th_cholesky,
+        database = rbf.database,        # pass by reference, this is okay, as we have decoupled it from evaluation
+        params = deepcopy(rbf.params),  # these must!! be copied
+        buffers = rbf.buffers,          # these can be passed by reference, don't really influence training
+        sampling_factor, max_sampling_factor
+    )
 end
 
 function CE.copyto_model!(mod_trgt::RBFModel, mod_src::RBFModel)
-    return error("TODO")
+    copyto!(mod_trgt.params, mod_src.params)
 end
 
-function _is_fully_linear(rbf::RBFModel)
-    return rbf.n_X1 == rbf.surrogate.dim_x
-end
-=#
-
-#=
-
-# ## Interface Implementation
-
-
-#src function model_op_and_grads! end # TODO
 # TODO partial evaluation
-=#
+
 export RBFModel, RBFConfig
 export CubicKernel, GaussianKernel, InverseMultiQuadricKernel
 

@@ -93,7 +93,7 @@ Base.@kwdef struct AlgorithmOptions{_T <: Number, SC}
 	"At the end of the Criticality Routine the radius is possibly set to `crit_B * χ`."
 	crit_B :: _T = 1000
 	"Criticality Routine runs until `Δ ≤ crit_M * χ`."
-	crit_M :: _T = 3000
+	crit_M :: _T = 3*crit_B
 	"Trust region shrinking factor in criticality loops."
 	crit_alpha :: _T = 0.5
 	

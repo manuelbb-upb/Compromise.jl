@@ -46,7 +46,7 @@ function criticality_routine(
                 !isnothing(stop_code) && break
             end
             !isnothing(stop_code) && break
-            @logmsg log_level "\tCRITICALITY LOOP $(j+1), Δ=$Δj, Mχ=$(crit_M * χ)."
+            @logmsg log_level "\tCRITICALITY LOOP $(j+1), Δ=$Δj > Mχ=$(crit_M * χ)."
             Δj *= crit_alpha 
             if depends_on_radius(modj)
                 _stop_code = update_models!(modj, Δj, mop, scaler, vals, scaled_cons, algo_opts)
@@ -118,8 +118,10 @@ function criticality_routine(
             return CRITICAL_LOOP, TOLERANCE_Δ, false, Δ
         end
         =#
-        @logmsg log_level "\tFinished after $j criticality loop(s)."
+        _Δ = Δ
         Δ = min(max(Δ, algo_opts.crit_B*χ), iter_meta.Δ_pre)
+        @logmsg log_level "\tFinished after $j criticality loop(s), 
+        \t Δ=$_Δ > Mχ=$(crit_M * χ), now Δ=$Δ."
         iter_meta.crit_val = χ
     end
     return Δ, stop_code

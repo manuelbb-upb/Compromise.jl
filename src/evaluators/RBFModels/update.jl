@@ -16,7 +16,10 @@ function update_rbf_model!(
         was_fully_linear && 
         last_db_state == val(database.state)
     )
+        @logmsg log_level " RBFModel: No need to update."
         return nothing
+    else
+        @logmsg log_level " RBFModel: Starting surrogate update."
     end
 
     n_X = affine_sampling!(rbf, Δ, x0, fx0, global_lb, global_ub; delta_max, norm_p, log_level)
@@ -134,13 +137,20 @@ function affine_sampling!(
     rbf::RBFModel, Δ, x0, fx0, global_lb=nothing, global_ub=nothing; 
     delta_max, norm_p, log_level,
 )
-    @unpack params, buffers, database = rbf
+    @unpack dim_x, params, buffers, database = rbf
     @unpack X = params
     @unpack FX, db_index, lb, ub, xZ, qr_ws_dim_x = buffers
     @unpack has_z_new_ref, is_fully_linear_ref, z_new = params
-    @unpack min_points, max_points, search_factor, max_search_factor, th_qr, enforce_fully_linear = rbf
+    @unpack min_points, max_points, search_factor, max_search_factor = rbf 
+    @unpack sampling_factor, max_sampling_factor, th_qr, enforce_fully_linear = rbf
     x0_db_index = val(buffers.x0_db_index_ref)
 
+    if x0_db_index > 0
+        _x0 = view(entries_x(database), 1:dim_x, x0_db_index)
+        if !isequal(x0, _x0)
+            x0_db_index = 0
+        end
+    end
     if x0_db_index < 1
         x0_db_index = add_to_database!(database, x0, fx0)
     end
@@ -150,7 +160,8 @@ function affine_sampling!(
         X, FX, db_index, lb, ub, xZ, qr_ws_dim_x, QRbuff,
         has_z_new_ref, is_fully_linear_ref, z_new,
         database,
-        min_points, max_points, search_factor, max_search_factor, th_qr,
+        min_points, max_points, search_factor, max_search_factor, 
+        sampling_factor, max_sampling_factor, th_qr,
         Δ, x0, fx0, global_lb, global_ub;
         norm_p, delta_max, enforce_fully_linear, log_level, x0_db_index
     )
@@ -160,7 +171,8 @@ end
     X, FX, db_index::AbstractVector{Int}, lb, ub, xZ, qr_ws_dim_x, QRbuff,
     has_z_new_ref, is_fully_linear_ref, z_new, 
     database, 
-    min_points, max_points, search_factor, max_search_factor, th_qr, 
+    min_points, max_points, search_factor, max_search_factor,
+    sampling_factor, max_sampling_factor, th_qr, 
     Δ, x0, fx0, global_lb, global_ub;
     norm_p, enforce_fully_linear, delta_max, log_level, x0_db_index=-1
 )
@@ -173,10 +185,11 @@ end
     n_X = 1
     db_index[1] = x0_db_index
     
+    th_qr *= Δ
+    
     if n_X < min_points  
-        Δ1 = search_factor .* Δ
-        th_qr *= Δ
-        trust_region_bounds!(lb, ub, x0, Δ1, global_lb, global_ub)
+        Δz = sampling_factor .* Δ
+        trust_region_bounds!(lb, ub, x0, Δz, global_lb, global_ub)
 
         has_z_new = val(has_z_new_ref)
         if has_z_new           
@@ -188,6 +201,9 @@ end
     end
     
     if n_X < min_points
+        Δ1 = search_factor .* Δ
+        trust_region_bounds!(lb, ub, x0, Δ1, global_lb, global_ub)
+
         box_search!(database, lb, ub)
         for ix in 1:n_X
             ci = db_index[ix]
@@ -202,21 +218,27 @@ end
             xZ, ix1=2, ix2=n_X, norm_p, chosen_index=db_index, th=th_qr,    
         )
         n_X += n_new
+        @logmsg log_level "  RBFModel: Found $(n_new) points in radius $(Δ1)."
+
         ## account for offset indices in chosen_index:
         unfilter_index!(db_index, database.filter_flags; ix1=2, ix2=n_X)    # `ix1=2` because we don't need to care about `x0_db_index`
     end
 
     if n_X < min_points && enforce_fully_linear
+        ΔZ1 = sampling_factor .* Δ
+        trust_region_bounds!(lb, ub, x0, ΔZ1, global_lb, global_ub)
+
         n_new, qr = sample_along_Z!(X, qr_ws_dim_x, QRbuff, x0, lb, ub, th_qr;
             ix1=2, ix2=n_X, norm_p, qr, n_new = min_points - n_X
         )
         n_X += n_new
+        @logmsg log_level "  RBFModel: Sampled $(n_new) points in radius $(ΔZ1)."
     end
     
-    Δ2 = max_search_factor .* delta_max
-    trust_region_bounds!(lb, ub, x0, Δ2, global_lb, global_ub)
-
     if n_X < min_points || min_points < max_points
+        Δ2 = max_search_factor .* delta_max
+        trust_region_bounds!(lb, ub, x0, Δ2, global_lb, global_ub)
+
         box_search!(database, lb, ub)
         for ix in 1:n_X
             ci = db_index[ix]
@@ -242,6 +264,7 @@ end
             xZ, ix1=2, ix2=n_X, norm_p, chosen_index = db_index, th = th_qr,    
         )
         _n_X = n_X + n_new
+        @logmsg log_level "  RBFModel: Found $(n_new) points in radius $(Δ2)."
         ## account for offset indices in chosen_index:
         unfilter_index!(db_index, database.filter_flags; ix1=n_X+1, ix2=_n_X)
         for ix in n_X+1:_n_X
@@ -256,10 +279,14 @@ end
     end
 
     if n_X < min_points
+        ΔZ2 = max_sampling_factor .* delta_max
+        trust_region_bounds!(lb, ub, x0, ΔZ2, global_lb, global_ub)
+
         n_new, qr = sample_along_Z!(X, qr_ws_dim_x, QRbuff, x0, lb, ub, th_qr;
             ix1=2, ix2=n_X, norm_p, qr, n_new = min_points - n_X
         )
         n_X += n_new
+        @logmsg log_level "  RBFModel: Sampled $(n_new) points in radius $(ΔZ2)."
     end
 
     return n_X
@@ -297,7 +324,7 @@ function least_squares_model!(rbf, n_X; log_level)
 end
 
 function cholesky_point_search!(rbf, x0, n_X; log_level)
-    @assert n_X == rbf.min_points 
+    @assert n_X == rbf.min_points
     @unpack params, buffers, database = rbf
     @unpack min_points, max_points, dim_x, dim_y, dim_π, kernel, poly_deg, th_cholesky = rbf
     @unpack X = params
@@ -346,5 +373,9 @@ function cholesky_point_search!(rbf, x0, n_X; log_level)
         coeff_φ, coeff_π, FX, Linv, Φ, Q, R, L;
         n_X, dim_y, dim_π
     )
+    n_new = n_X - rbf.min_points
+    if n_new > 0
+        @logmsg log_level "   RBFModel: Found $(n_new) additional points."
+    end
     return n_X
 end

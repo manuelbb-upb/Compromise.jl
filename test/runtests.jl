@@ -163,7 +163,7 @@ end
     #%%
     mop = setup_mop()
     final_vals, stop_code = optimize(
-        mop, zeros(2);
+        mop, rand(2);
         algo_opts = AlgorithmOptions(;
             max_iter=1,
             stop_delta_min=-Inf,
@@ -181,7 +181,7 @@ end
     #%%
     mop = setup_mop()
     final_vals, stop_code = optimize(
-        mop, zeros(2);
+        mop, rand(2);
         algo_opts = AlgorithmOptions(;
             max_iter=typemax(Int),
             stop_delta_min=1e-2,

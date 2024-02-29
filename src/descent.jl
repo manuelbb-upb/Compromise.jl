@@ -427,7 +427,7 @@ function solve_steepest_descent_problem(
     _d = JuMP.value.(d)  # this allocation should be negligible
     #src @show d_norm = LA.norm(_d, descent_step_norm)
     #srcχ = iszero(d_norm) ? d_norm : @show(-JuMP.value(β))/d_norm
-    χ = abs(JuMP.value(β) * LA.norm(_d, descent_step_norm))
+    χ = abs(JuMP.value(β)) / Δ
     return χ, _d
 end
 
@@ -455,25 +455,29 @@ function compute_descent_step!(
         En, E_c, An, A_b, Hn, mod_Dhx, Gn, mod_Dgx;
         descent_step_norm, normalize_gradients
     )
-    crit_ref[] = χ
     ## set `d`, scale it in place, and set `xs` and `mod_fxs` in backtracking
     copyto!(d, _d)
     @unpack fxn, backtracking_factor, rhs_factor, strict_backtracking = step_cache;
-    r = backtrack!(d, mod, xn, xs, fxn, mod_fxs, lb, ub, χ, backtracking_factor, rhs_factor, Val(strict_backtracking))
+    r, χ = backtrack!(d, mod, xn, xs, fxn, mod_fxs, lb, ub, χ, Δ, backtracking_factor, rhs_factor, Val(strict_backtracking))
+    crit_ref[] = χ
     @. s = n + d
     return r
 end
 
 function backtrack!(
-    d, mod, xn, xs, fxn, fxs, lb, ub, χ, backtracking_factor, rhs_factor, strict_backtracking_val :: Val{strict_backtracking}
+    d, mod, xn, xs, fxn, fxs, lb, ub, χ, Δ, backtracking_factor, rhs_factor, strict_backtracking_val :: Val{strict_backtracking}
 ) where strict_backtracking
+    if χ <= 0
+        d .*= 0
+        return nothing, 0
+    end
     ## initialize stepsize `σ=1`
     T = eltype(d)
     σ = one(T)
     σ_min = nextfloat(zero(T), 2)   # TODO make configurable
 
     ## pre-compute RHS for Armijo test
-    rhs = χ * rhs_factor
+    rhs = χ * rhs_factor * Δ
 
     ## evaluate objectives at `xn` and trial point `xs`
     xs .= xn .+ d
@@ -498,7 +502,8 @@ function backtrack!(
         d .= xs .- xn
         @serve objectives!(fxs, mod, xs)
     end
-    return nothing
+    _χ = σ < σ_min ? 0 : χ
+    return nothing, _χ
 end
 
 armijo_condition(strict::Val{true}, fxn, fxs, rhs) = all(fxn .-  fxs .>= rhs)

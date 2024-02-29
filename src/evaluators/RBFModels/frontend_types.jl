@@ -34,8 +34,11 @@
 
     "Enlargement factor for trust region to look for affinely independent points in."
     search_factor :: Real = 2
+    sampling_factor :: Real = 1
+    
     "Enlargement factor for maximum trust region to look for affinely independent points in."
-    max_search_factor :: Real = 2
+    max_search_factor :: Real = search_factor
+    max_sampling_factor :: Real = sampling_factor
 
     "Pivoting threshold to determine a poised interpolation set."
     th_qr :: Real = 1/(2*search_factor)
@@ -242,6 +245,9 @@ Base.@kwdef struct RBFModel{
     "Enlargement factor for trust region that is queried for additional samples."
     max_search_factor :: T
 
+    sampling_factor :: T
+    max_sampling_factor :: T
+
     "Training parameter: Threshold for sample acceptance."
     th_qr :: T
     "Training parameter: Threshold for sample acceptance to capture nonlinear behavior."
@@ -369,6 +375,7 @@ function rbf_init_model(
     max_points :: Union{Nothing, Integer}, 
     enforce_fully_linear :: Bool, 
     search_factor :: Real, max_search_factor :: Real,
+    sampling_factor :: Real, max_sampling_factor :: Real,
     th_qr :: Real, th_cholesky :: Real,
     T :: Type{<:Number} = DEFAULT_PRECISION;
 )
@@ -404,6 +411,8 @@ function rbf_init_model(
       enforce_fully_linear,
       search_factor = T(search_factor),
       max_search_factor = T(max_search_factor),
+      sampling_factor = T(sampling_factor),
+      max_sampling_factor = T(max_sampling_factor),
       th_qr = T(th_qr),
       th_cholesky = T(th_cholesky), 
       database,
