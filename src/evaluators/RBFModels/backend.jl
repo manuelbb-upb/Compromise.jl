@@ -32,7 +32,7 @@ apply_kernel_derivative(φ::AbstractRBFKernel, r, ε)=_apply_kernel_derivative(�
     CubicKernel(; eps=1)
 
 Kernel for ``φ(r) = (εr)^3``."""
-@with_kw struct CubicKernel{F} <: AbstractRBFKernel
+Base.@kwdef struct CubicKernel{F} <: AbstractRBFKernel
     eps :: F = 1
 end
 _apply_kernel(kernel::CubicKernel, r, ε) = (r*ε)^3
@@ -44,7 +44,7 @@ _shape_parameter(kernel::CubicKernel)=kernel.eps
 
 Kernel for ``φ_ε(r) = \\exp(-(εr)^2)``.
 """
-@with_kw struct GaussianKernel{F} <: AbstractRBFKernel
+Base.@kwdef struct GaussianKernel{F} <: AbstractRBFKernel
     eps :: F = 1
 end
 _apply_kernel(kernel::GaussianKernel, r, ε)=exp( -(ε*r)^2 )
@@ -58,7 +58,7 @@ _shape_parameter(kernel::GaussianKernel)=kernel.eps
 
 Kernel for ``φ_ε(r) = 1 / \\sqrt{1 + (εr)^2}``.
 """
-@with_kw struct InverseMultiQuadricKernel{F} <: AbstractRBFKernel
+Base.@kwdef struct InverseMultiQuadricKernel{F} <: AbstractRBFKernel
     eps :: F = 1
 end
 _apply_kernel(kernel::InverseMultiQuadricKernel, r, ε)=1/sqrt(1+(ε*r)^2)
@@ -66,6 +66,11 @@ _apply_kernel_derivative(kernel::InverseMultiQuadricKernel, r, ε) = let esq=ε^
     -esq*r/(esq*r^2 + 1)^(3//2) 
 end
 _shape_parameter(kernel::InverseMultiQuadricKernel)=kernel.eps
+
+function Base.show(io::IO, kernel::K) where K<:AbstractRBFKernel
+    tname = Base.typename(K).name
+    print(io, "$(tname)( ε = $(_shape_parameter(kernel)) )")
+end
 
 # A type used for evaluation of an RBF surrogate 
 # ```

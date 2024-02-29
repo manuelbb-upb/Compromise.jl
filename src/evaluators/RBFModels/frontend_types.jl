@@ -83,6 +83,29 @@ end
 
 @batteries RBFParameters selfconstructor=false
 
+function param_top_str(params)
+  repr_str = "( ℝ$(supscript(params.dim_x)) → ℝ$(supscript(params.dim_y))"
+  repr_str *= ", dim(Π)=$(params.dim_π), dim(Φ)=$(val(params.n_X_ref))∈[$(params.min_points), $(params.max_points)] )"
+  return repr_str
+end
+function param_str(params; iscompact=false)
+  repr_str = param_top_str(params)
+  if !iscompact
+    repr_str *= "\n  `x0`    : $(pretty_row_vec(params.x0))"
+    repr_str *= "\n  `(Δ, ε)`: $(@sprintf("(%.2e, %.2e)", val(params.delta_ref), val(params.shape_parameter_ref)))"
+    repr_str *= "\n  fully linear: $(val(params.is_fully_linear_ref))"
+    repr_str *= "\n  has `z_new` : $(val(params.has_z_new_ref))"
+    repr_str *= "\n  SIZE = $(Base.format_bytes(Base.summarysize(params)))"
+  end
+  return repr_str
+end
+function Base.show(io::IO, params::RBFParameters{T}) where T
+    iscompact = get(io, :compact, false)
+    repr_str = "RBFParamaters{$T}"
+    repr_str *= param_str(params; iscompact)
+    print(io, repr_str)
+end
+
 function Base.copyto!(dst :: RBFParameters, src :: RBFParameters)
   for fn in (
       :n_X_ref, :is_fully_linear_ref, :has_z_new_ref, :delta_ref, 
@@ -96,9 +119,8 @@ function Base.copyto!(dst :: RBFParameters, src :: RBFParameters)
       )
   end
   for fn in (:X, :coeff_φ, :coeff_π, :z_new, :x0)
-      Base.copyto!(getfield(dst, fn), getfield(src, fn))
+      copyto!(getfield(dst, fn), getfield(src, fn))
   end
-
 
 end
 
@@ -180,36 +202,12 @@ end
 
 function Base.show(io::IO, buffers::RBFTrainingBuffers{T}) where T
     iscompact = get(io, :compact, false)
-    lnend = iscompact ? ", " : "\n"
-    repr_str = "RBFTrainingBuffers{$(T)}"
-    if iscompact
-      repr_str *= "("
-    else
-      repr_str *= "\n"
-    end
-    repr_str *= "dim_x = $(buffers.dim_x)" * lnend
-    repr_str *= "dim_y = $(buffers.dim_y)" * lnend
-    repr_str *= "dim_π = $(buffers.dim_π)" * lnend
-    repr_str *= "min_points = $(buffers.min_points)" * lnend
-    repr_str *= "max_points = $(buffers.max_points)" * lnend
-    repr_str *= "size = $(Base.format_bytes(Base.summarysize(buffers)))"
-    if iscompact
-      repr_str *= ")"
-    end
-    print(io, repr_str)
-end
-
-function Base.show(io::IO, params::RBFParameters{T}) where T
-    iscompact = get(io, :compact, false)
-    lnend = iscompact ? ", " : "\n"
-    repr_str = "RBFParamaters{$T}("
-    repr_str *= "ℝ$(supscript(params.dim_x)) → ℝ$(supscript(params.dim_y))"
-    repr_str *= ", dim(Π)=$(params.dim_π), dim(Φ)=$(val(params.n_X_ref))∈[$(params.min_points), $(params.max_points)])"
+    repr_str = "RBFTrainingBuffers{$T}("
+    repr_str *= "ℝ$(supscript(buffers.dim_x)) → ℝ$(supscript(buffers.dim_y))"
+    repr_str *= ", dim(Π)=$(buffers.dim_π), dim(Φ)∈[$(buffers.min_points), $(buffers.max_points)])"
+  
     if !iscompact
-      repr_str *= "\n  `x0`    : $(pretty_row_vec(params.x0))"
-      repr_str *= "\n  `(Δ, ε)`: $(@sprintf("(%.2e, %.2e)", val(params.delta_ref), val(params.shape_parameter_ref)))"
-      repr_str *= "\n  fully linear: $(val(params.is_fully_linear_ref))"
-      repr_str *= "\n  has `z_new` : $(val(params.has_z_new_ref))"
+      repr_str *= "\n  SIZE = $(Base.format_bytes(Base.summarysize(buffers)))"
     end
     print(io, repr_str)
 end
@@ -256,24 +254,21 @@ Base.@kwdef struct RBFModel{
     buffers :: RBFTrainingBuffers{T}
 end
 
-function Base.show(io::IO, buffers::RBFModel)
+function Base.show(io::IO, rbf::RBFModel{T}) where T
     iscompact = get(io, :compact, false)
-    lnend = iscompact ? ", " : "\n"
-    repr_str = "RBFModel{$(Base.typename(typeof(buffers.kernel)).name)}"
-    if iscompact
-      repr_str *= "("
-    else
-      repr_str *= "\n"
-    end
-    repr_str *= "dim_x = $(buffers.dim_x)" * lnend
-    repr_str *= "dim_y = $(buffers.dim_y)" * lnend
-    repr_str *= "poly_deg = $(buffers.poly_deg)" * lnend
-    repr_str *= "dim_π = $(buffers.dim_π)" * lnend
-    repr_str *= "min_points = $(buffers.min_points)" * lnend
-    repr_str *= "max_points = $(buffers.max_points)" * lnend
-    repr_str *= "size = $(Base.format_bytes(Base.summarysize(buffers)))"
-    if iscompact
-      repr_str *= ")"
+    repr_str = "RBFModel{$T}"
+    repr_str *= param_top_str(rbf.params)
+    if !iscompact
+      repr_str *= "\n  kernel         : $(repr(rbf.kernel))"
+      repr_str *= "\n  shape parameter: "
+      if rbf.shape_parameter_function isa Function
+        repr_str *= "dynamic, currently `$(val(rbf.params.shape_parameter_ref))`"
+      elseif rbf.shape_parameter_function isa Number
+        repr_str *= "constant, set to `$(rbf.shape_parameter_function)`"
+      else
+        repr_str *= "constant by kernel as `$(_shape_parameter(rbf.kernel))`"
+      end
+      repr_str *= "\n  SIZE = $(Base.format_bytes(Base.summarysize(rbf)))"
     end
     print(io, repr_str)
 end
