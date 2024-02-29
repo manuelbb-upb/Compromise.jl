@@ -47,7 +47,7 @@
     @assert isnothing(poly_deg) || poly_deg in (0,1)
 end
 
-Base.@kwdef struct RBFParameters{T<:AbstractFloat}
+Base.@kwdef struct RBFParameters{T<:Real}
     ## meta data for `Base.show`
     dim_x :: Int
     dim_y :: Int
@@ -83,7 +83,26 @@ end
 
 @batteries RBFParameters selfconstructor=false
 
-Base.@kwdef struct RBFTrainingBuffers{T<:AbstractFloat}
+function Base.copyto!(dst :: RBFParameters, src :: RBFParameters)
+  for fn in (
+      :n_X_ref, :is_fully_linear_ref, :has_z_new_ref, :delta_ref, 
+      :shape_parameter_ref, :database_state_ref
+  )
+      val!(
+          getfield(dst, fn),
+          val(
+              getfield(src, fn)
+          )
+      )
+  end
+  for fn in (:X, :coeff_φ, :coeff_π, :z_new, :x0)
+      Base.copyto!(getfield(dst, fn), getfield(src, fn))
+  end
+
+
+end
+
+Base.@kwdef struct RBFTrainingBuffers{T<:Real}
     ## meta data for `Base.show`
     dim_x :: Int
     dim_y :: Int
@@ -127,7 +146,6 @@ Base.@kwdef struct RBFTrainingBuffers{T<:AbstractFloat}
     Qj :: Matrix{T}
     "`dim_π+1` × `dim_π` buffer for new R factor update."
     Rj :: Matrix{T}
-
     "`max_points - dim_π` × `max_points` buffer for matrix-matrix-product."
     NΦ :: Matrix{T}
     "`max_points - dim_π` × `max_points - dim_π` buffer for coefficient LES."
@@ -144,8 +162,21 @@ Base.@kwdef struct RBFTrainingBuffers{T<:AbstractFloat}
     v2 :: Vector{T}
 end
 
-float_type(::RBFParameters{T}) where T = T
-float_type(::RBFTrainingBuffers{T}) where T = T
+function Base.copyto!(dst::RBFTrainingBuffers, src::RBFTrainingBuffers)
+  for fn in (
+    :lb, :ub, :FX, :xZ, :db_index, :not_db_flags, :Φ, :Π, :Q, :R, :Qj, :Rj,
+    :NΦ, :NΦN, :L, :Linv, :v1, :v2
+  )
+    copyto!(getfield(dst, fn), getfield(src, fn))
+  end
+  val!(dst.x0_db_index_ref, val(src.x0_db_index_ref))
+  if !isnothing(dst.qr_ws_dim_x) && !isnothing(src.qr_ws_dim_x)
+    copyto!(dst.qr_ws_dim_x, src.qr_ws_dim_x)
+  end
+  if !isnothing(dst.qr_ws_max_points) && !isnothing(src.qr_ws_max_points)
+    copyto!(dst.qr_ws_max_points, src.qr_ws_max_points)
+  end
+end
 
 function Base.show(io::IO, buffers::RBFTrainingBuffers{T}) where T
     iscompact = get(io, :compact, false)
@@ -265,8 +296,8 @@ function rbf_params_and_buffers(
   coeff_π = array(T, dim_π, dim_y)
   z_new = array(T, dim_x)
   x0 = array(T, dim_x)
-  delta_ref = MutableNumber(one(T))
-  shape_parameter_ref = MutableNumber(one(T))
+  delta_ref = MutableNumber{T}(1)
+  shape_parameter_ref = MutableNumber{T}(1)
   is_fully_linear_ref = MutableNumber(false)
   has_z_new_ref = MutableNumber(false)
   database_state_ref = MutableNumber(rand(UInt64))
@@ -281,11 +312,17 @@ function rbf_params_and_buffers(
 
   FX = array(T, dim_y, max_points)
 
-  qr_ws_dim_x = QRWYWs(@view(X[:, 1:dim_x]))
-  #qr_ws_max_points = QRWYWs(X)
-  #qr_ws_dim_x = nothing 
-  qr_ws_max_points = nothing
- 
+  qr_ws_dim_x = if T isa BlasFloat 
+    QRWYWs(@view(X[:, 1:dim_x]))
+  else
+    nothing
+  end
+  qr_ws_max_points = if T isa BlasFloat
+    QRWYWs(X)
+  else
+    nothing
+  end
+  
   lb = array(T, dim_x)
   ub = array(T, dim_x)
 

@@ -8,7 +8,7 @@ import Compromise as C
 import .C.RBFModels as R
 import ForwardDiff as FD
 
-import Compromise.RBFModels: rbf_init_model, update_rbf_model!, add_to_database!, val
+import Compromise.RBFModels: rbf_init_model, update_rbf_model!, add_to_database!, val, val!
 import Compromise: NonlinearFunction, eval_op!, model_op!, model_grads!
 
 using Test
@@ -380,25 +380,20 @@ end
                 @test fx0 ≈ yi
             end
 
+            _rbf = C.init_surrogate(cfg, nothing, dim_x, dim_y, nothing, Real)
+            copyto!(_rbf.params, rbf.params)
+            copyto!(_rbf.buffers, rbf.buffers)
             Dy = zeros(dim_x, dim_y)
             for _=1:10
                 xi = randx()
-                #=jac = finite_difference_jacobian(xi) do x
-                    y = zeros(dim_y)
-                    model_op!(y, rbf, x)
+                jac = FD.jacobian(xi) do x
+                    y = zeros(Real, dim_y)
+                    model_op!(y, _rbf, x)
                     y
-                end=#
-                jac = diff_rbf(
-                    xi - rbf.params.x0, 
-                    rbf.kernel, 
-                    rbf.params.X[1:dim_x, 1:n_X], 
-                    rbf.params.coeff_φ[1:n_X, 1:dim_y], 
-                    rbf.params.coeff_π[1:rbf.dim_π, 1:dim_y], 
-                    val(rbf.params.shape_parameter_ref)
-                )
-                
+                end
+               
                 model_grads!(Dy, rbf, xi)
-                @test isapprox(jac, Dy'; rtol=1e-3)
+                @test isapprox(jac, Dy'; rtol=1e-6)
             end
         end
         end

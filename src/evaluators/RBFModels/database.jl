@@ -1,6 +1,6 @@
 # ### Sample Database
 
-Base.@kwdef struct RBFDatabase{T}
+Base.@kwdef struct RBFDatabase{T<:Number}
     dim_x :: Int
     dim_y :: Int
 
@@ -52,7 +52,11 @@ function init_rbf_database(
         ## 1 GB = 1 billion bytes = 10^9 bytes
         ## byte-size of one colum: `sizeof(T)*dim_x`
         ## 1 GB database => 10^9/(sizeof(T)*dim_x)
-        max(min_points, round(Int, 10^9/(sizeof(T)*dim_x)))
+        if isconcretetype(T)
+            max(2 * min_points, round(Int, 10^9/(sizeof(T)*dim_x)))
+        else
+            2 * min_points
+        end
     else
         database_size
         #=if database_size < min_points

@@ -25,6 +25,19 @@ function QRWYWs(A::StridedMatrix{T}; kwargs...) where {T <: BlasFloat}
     )
 end
 
+function Base.copyto!(dst::QRWYWs, src::QRWYWs)
+    nwork = length(src.work)
+    if length(dst.work) < nwork
+        resize!(dst.work, nwork)
+    end
+    copyto!(dst.work, src.work)
+
+    if length(dst.T) < length(src.T)
+        dst.T = similar(dst.T, size(src.T))
+    end
+    copyto!(dst.T, src.T)
+end
+
 function Base.resize!(
     ws::QRWYWs, A::StridedMatrix; 
     blocksize=36, work=true
