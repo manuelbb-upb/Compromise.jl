@@ -21,7 +21,11 @@ supports_scaling(T::Type{<:AbstractMOPSurrogate})=NoScaling()
 # ## Construction
 # Define a function to return a model for some MOP.
 # The model does not yet have to be trained.
-init_models(mop::AbstractMOP, n_vars, scaler)::AbstractMOPSurrogate=nothing
+init_models(
+    mop::AbstractMOP, n_vars, scaler; 
+    delta_max::Union{Number,AbstractVector{<:Number}},
+    require_fully_linear::Bool=true,
+)::AbstractMOPSurrogate=nothing
 # It is trained with the update method `update_models!`.
 #
 # !!! note

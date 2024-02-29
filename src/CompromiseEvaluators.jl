@@ -461,7 +461,10 @@ The operator (and model) has input dimension `dim_in` and output dimension `dim_
 `T` is a subtype of `AbstractFloat` to indicate precision of cache arrays.
 """
 function init_surrogate(
-    ::AbstractSurrogateModelConfig, op, dim_in, dim_out, params, T)::AbstractSurrogateModel
+    ::AbstractSurrogateModelConfig, op, dim_in, dim_out, params, T;
+    require_fully_linear::Bool=true, 
+    delta_max::Union{Number, AbstractVector{<:Number}}=Inf,
+)::AbstractSurrogateModel
     return nothing
 end
 
@@ -495,7 +498,7 @@ and upper right corner `ub` (in the scaled variable domain)
 in the scaled domain. `fx` are the outputs of `nonlinear_operator` at `x`.
 """
 function update!(
-    surr::AbstractSurrogateModel, op, Δ, x, fx, lb, ub; kwargs...
+    surr::AbstractSurrogateModel, op, Δ, x, fx, lb, ub; log_level, kwargs...
 )
     return nothing    
 end

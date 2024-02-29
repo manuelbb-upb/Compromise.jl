@@ -87,19 +87,32 @@ function CE.model_grads!(Dy, rbf::RBFModel, x)
     )
 end
 
-function CE.init_surrogate(cfg::RBFConfig, op, dim_in, dim_out, params, T)
+function CE.init_surrogate(
+    cfg::RBFConfig, op, dim_in, dim_out, params, T;
+    require_fully_linear::Bool=true,
+    delta_max::Number=T(Inf),
+)
     @unpack (
         kernel, search_factor, max_search_factor, th_qr, th_cholesky, max_points, 
         database_size, database_chunk_size, enforce_fully_linear, poly_deg, 
         shape_parameter_function
     ) = cfg
+    if require_fully_linear
+        enforce_fully_linear = require_fully_linear
+    end
     return rbf_init_model(
-        dim_in, dim_out, poly_deg, kernel, shape_parameter_function, 
+        dim_in, dim_out, poly_deg, delta_max, kernel, shape_parameter_function, 
         database_size, database_chunk_size, max_points, enforce_fully_linear, 
         search_factor, max_search_factor, th_qr, th_cholesky, T
     )
 end
 
+function CE.update!(
+    rbf::RBFModel, op, Δ, x, fx, lb, ub; 
+    log_level=Info, kwargs...
+)
+    update_rbf_model!(rbf, op, Δ, x, fx, lb, ub; log_level, norm_p=Inf)
+end
 #=
 function CE.copy_model(mod::RBFModel)
     return error("TODO")
@@ -118,24 +131,6 @@ end
 
 # ## Interface Implementation
 
-function CE.init_surrogate(cfg::RBFConfig, op, dim_in, dim_out, params, T)
-    @unpack (kernel, search_factor, max_search_factor, th_qr, th_cholesky, max_points, database_size, 
-        database_chunk_size, enforce_fully_linear, poly_deg, shape_parameter_function) = cfg
-    return init_rbf_model(
-        dim_in, dim_out, poly_deg, kernel, shape_parameter_function, 
-        database_size, database_chunk_size, max_points, 
-        enforce_fully_linear, search_factor, max_search_factor,
-        th_qr, th_cholesky, T
-    )
-end
-
-
-function CE.update!(
-    rbf::RBFModel, op, Δ, x, fx, lb, ub; 
-    Δ_max=Δ, log_level, kwargs...
-)
-    update_rbf_model!(rbf, op, Δ, x, fx, lb, ub; Δ_max, log_level, norm_p=Inf)
-end
 
 #src function model_op_and_grads! end # TODO
 # TODO partial evaluation

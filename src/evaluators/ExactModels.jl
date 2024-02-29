@@ -15,7 +15,7 @@ CE.depends_on_radius(::ExactModel)=false
 CE.requires_grads(::ExactModelConfig)=true
 CE.requires_hessians(::ExactModelConfig)=false
 
-function CE.init_surrogate(::ExactModelConfig, op, dim_in, dim_out, params, T)
+function CE.init_surrogate(::ExactModelConfig, op, dim_in, dim_out, params, T; kwargs...)
     return ExactModel(op, params)
 end
 

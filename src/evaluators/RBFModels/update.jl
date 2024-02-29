@@ -1,8 +1,8 @@
 function update_rbf_model!(
     rbf::RBFModel, op, Δ, x0, fx0, global_lb=nothing, global_ub=nothing; 
-    Δ_max=Δ, norm_p=Inf, log_level=Info, force_rebuild::Bool=false
+    norm_p=Inf, log_level=Info, force_rebuild::Bool=false
 )
-    @unpack dim_x, dim_y = rbf
+    @unpack delta_max, dim_x, dim_y = rbf
     @assert dim_x == length(x0)
     @assert dim_y == length(fx0)
 
@@ -19,7 +19,7 @@ function update_rbf_model!(
         return nothing
     end
 
-    n_X = affine_sampling!(rbf, Δ, x0, fx0, global_lb, global_ub; Δ_max, norm_p, log_level)
+    n_X = affine_sampling!(rbf, Δ, x0, fx0, global_lb, global_ub; delta_max, norm_p, log_level)
     
     n_X, op_code = evaluate_and_update_db!(rbf, op, x0, n_X)
 
@@ -132,7 +132,7 @@ end
 
 function affine_sampling!(
     rbf::RBFModel, Δ, x0, fx0, global_lb=nothing, global_ub=nothing; 
-    Δ_max, norm_p, log_level,
+    delta_max, norm_p, log_level,
 )
     @unpack params, buffers, database = rbf
     @unpack X = params
@@ -152,7 +152,7 @@ function affine_sampling!(
         database,
         min_points, max_points, search_factor, max_search_factor, th_qr,
         Δ, x0, fx0, global_lb, global_ub;
-        norm_p, Δ_max, enforce_fully_linear, log_level, x0_db_index
+        norm_p, delta_max, enforce_fully_linear, log_level, x0_db_index
     )
 end
 
@@ -162,7 +162,7 @@ end
     database, 
     min_points, max_points, search_factor, max_search_factor, th_qr, 
     Δ, x0, fx0, global_lb, global_ub;
-    norm_p, enforce_fully_linear, Δ_max, log_level, x0_db_index=-1
+    norm_p, enforce_fully_linear, delta_max, log_level, x0_db_index=-1
 )
     ## first column will contain `x0`, but shifted into origin, so set to zero:
     db_index .= -1
@@ -213,7 +213,7 @@ end
         n_X += n_new
     end
     
-    Δ2 = max_search_factor .* Δ_max
+    Δ2 = max_search_factor .* delta_max
     trust_region_bounds!(lb, ub, x0, Δ2, global_lb, global_ub)
 
     if n_X < min_points || min_points < max_points

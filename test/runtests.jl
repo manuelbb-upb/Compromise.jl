@@ -1,8 +1,18 @@
-using Compromise
+if !get(ENV, "CI", false)
+    using TestEnv, Pkg
+    Pkg.activate(joinpath(@__DIR__, ".."))
+    TestEnv.activate()
+end
+
 using Test
-
-include("rbfs.jl")
-
+using SafeTestsets
+#%%
+@safetestset "RBFModels" begin 
+    include("rbfs.jl")
+end
+#%%
+@safetestset "Misc" begin
+using Compromise
 @testset  "SteepestDescentConfig" begin
     for backtracking_factor in (-1.0, -1//2, 0, 1f0, 2)
         @test_throws AssertionError Compromise.SteepestDescentConfig(;
@@ -53,6 +63,19 @@ end
     _opts = deepcopy(opts)
 
     @test opts == _opts
+    @test opts.stop_crit_tol_abs isa Float32
+
+    opts = AlgorithmOptions(; T = Float16)
+    @test opts.stop_crit_tol_abs isa Float16
+    
+    opts = AlgorithmOptions{Float64}(; T = Float16)
+    @test opts.stop_crit_tol_abs isa Float16
+
+    opts = AlgorithmOptions{Float64}()
+    @test opts.stop_crit_tol_abs isa Float64
+
+    opts = AlgorithmOptions{Float64}(; stop_crit_tol_abs=1f0)
+    @test opts.stop_crit_tol_abs isa Float64
 end
 
 @testset "Taylor Polynomials deg 2" begin
@@ -465,4 +488,5 @@ end
     final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
     @test fn_counter[] == 10
     @test stop_code isa Compromise.GenericStopping
+end
 end

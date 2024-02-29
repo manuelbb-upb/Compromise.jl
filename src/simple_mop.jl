@@ -492,7 +492,7 @@ end
 # as easy as possible. 
 # Modellers should always assume working in the scaled domain and not be bothered
 # with transformations...
-function init_models(mop::SimpleMOP, n_vars, scaler)
+function init_models(mop::SimpleMOP, n_vars, scaler; kwargs...)
     d_objf = dim_objectives(mop)
     d_nl_eq = dim_nl_eq_constraints(mop)
     d_nl_ineq = dim_nl_ineq_constraints(mop)
@@ -504,11 +504,11 @@ function init_models(mop::SimpleMOP, n_vars, scaler)
     nl_ineq = scale_wrap_op(
         scaler, mop.nl_ineq_constraints, mop.mcfg_nl_ineq_constraints, d_in, d_nl_ineq, Float64)
     mobjf = init_surrogate(
-        mop.mcfg_objectives, objf, d_in, d_objf, nothing, Float64)
+        mop.mcfg_objectives, objf, d_in, d_objf, nothing, Float64; kwargs...)
     mnl_eq = init_surrogate(
-        mop.mcfg_nl_eq_constraints, nl_eq, d_in, d_nl_eq, nothing, Float64)
+        mop.mcfg_nl_eq_constraints, nl_eq, d_in, d_nl_eq, nothing, Float64; kwargs...)
     mnl_ineq = init_surrogate(
-        mop.mcfg_nl_ineq_constraints, nl_ineq, d_in, d_nl_ineq, nothing, Float64)
+        mop.mcfg_nl_ineq_constraints, nl_ineq, d_in, d_nl_ineq, nothing, Float64; kwargs...)
 
     return SimpleMOPSurrogate(
         objf, nl_eq, nl_ineq, d_in, d_objf, d_nl_eq, d_nl_ineq, mobjf, mnl_eq, mnl_ineq)
@@ -521,11 +521,10 @@ function update_models!(
     @unpack x, fx, gx, hx = vals
     @unpack lb, ub = scaled_cons
     log_level = algo_opts.log_level
-    Δ_max = algo_opts.delta_max
 
-    @serve update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; Δ_max, log_level)
-    @serve update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; Δ_max, log_level)
-    @serve update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; Δ_max, log_level)
+    @serve update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; log_level)
+    @serve update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; log_level)
+    @serve update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; log_level)
     return nothing
 end
 

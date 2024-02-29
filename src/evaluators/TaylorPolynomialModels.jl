@@ -61,7 +61,7 @@ function TaylorPolynomial2(dim_in, dim_out, T)
     return TaylorPolynomial2(tp1, Hfx, xtmp)
 end
 
-function CE.init_surrogate(tp_cfg::TaylorPolynomialConfig, op, dim_in, dim_out, params, T)
+function CE.init_surrogate(tp_cfg::TaylorPolynomialConfig, op, dim_in, dim_out, params, T; kwargs...)
     if tp_cfg.degree == 1
         return TaylorPolynomial1(dim_in, dim_out, T)
     else
@@ -74,7 +74,7 @@ CE.depends_on_radius(::TaylorPoly)=false
 CE.requires_hessians(cfg::TaylorPolynomialConfig)=(cfg.degree>=2)
 CE.requires_grads(::TaylorPolynomialConfig)=true
 
-function CE.model_op!(y, tp::TaylorPolynomial1, x)
+function CE.model_op!(y::AbstractVector, tp::TaylorPolynomial1, x::AbstractVector)
     Δx = tp.Δx
     Δx .= x .- tp.x0
 

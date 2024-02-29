@@ -226,6 +226,7 @@ Base.@kwdef struct RBFModel{
     dim_π :: Int
     min_points :: Int
     max_points :: Int
+    delta_max :: T
 
     poly_deg :: Int
     kernel :: K
@@ -360,6 +361,7 @@ end
 function rbf_init_model(
     dim_x :: Integer, dim_y :: Integer, 
     poly_deg :: Union{Nothing, Integer}, 
+    delta_max :: Number,
     kernel :: AbstractRBFKernel,
     shape_parameter_function :: Union{Nothing, Number, Function},
     database_size :: Union{Nothing, Integer}, 
@@ -395,6 +397,7 @@ function rbf_init_model(
       dim_π,
       min_points,
       max_points,
+      delta_max = T(delta_max),
       poly_deg,
       kernel,
       shape_parameter_function, 

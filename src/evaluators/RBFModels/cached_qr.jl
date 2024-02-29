@@ -5,7 +5,6 @@
 import LinearAlgebra: BlasInt, BlasFloat, require_one_based_indexing, chkstride1 
 import LinearAlgebra.BLAS: @blasfunc
 import LinearAlgebra.LAPACK: chklapackerror, libblastrampoline
-import Libdl: dlsym
 
 import StridedViews: sview
 

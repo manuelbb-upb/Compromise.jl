@@ -330,7 +330,11 @@ function optimize(
  
     ## pre-allocate surrogates `mod`
     ## (they are not trained yet)
-    mod = init_models(mop, n_vars, scaler)
+    mod = init_models(
+        mop, n_vars, scaler; 
+        delta_max = algo_opts.delta_max,
+        require_fully_linear = algo_opts.require_fully_linear_models
+    )
     
     ## chaches for surrogate value vectors fx, hx, gx, Dfx, Dhx, Dgx
     ## (values not set yet, only after training)

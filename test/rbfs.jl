@@ -1,14 +1,8 @@
-if !get(ENV, "CI", false)
-    using TestEnv, Pkg
-    Pkg.activate(joinpath(@__DIR__, ".."))
-    TestEnv.activate()
-end
-
 import Compromise as C
 import .C.RBFModels as R
 import ForwardDiff as FD
 
-import Compromise.RBFModels: rbf_init_model, update_rbf_model!, add_to_database!, val, val!
+import Compromise.RBFModels: add_to_database!, val, val!
 import Compromise: NonlinearFunction, eval_op!, model_op!, model_grads!
 
 using Test
@@ -161,7 +155,10 @@ end
 
     dim_x = 2
     dim_y = 3
-    rbf = C.init_surrogate(cfg, nothing, dim_x, dim_y, nothing, nothing)
+    rbf = C.init_surrogate(
+        cfg, nothing, dim_x, dim_y, nothing, Float64;
+        delta_max = Inf,
+    )
     @test rbf.dim_x == dim_x
     @test rbf.dim_y == dim_y
     @test rbf.min_points == dim_x + 1
@@ -273,18 +270,6 @@ end
     @assert all( dat.filter_flags[10:11] .== false )
 end
 #%%
- cfg = R.RBFConfig()
-    @test cfg.kernel isa R.CubicKernel
-    @test cfg.poly_deg == 1
-    @test cfg.shape_parameter_function === nothing
-    @test cfg.max_points === nothing
-    @test cfg.database_size === nothing
-    @test cfg.database_chunk_size === nothing
-    @test cfg.enforce_fully_linear
-    @test cfg.search_factor == 2
-    @test cfg.max_search_factor == 2
-    @test cfg.th_qr == 1/4
-    @test cfg.th_cholesky == 1e-7
 
 @testset "RBFModel" begin
     op = NonlinearFunction(;
@@ -303,15 +288,16 @@ end
         for dim_y in (1, 2, 4, 10)
         for max_points in (dim_x+1, 2*(dim_x + 1))
 
+            Δ = .1
             cfg = R.RBFConfig(; kernel, poly_deg, max_points)
-            rbf = C.init_surrogate(cfg, nothing, dim_x, dim_y, nothing, Float64)
+            rbf = C.init_surrogate(cfg, nothing, dim_x, dim_y, nothing, Float64; delta_max = Δ)
             @test val(rbf.params.is_fully_linear_ref) == false
             x0 = rand(dim_x)
             fx0 = zeros(dim_y)
             eval_op!(fx0, op, x0)
 
-            Δ = .1
-            update_rbf_model!(rbf, op, Δ, x0, fx0)
+            #update_rbf_model!(rbf, op, Δ, x0, fx0)
+            C.update!(rbf, op, Δ, x0, fx0, nothing, nothing,)
             @test rbf.params.x0 == x0
             @test val(rbf.params.is_fully_linear_ref) == true
             n_X = val(rbf.params.n_X_ref)
@@ -328,10 +314,12 @@ end
                 @test isapprox(fx0, yi; rtol=1e-6)
             end 
             rbf0 = deepcopy(rbf)
-            update_rbf_model!(rbf, op, Δ, x0, fx0)
+            #update_rbf_model!(rbf, op, Δ, x0, fx0)
+            C.update!(rbf, op, Δ, x0, fx0, nothing, nothing,)
             @test isequal(rbf.params, rbf0.params) # isequal(NaN, NaN) == true
             
-            update_rbf_model!(rbf, op, Δ, x0, fx0; force_rebuild=true)
+            #update_rbf_model!(rbf, op, Δ, x0, fx0; force_rebuild=true)
+            C.update!(rbf, op, Δ, x0, fx0, nothing, nothing; force_rebuild=true)
             @test sum(rbf.database.flags_x) == sum(rbf0.database.flags_x)
             @test rbf.params.database_state_ref == rbf0.params.database_state_ref
             n_X = val(rbf.params.n_X_ref)
@@ -361,7 +349,8 @@ end
                 @test xi == _xi
             end
             
-            update_rbf_model!(rbf, op, Δ, x0, fx0)
+            #update_rbf_model!(rbf, op, Δ, x0, fx0)
+            C.update!(rbf, op, Δ, x0, fx0, nothing, nothing,)
 
             n_X = val(rbf.params.n_X_ref)
             X = rbf.params.X[:, 1:n_X]
