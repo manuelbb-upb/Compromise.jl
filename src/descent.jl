@@ -403,8 +403,14 @@ function solve_steepest_descent_problem(
     end
 
     ## descent constraints, ∇f(x)*d ≤ β
+    ndf = 1
     for df in eachcol(Dfx)
-        ndf = normalize_gradients ? LA.norm(df) : 1
+        if normalize_gradients
+            ndf = LA.norm(df)
+            if iszero(ndf)
+                return ndf, df
+            end
+        end
         JuMP.@constraint(opt, df'd <= ndf * β)
     end
 
