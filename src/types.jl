@@ -78,12 +78,12 @@ Base.@kwdef struct AlgorithmOptions{_T <: Number, SC}
 	stop_ftol_abs :: _T = -Inf
 
 	"Stop if for the approximate criticality it holds that ``χ̂(x) <= ε`` and for the feasibility that ``θ <= δ``."
-	stop_crit_tol_abs :: _T = eps(T)
+	stop_crit_tol_abs :: _T = -Inf
 	"Stop if for the approximate criticality it holds that ``χ̂(x) <= ε`` and for the feasibility that ``θ <= δ``."
 	stop_theta_tol_abs :: _T = eps(T)
 	
 	"Stop after the criticality routine has looped `stop_max_crit_loops` times."
-	stop_max_crit_loops :: Int = 1
+	stop_max_crit_loops :: Int = 10
 
 	# criticality test thresholds
 	"Lower bound for criticality before entering Criticality Routine."

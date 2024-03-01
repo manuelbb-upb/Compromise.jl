@@ -71,11 +71,9 @@ compute the derivatives if the relevant field `isnothing`.
     num_grad_calls :: Base.RefValue{Int} = Ref(0)
     num_hess_calls :: Base.RefValue{Int} = Ref(0)
 
-    max_func_calls :: Union{Int, Nothing} = nothing
-    max_grad_calls :: Union{Int, Nothing} = nothing
-    max_hess_calls :: Union{Int, Nothing} = nothing
-
-    enforce_max_calls :: Bool = true
+    max_func_calls :: Int = typemax(Int)
+    max_grad_calls :: Int = typemax(Int)
+    max_hess_calls :: Int = typemax(Int)
 end
 
 function CE.provides_grads(op::NonlinearParametricFunction)
@@ -101,6 +99,7 @@ function CE.set_num_calls!(op::NonlinearParametricFunction, vals::Tuple{Int,Int,
     op.num_hess_calls[]=0
     return nothing
 end
+
 function CE.max_calls(op::NonlinearParametricFunction)
     return (
         op.max_func_calls,
@@ -108,8 +107,6 @@ function CE.max_calls(op::NonlinearParametricFunction)
         op.max_hess_calls
     )
 end
-
-CE.enforce_max_calls(op::NonlinearParametricFunction)=op.enforce_max_calls
 
 function CE.eval_op!(y::AbstractVector, op::NonlinearParametricFunction, x::AbstractVector, p)
     if op.func_iip 
@@ -318,7 +315,6 @@ end
 @forward CE.is_counted(op::NonlinearFunction)
 @forward CE.num_calls(op::NonlinearFunction)
 @forward CE.max_calls(op::NonlinearFunction)
-@forward CE.enforce_max_calls(op::NonlinearFunction)
 @forward CE.set_num_calls!(op::NonlinearFunction)
 @forward CE.provides_grads(op::NonlinearFunction)
 @forward CE.provides_hessians(op::NonlinearFunction)

@@ -1,5 +1,6 @@
 
 # # AbstractMOP Interface
+
 # An object subtyping `AbstractMOP` is a glorified wrapper around vector-vector functions.
 # The methods below were originally meant to be used to implement our algorithm similar to 
 # how it has been stated in the article, rather “mathematically“.
@@ -95,12 +96,22 @@ function eval_nl_ineq_constraints!(y::RVec, mop::M, x::RVec) where {M<:AbstractM
     error("`eval_nl_ineq_constraints!(y, mop, x) not implemented for mop of type $(M).")
 end
 
-# To ensure, they only get called if needed, we wrap them and assign shorter names:
-objectives!(y::RVec, mop::AbstractMOP, x::RVec)=eval_objectives!(y, mop, x)
-nl_eq_constraints!(y::Nothing, mop::AbstractMOP, x::RVec)=nothing
-nl_ineq_constraints!(y::Nothing, mop::AbstractMOP, x::RVec)=nothing
-nl_eq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)=eval_nl_eq_constraints!(y, mop, x)
-nl_ineq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)=eval_nl_ineq_constraints!(y, mop, x)
+# To ensure they only get called if needed, we wrap them and assign shorter names:
+function objectives!(y::RVec, mop::AbstractMOP, x::RVec)
+    eval_objectives!(y, mop, x)
+end
+function nl_eq_constraints!(y::Nothing, mop::AbstractMOP, x::RVec)
+    nothing
+end
+function nl_ineq_constraints!(y::Nothing, mop::AbstractMOP, x::RVec)
+    nothing
+end
+function nl_eq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)
+    eval_nl_eq_constraints!(y, mop, x)
+end
+function nl_ineq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)
+    eval_nl_ineq_constraints!(y, mop, x)
+end
 
 # Similar methods can be defined for linear constraints.
 """

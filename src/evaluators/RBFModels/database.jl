@@ -212,7 +212,7 @@ function evaluate!(rbf_database, op)
                 end
                 x = @view(database_x[:, i])
                 y = @view(database_y[:, i])
-                @serve func_vals!(y, op, x)
+                @ignoraise func_vals!(y, op, x)
                 
                 _state = val(state)
                 val!(state, hash(y, _state))

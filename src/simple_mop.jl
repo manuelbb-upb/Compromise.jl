@@ -33,7 +33,6 @@ CE.is_counted(sop::ScaledOperator)=CE.is_counted(sop.op)
 CE.num_calls(sop::ScaledOperator)=CE.num_calls(sop.op)
 CE.max_calls(sop::ScaledOperator)=CE.max_calls(sop.op)
 CE.set_num_calls!(sop::ScaledOperator, vals::Tuple{Int,Int,Int})=CE.set_num_calls!(sop.op, vals)
-CE.enforce_max_calls(sop::ScaledOperator) = CE.enforce_max_calls(sop.op)
 
 # Consider ``f: ℝ^n → ℝ^m`` and the unscaling map ``u: ℝ^n → ℝ^n``.
 # By the chain rule we have ``∇(f∘u)(x) = ∇f(ξ)*T``, where ``T`` is 
@@ -386,15 +385,12 @@ lin_ineq_constraints(mop::TypedMOP) = mop.A_b
 
 # Because we store `AbstractNonlinearOperator`s, evaluation can simply be redirected:
 function eval_objectives!(y::RVec, mop::SimpleMOP, x::RVec)
-    @serve CE.check_num_calls(mop.objectives, 1; force=true)
     return func_vals!(y, mop.objectives, x)
 end
 function eval_nl_eq_constraints!(y::RVec, mop::SimpleMOP, x::RVec)
-    @serve CE.check_num_calls(mop.nl_eq_constraints, 1; force=true)
     return func_vals!(y, mop.nl_eq_constraints, x)
 end
 function eval_nl_ineq_constraints!(y::RVec, mop::SimpleMOP, x::RVec)
-    @serve CE.check_num_calls(mop.nl_ineq_constraints, 1; force=true)
     return func_vals!(y, mop.nl_ineq_constraints, x)
 end
 
@@ -443,32 +439,32 @@ supports_scaling(::Type{<:SimpleMOPSurrogate})=ConstantAffineScaling()
 
 # Evaluation redirects to evaluation of the surrogates:
 function eval_objectives!(y::RVec, mod::SimpleMOPSurrogate, x::RVec)
-    return model_op!(y, mod.mod_objectives, x)
+    return func_vals!(y, mod.mod_objectives, x)
 end
 function eval_nl_eq_constraints!(y::RVec, mod::SimpleMOPSurrogate, x::RVec)
-    return model_op!(y, mod.mod_nl_eq_constraints, x)
+    return func_vals!(y, mod.mod_nl_eq_constraints, x)
 end
 function eval_nl_ineq_constraints!(y::RVec, mod::SimpleMOPSurrogate, x::RVec)
-    return model_op!(y, mod.mod_nl_ineq_constraints, x)
+    return func_vals!(y, mod.mod_nl_ineq_constraints, x)
 end
 # Gradients:
 function grads_objectives!(Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
-    return model_grads!(Dy, mod.mod_objectives, x)
+    return func_grads!(Dy, mod.mod_objectives, x)
 end
 function grads_nl_eq_constraints!(Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
-    return model_grads!(Dy, mod.mod_nl_eq_constraints, x)
+    return func_grads!(Dy, mod.mod_nl_eq_constraints, x)
 end
 function grads_nl_ineq_constraints!(Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
-    return model_grads!(Dy, mod.mod_nl_ineq_constraints, x)
+    return func_grads!(Dy, mod.mod_nl_ineq_constraints, x)
 end
 function eval_and_grads_objectives!(y::RVec, Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
-    return model_op_and_grads!(y, Dy, mod.mod_objectives, x)
+    return func_vals_and_grads!(y, Dy, mod.mod_objectives, x)
 end
 function eval_and_grads_nl_eq_constraints!(y::RVec, Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
-    return model_op_and_grads!(y, Dy, mod.mod_nl_eq_constraints, x)
+    return func_vals_and_grads!(y, Dy, mod.mod_nl_eq_constraints, x)
 end
 function eval_and_grads_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
-    return model_op_and_grads!(y, Dy, mod.mod_nl_ineq_constraints, x)
+    return func_vals_and_grads!(y, Dy, mod.mod_nl_ineq_constraints, x)
 end
 # ### Initialization and Training
 # These helpers make an operator respect scaling by returning `ScaledOperator`:
@@ -520,11 +516,10 @@ function update_models!(
 )
     @unpack x, fx, gx, hx = vals
     @unpack lb, ub = scaled_cons
-    log_level = algo_opts.log_level
-
-    @serve update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; log_level)
-    @serve update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; log_level)
-    @serve update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; log_level)
+    @unpack log_level = algo_opts
+    @ignoraise update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; log_level)
+    @ignoraise update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; log_level)
+    @ignoraise update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; log_level)
     return nothing
 end
 

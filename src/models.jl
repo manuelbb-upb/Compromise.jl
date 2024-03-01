@@ -51,9 +51,7 @@ _copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=de
 # ## Evaluation
 
 # !!! note
-#     All evaluation and differentiation methods that you see below should always 
-#     return `nothing`, **unless** you want to stop early.
-#     Then return something else, for example a string.
+#     Methods are in-place, return values are ignored, except for `AbstractStoppingCriterion`.
 
 # Evaluation of nonlinear objective models requires the following method.
 # `x` will be from the scaled domain, but if a model does not support scaling, 
@@ -70,11 +68,21 @@ function eval_nl_ineq_constraints!(y::RVec, mod::M, x::RVec) where {M<:AbstractM
 end
 
 # As before, we use shorter function names in the algorithm.
-objectives!(y::RVec, mod::AbstractMOPSurrogate, x::RVec)=eval_objectives!(y, mod, x)
-nl_eq_constraints!(y::Nothing, mod::AbstractMOPSurrogate, x::RVec)=nothing
-nl_ineq_constraints!(y::Nothing, mod::AbstractMOPSurrogate, x::RVec)=nothing
-nl_eq_constraints!(y::RVec, mod::AbstractMOPSurrogate, x::RVec)=eval_nl_eq_constraints!(y, mod, x)
-nl_ineq_constraints!(y::RVec, mod::AbstractMOPSurrogate, x::RVec)=eval_nl_ineq_constraints!(y, mod, x)
+function objectives!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+    eval_objectives!(y, mop, x)
+end
+function nl_eq_constraints!(y::Nothing, mop::AbstractMOPSurrogate, x::RVec)
+    nothing
+end
+function nl_ineq_constraints!(y::Nothing, mop::AbstractMOPSurrogate, x::RVec)
+    nothing
+end
+function nl_eq_constraints!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+    eval_nl_eq_constraints!(y, mop, x) 
+end
+function nl_ineq_constraints!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+    eval_nl_ineq_constraints!(y, mop, x)
+end
 
 # ## Pre-Allocation
 # The preallocation functions look the same as for `AbstractMOP`:
@@ -117,52 +125,62 @@ diff_nl_ineq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=grads_nl
 
 # Optionally, we can have evaluation and differentiation in one go:
 function eval_and_grads_objectives!(y::RVec, Dy::RMat, mod::M, x::RVec) where {M<:AbstractMOPSurrogate}
-    eval_objectives!(y, mop, x)
-    grads_objectives!(Dy, mod, x)
+    @ignoraise eval_objectives!(y, mod, x)
+    @ignoraise grads_objectives!(Dy, mod, x)
     return nothing
 end
 function eval_grads_nl_eq_constraints!(y::RVec, Dy::RMat, mod::M, x::RVec) where {M<:AbstractMOPSurrogate}
-    eval_nl_eq_constraints!(y, mop, x)
-    grads_nl_eq_constraints!(Dy, mod, x)
+    @ignoraise eval_nl_eq_constraints!(y, mod, x)
+    @ignoraise grads_nl_eq_constraints!(Dy, mod, x)
     return nothing
 end
 function eval_grads_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::M, x::RVec) where {M<:AbstractMOPSurrogate}
-    eval_nl_ineq_constraints!(y, mop, x)
-    grads_nl_ineq_constraints!(Dy, mod, x)
+    @ignoraise eval_nl_ineq_constraints!(y, mod, x)
+    @ignoraise grads_nl_ineq_constraints!(Dy, mod, x)
     return nothing
 end
 # Wrappers for use in the algorithm:
-vals_diff_objectives!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=eval_and_grads_objectives!(y, Dy, mod, x)
-vals_diff_nl_eq_constraints!(y::Nothing, Dy::Nothing, mod::AbstractMOPSurrogate, x::RVec)=nothing
-vals_diff_nl_ineq_constraints!(y::Nothing, Dy::Nothing, mod::AbstractMOPSurrogate, x::RVec)=nothing
-vals_diff_nl_eq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=eval_and_grads_nl_eq_constraints!(y, Dy, mod, x)
-vals_diff_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=eval_and_grads_nl_ineq_constraints!(y, Dy, mod, x)
+function vals_diff_objectives!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+    eval_and_grads_objectives!(y, Dy, mod, x)
+end
+function vals_diff_nl_eq_constraints!(y::Nothing, Dy::Nothing, mod::AbstractMOPSurrogate, x::RVec)
+    nothing
+end
+function vals_diff_nl_ineq_constraints!(y::Nothing, Dy::Nothing, mod::AbstractMOPSurrogate, x::RVec)
+    nothing
+end
+function vals_diff_nl_eq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+    eval_and_grads_nl_eq_constraints!(y, Dy, mod, x)
+end
+function vals_diff_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+    eval_and_grads_nl_ineq_constraints!(y, Dy, mod, x)
+end
 
 # Here is what is called later on:
 "Evaluate the models `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
 function eval_mod!(mod_vals, mod, x)
     @unpack fx, hx, gx = mod_vals
-    @serve objectives!(fx, mod, x)
-    @serve nl_eq_constraints!(hx, mod, x)
-    @serve nl_ineq_constraints!(hx, mod, x)
+    @ignoraise objectives!(fx, mod, x)
+    @ignoraise nl_eq_constraints!(hx, mod, x)
+    @ignoraise nl_ineq_constraints!(hx, mod, x)
     return nothing
 end
 
 "Evaluate the model gradients of `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
 function diff_mod!(mod_vals, mod, x)
     @unpack Dfx, Dhx, Dgx = mod_vals
-    @serve diff_objectives!(Dfx, mod, x)
-    @serve diff_nl_eq_constraints!(Dhx, mod, x)
-    @serve diff_nl_ineq_constraints!(hx, mod, x)
+    @ignoraise diff_objectives!(Dfx, mod, x)
+    @ignoraise diff_nl_eq_constraints!(Dhx, mod, x)
+    @ignoraise diff_nl_ineq_constraints!(hx, mod, x)
     return nothing
 end
 
 "Evaluate and differentiate `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
 function eval_and_diff_mod!(mod_vals, mod, x)
     @unpack fx, hx, gx, Dfx, Dhx, Dgx = mod_vals
-    @serve vals_diff_objectives!(fx, Dfx, mod, x)
-    @serve vals_diff_nl_eq_constraints!(hx, Dhx, mod, x)
-    @serve vals_diff_nl_ineq_constraints!(gx, Dgx, mod, x)
+    @ignoraise vals_diff_objectives!(fx, Dfx, mod, x)
+    @ignoraise vals_diff_nl_eq_constraints!(hx, Dhx, mod, x)
+    @ignoraise vals_diff_nl_ineq_constraints!(gx, Dgx, mod, x)
     return nothing
 end
 

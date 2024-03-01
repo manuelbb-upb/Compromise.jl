@@ -9,7 +9,7 @@ function test_trial_point!(
     
     # Use `vals_tmp` to hold the true values at `xs`:
     copyto!(vals_tmp.x, xs)
-    @serve eval_mop!(vals_tmp, mop, scaler)
+    @ignoraise eval_mop!(vals_tmp, mop, scaler)
 
     # To test the trial point against the filter, extract
     # current values and trial point values

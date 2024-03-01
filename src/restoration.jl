@@ -86,8 +86,7 @@ function postproccess_restoration(
     ##  we have to set `vals` eventually. in case of unsuccessfull restoration, we have to 
     ##  abort anyways)
     copyto!(vals.x, xr_opt)
-    mop_code = eval_mop!(vals, mop, scaler)
-    !isnothing(mop_code) && return GenericStopping(mop_code, algo_opts.log_level)
+    @ignoraise eval_mop!(vals, mop, scaler)
 
     Δ = iter_meta.Δ_pre
 

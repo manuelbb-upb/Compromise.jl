@@ -2,7 +2,7 @@ module RBFModels
 
 using ..Compromise.CompromiseEvaluators
 const CE = CompromiseEvaluators
-import ..Compromise: @serve, DEFAULT_PRECISION, project_into_box!
+import ..Compromise: @ignoraise, DEFAULT_PRECISION, project_into_box!
 import ..Compromise: subscript, supscript, pretty_row_vec
 import Printf: @sprintf
 
@@ -42,7 +42,7 @@ CE.depends_on_radius(::RBFModel)=true
 CE.requires_grads(::RBFConfig)=false
 CE.requires_hessians(::RBFConfig)=false
 
-function prepare_eval_buffers(rbf, x)
+@views function prepare_eval_buffers(rbf, x)
     @unpack dim_x, dim_y, dim_π, poly_deg, kernel, params, buffers = rbf
     @unpack coeff_φ, coeff_π, x0, X = params
     n_X = val(params.n_X_ref)
@@ -62,7 +62,7 @@ function prepare_eval_buffers(rbf, x)
     return vec2row(Φ), vec2row(Π), vec2col(x_in), centers, cφ, cπ, ε, n_X
 end
 
-@views function CE.model_op!(y::AbstractVector, rbf::RBFModel, x::AbstractVector)
+function CE.model_op!(y::AbstractVector, rbf::RBFModel, x::AbstractVector)
     Φ, Π, x_in, centers, cφ, cπ, ε, n_X = prepare_eval_buffers(rbf, x)
 
     _rbf_eval!(

@@ -25,40 +25,34 @@ function criticality_routine(
         copyto!(step_valsj, step_vals)
         copyto!(mod_valsj, mod_vals)
         _copyto_model!(modj, mod)
+
         while Δj > crit_M * χ
             iter_meta.num_crit_loops = j
             stop_code=nothing
             for stopping_criterion in stop_crits
                 if check_pre_crit_loop(stopping_criterion)
-                    stop_code = _evaluate_stopping_criterion(
+                    @ignorebreak stop_code = _evaluate_stopping_criterion(
                         stopping_criterion, Δj, mop, modj, scaler, lin_cons, scaled_cons, 
                         vals, vals_tmp, step_valsj, mod_valsj, filter, iter_meta, step_cachej, algo_opts
                     )
-                    !isnothing(stop_code) && break
                 end
             end
-            !isnothing(stop_code) && break
+            @ignorebreak stop_code
             if check_pre_crit_loop(user_callback)
-                stop_code = evaluate_stopping_criterion(
+                @ignorebreak stop_code = evaluate_stopping_criterion(
                     user_callback, Δj, mop, modj, scaler, lin_cons, scaled_cons, 
                     vals, vals_tmp, step_valsj, mod_valsj, filter, iter_meta, step_cachej, algo_opts
                 )
-                !isnothing(stop_code) && break
             end
-            !isnothing(stop_code) && break
+            @ignorebreak stop_code
+            
             @logmsg log_level "\tCRITICALITY LOOP $(j+1), Δ=$Δj > Mχ=$(crit_M * χ)."
+            
             Δj *= crit_alpha 
+            
             if depends_on_radius(modj)
-                _stop_code = update_models!(modj, Δj, mop, scaler, vals, scaled_cons, algo_opts)
-                if !isnothing(_stop_code)
-                    stop_code = GenericStopping(_stop_code, log_level)
-                    break
-                end
-                _stop_code = eval_and_diff_mod!(mod_valsj, modj, vals.x)
-                if !isnothing(_stop_code)
-                    stop_code = GenericStopping(_stop_code, log_level)
-                    break
-                end
+                @ignorebreak stop_code = update_models!(modj, Δj, mop, scaler, vals, scaled_cons, algo_opts)
+                @ignorebreak stop_code = eval_and_diff_mod!(mod_valsj, modj, vals.x)
                 compute_normal_step!(
                     step_cachej, step_valsj.n, step_valsj.xn, Δj, vals.θ[], 
                     vals.ξ, vals.x, vals.fx, vals.hx, vals.gx, 
@@ -70,7 +64,7 @@ function criticality_routine(
             if !compatibility_test(step_valsj.n, algo_opts, Δj)
                 break
             end
-            _stop_code = compute_descent_step!(
+            @ignorebreak stop_code = compute_descent_step!(
                 step_cachej, step_valsj.d, step_valsj.s, step_valsj.xs, step_valsj.fxs, 
                 step_valsj.crit_ref,
                 Δj, θ, vals.ξ, vals.x, step_valsj.n, step_valsj.xn, vals.fx, vals.hx, vals.gx, 
@@ -84,28 +78,22 @@ function criticality_routine(
             copyto!(step_vals, step_valsj)
             copyto!(mod_vals, mod_valsj)
             _copyto_model!(mod, modj)        # check if this is non-allocating
-            if !isnothing(_stop_code)
-                stop_code = GenericStopping(_stop_code, log_level)
-                break
-            end
             for stopping_criterion in stop_crits
                 if check_post_crit_loop(stopping_criterion)
-                    stop_code = _evaluate_stopping_criterion(
+                    @ignorebreak stop_code = _evaluate_stopping_criterion(
                         stopping_criterion, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
                         vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
                     )
-                    !isnothing(stop_code) && break
                 end
             end
-            !isnothing(stop_code) && break
+            @ignorebreak stop_code
             if check_post_crit_loop(user_callback)
-                stop_code = evaluate_stopping_criterion(
+                @ignorebreak stop_code = evaluate_stopping_criterion(
                     user_callback, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
                     vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
                 )
-                !isnothing(stop_code) && break
             end
-            !isnothing(stop_code) && break
+            @ignorebreak stop_code
             j+=1
         end
         #=
@@ -124,5 +112,9 @@ function criticality_routine(
         \t Δ=$_Δ > Mχ=$(crit_M * χ), now Δ=$Δ."
         iter_meta.crit_val = χ
     end
-    return Δ, stop_code
+    if isa(stop_code, AbstractStoppingCriterion)
+        return stop_code 
+    else
+        return Δ
+    end
 end

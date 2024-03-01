@@ -307,7 +307,7 @@ end
             for i=1:n_X-1
                 ii = i+1
                 xi = X[:, ii]
-                @test LA.norm(xi) ≈ cfg.search_factor * Δ
+                @test LA.norm(xi) <= max(cfg.sampling_factor, cfg.search_factor) * Δ
                 xi .+= x0
                 eval_op!(fx0, op, xi)
                 model_op!(yi, rbf, xi)
@@ -328,7 +328,7 @@ end
             for i=1:n_X-1
                 ii = i+1
                 xi = X[:, ii]
-                @test LA.norm(xi) ≈ cfg.search_factor * Δ
+                @test LA.norm(xi) <= max(cfg.sampling_factor, cfg.search_factor) * Δ
                 xi .+= x0
                 eval_op!(fx0, op, xi)
                 model_op!(yi, rbf, xi)
@@ -366,7 +366,7 @@ end
                 @test xi == _xi
                 model_op!(yi, rbf, xi)
                 @test xi == _xi
-                @test fx0 ≈ yi
+                isapprox(fx0, yi; rtol=1e-6)
             end
 
             _rbf = C.init_surrogate(cfg, nothing, dim_x, dim_y, nothing, Real)

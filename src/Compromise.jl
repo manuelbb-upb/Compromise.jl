@@ -10,7 +10,7 @@ import LinearAlgebra as LA
 # Automatically annotated docstrings:
 using DocStringExtensions
 
-import Logging: @logmsg, LogLevel
+import Logging: @logmsg, LogLevel, Info, Debug
 import Printf: @sprintf
 
 # Re-export symbols from important sub-modules
@@ -232,9 +232,9 @@ function init_model_vals(mod, n_vars)
 end
 
 function eval_mop!(fx, hx, gx, Eres, Ex, Ares, Ax, θref, Φref, mop, ξ)
-    @serve objectives!(fx, mop, ξ)
-    @serve nl_eq_constraints!(hx, mop, ξ)
-    @serve nl_ineq_constraints!(gx, mop, ξ)
+    @ignoraise objectives!(fx, mop, ξ)
+    @ignoraise nl_eq_constraints!(hx, mop, ξ)
+    @ignoraise nl_ineq_constraints!(gx, mop, ξ)
     lin_eq_constraints!(Eres, Ex, mop, ξ)
     lin_ineq_constraints!(Ares, Ax, mop, ξ)
 
@@ -300,6 +300,8 @@ function optimize(
     @assert !isempty(ξ0) "Starting point array `x0` is empty."
     @assert dim_objectives(MOP) > 0 "Objective Vector dimension of problem is zero."
     
+    @unpack log_level = algo_opts
+    
     ## INITIALIZATION (Iteration 0)
     mop = initialize(MOP, ξ0)
     T = precision(mop)
@@ -323,8 +325,7 @@ function optimize(
     
     project_into_box!(vals.x, scaled_cons)
     unscale!(vals.ξ, scaler, vals.x)
-    vals_code = eval_mop!(vals, mop, scaler)
-    !isnothing(vals_code) && return vals, GenericStopping(vals_code, algo_opts.log_level)
+    @ignoraise eval_mop!(vals, mop, scaler) log_level
 
     vals_tmp = deepcopy(vals)
  
@@ -361,7 +362,7 @@ function optimize(
     stop_crits = stopping_criteria(algo_opts)
     stop_code = nothing
     while true
-        !isnothing(stop_code) && break
+        isa(stop_code, AbstractStoppingCriterion) && break
         stop_code = do_iteration!(      # assume `copyto_model!`, otherwise, `mod, stop_code = do_iteration!...`
             iter_meta, mop, mod, scaler, lin_cons, scaled_cons, 
             vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, stop_crits, algo_opts,
@@ -386,22 +387,24 @@ function do_iteration!(
     iter_meta.it_index += 1
     @unpack it_index = iter_meta
 
+    @unpack log_level = algo_opts
+
     for stopping_criterion in stop_crits
         if check_pre_iteration(stopping_criterion)
-            @serve _evaluate_stopping_criterion(
+            @ignoraise _evaluate_stopping_criterion(
                 stopping_criterion, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
                 vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
-            )
+            ) log_level
         end
     end
     if check_pre_iteration(user_callback)
-        @serve evaluate_stopping_criterion(
+        @ignoraise evaluate_stopping_criterion(
             user_callback, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
             vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
-        )
+        ) log_level
     end
 
-    @logmsg algo_opts.log_level """\n
+    @logmsg log_level """\n
     ###########################
     #  ITERATION $(it_index).
     ###########################
@@ -421,14 +424,12 @@ function do_iteration!(
     )
 
     if !models_valid
-        @logmsg algo_opts.log_level "ITERATION $(it_index): Updating Surrogates."
-        update_code = update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts)
-        !isnothing(update_code) && return GenericStopping(update_code, algo_opts.log_level)
-        mod_code = eval_and_diff_mod!(mod_vals, mod, vals.x)
-        !isnothing(mod_code) && return GenericStopping(mod_code, algo_opts.log_level)
+        @logmsg log_level "ITERATION $(it_index): Updating Surrogates."
+        @ignoraise update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts) log_level
+        @ignoraise eval_and_diff_mod!(mod_vals, mod, vals.x) log_level
 
         if vals.θ[] > 0
-            @logmsg algo_opts.log_level "ITERATION $(it_index): Computing a normal step."
+            @logmsg log_level "ITERATION $(it_index): Computing a normal step."
         end 
 
         compute_normal_step!(
@@ -440,7 +441,7 @@ function do_iteration!(
         )
         
         if vals.θ[] > 0
-            @logmsg algo_opts.log_level "ITERATION $(it_index): Found normal step $(vec2str(step_vals.n)). Hence xn=$(vec2str(step_vals.xn))."
+            @logmsg log_level "ITERATION $(it_index): Found normal step $(vec2str(step_vals.n)). Hence xn=$(vec2str(step_vals.xn))."
         end
         
     end
@@ -450,7 +451,7 @@ function do_iteration!(
 
     if !n_is_compatible
         ## Try to do a restoration
-        @logmsg algo_opts.log_level "ITERATION $(it_index): Normal step incompatible. Trying restoration."
+        @logmsg log_level "ITERATION $(it_index): Normal step incompatible. Trying restoration."
         add_to_filter!(filter, vals.θ[], vals.Φ[])
         return do_restoration(
             mop, mod, scaler, scaled_cons,
@@ -458,8 +459,8 @@ function do_iteration!(
         )
     end
 
-    @logmsg algo_opts.log_level "ITERATION $(it_index): Computing a descent step."
-    cd_code = compute_descent_step!(
+    @logmsg log_level "ITERATION $(it_index): Computing a descent step."
+    descent_step_code = compute_descent_step!(
         step_cache, step_vals.d, step_vals.s, step_vals.xs, step_vals.fxs, step_vals.crit_ref,
         Δ, vals.θ[], vals.ξ, vals.x, step_vals.n, step_vals.xn, vals.fx, vals.hx, vals.gx, 
         mod_vals.fx, mod_vals.hx, mod_vals.gx, mod_vals.Dfx, mod_vals.Dhx, mod_vals.Dgx,
@@ -469,36 +470,34 @@ function do_iteration!(
     χ = step_vals.crit_ref[]
     iter_meta.crit_val = χ
     
-    @logmsg algo_opts.log_level "\t Criticality χ=$(χ), ‖d‖₂=$(LA.norm(step_vals.d)), ‖s‖₂=$(LA.norm(step_vals.s))."
-    !isnothing(cd_code) && return GenericStopping(cd_code, algo_opts.log_level)
+    @logmsg log_level "\t Criticality χ=$(χ), ‖d‖₂=$(LA.norm(step_vals.d)), ‖s‖₂=$(LA.norm(step_vals.s))."
+    @ignoraise descent_step_code log_level
 
     for stopping_criterion in stop_crits
         if check_post_descent_step(stopping_criterion)
-            @serve _evaluate_stopping_criterion(
+            @ignoraise _evaluate_stopping_criterion(
                 stopping_criterion, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
                 vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
-            )
+            ) log_level
         end
     end
     if check_post_descent_step(user_callback)
-        @serve evaluate_stopping_criterion(
+        @ignoraise evaluate_stopping_criterion(
             user_callback, Δ, mop, mod, scaler, lin_cons, scaled_cons, 
             vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
-        )
+        ) log_level
     end
     ## `χ` is the inexact criticality.
     ## For the convergence analysis to work, we also have to have the Criticality Routine:
-    Δ, stop_code = criticality_routine(
+    @ignoraise Δ = criticality_routine(
         iter_meta, mod, step_vals, mod_vals, step_cache, crit_cache,
         mop, scaler, lin_cons, scaled_cons, vals, vals_tmp, stop_crits, algo_opts, 
         user_callback
-    )
-    !isnothing(stop_code) && return stop_code
+    ) log_level
     
     ## test if trial point is acceptable for filter and set missing meta data in `iter_meta`:
-    trial_code = test_trial_point!(
-        mop, scaler, iter_meta, filter, vals, mod_vals, vals_tmp, step_vals, algo_opts)
-    !isnothing(trial_code) && return GenericStopping(trial_code, algo_opts.log_level)
+    @ignoraise test_trial_point!(
+        mop, scaler, iter_meta, filter, vals, mod_vals, vals_tmp, step_vals, algo_opts) log_level
     this_it_stat = iter_meta.it_stat_post
     
     ## process trial point test results, order of operations IMPORTANT!
@@ -521,17 +520,17 @@ function do_iteration!(
     # It has to happen here, so that the criteria have access to `vals` and `vals_tmp`.
     for stopping_criterion in stop_crits
         if check_post_iteration(stopping_criterion)
-            @serve _evaluate_stopping_criterion(
+            @ignoraise _evaluate_stopping_criterion(
                 stopping_criterion, _Δ, mop, mod, scaler, lin_cons, scaled_cons, 
                 vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
-            )
+            ) log_level
         end
     end
     if check_post_iteration(user_callback)
-        @serve evaluate_stopping_criterion(
+        @ignoraise evaluate_stopping_criterion(
             user_callback, _Δ, mop, mod, scaler, lin_cons, scaled_cons, 
             vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts
-        )
+        ) log_level
     end
     # Finally, change filter and values
     if this_it_stat == FILTER_ADD || this_it_stat == FILTER_ADD_SHRINK

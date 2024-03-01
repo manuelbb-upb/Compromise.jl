@@ -319,8 +319,9 @@ function least_squares_model!(rbf, n_X; log_level)
     _Π = @view(Π[1:n_X, 1:dim_π])
     _Φ = @view(Π[1:n_X, 1:n_X])
     _rbf_poly_mat!(_Π, poly_deg, _X)
-    _rbf_kernel_mat!(_Φ, kernel, X, X, ε; centers_eq_features=true)
+    _rbf_kernel_mat!(_Φ, kernel, _X, _X, ε; centers_eq_features=true)
     _rbf_solve_normal_eqs!(cφ, cπ, hcat(_Φ, _Π), _Y)
+    return nothing
 end
 
 function cholesky_point_search!(rbf, x0, n_X; log_level)

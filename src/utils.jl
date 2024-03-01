@@ -13,24 +13,63 @@ end
 
 promote_modulo_nothing(T1, ::Type{Nothing})=T1
 promote_modulo_nothing(T1, T2)=Base.promote_type(T1, eltype(T2))
-macro serve(ex)
-	ret_val = gensym()
+macro ignoraise(ex, loglevelex=nothing)
+	has_lhs = false
+	if Meta.isexpr(ex, :(=), 2)
+		lhs, rhs = esc.(ex.args)
+		has_lhs = true
+	else
+		rhs = esc(ex)
+	end
+	
 	return quote
-		$(ret_val) = $(ex)
-		if !isnothing($(ret_val))
-			return $(ret_val)
+		ret_val = $(rhs)
+		if isa(ret_val, AbstractStoppingCriterion)
+			wrapped = if !isa(ret_val, WrappedStoppingCriterion)
+				WrappedStoppingCriterion(ret_val, $(QuoteNode(__source__)), false)
+			else
+				ret_val
+			end
+			$(if loglevelex isa Symbol
+				quote
+					if !wrapped.has_logged
+						stop_msg = stop_message(wrapped.crit)
+						if !isnothing(stop_msg)
+							@logmsg $(esc(loglevelex)) stop_msg
+						end
+						wrapped.has_logged = true
+					end
+				end
+			end)
+			return wrapped
 		end
-	end |> esc
+		$(if has_lhs
+			:($(lhs) = ret_val)
+		else
+			:(ret_val = nothing)
+		end)
+	end
 end
 
-macro exit(ex)
-	ret_val = gensym()
+macro ignorebreak(ex)
+	has_lhs = false
+	if Meta.isexpr(ex, :(=), 2)
+		lhs, rhs = esc.(ex.args)
+		has_lhs = true
+	else
+		rhs = esc(ex)
+	end
+	
 	return quote
-		$(ret_val) = $(ex)
-		if !isnothing($(ret_val))
-			break
-		end
-	end |> esc
+		ret_val = $(rhs)
+		do_break = isa(ret_val, AbstractStoppingCriterion)
+		$(if has_lhs
+			:($(lhs) = ret_val)
+		else
+			:(ret_val = nothing)
+		end)
+		do_break && break		
+	end
 end
 
 function project_into_box!(x, lb, ub)

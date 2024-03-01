@@ -455,13 +455,15 @@ function compute_descent_step!(
         En, E_c, An, A_b, Hn, mod_Dhx, Gn, mod_Dgx;
         descent_step_norm, normalize_gradients
     )
+    crit_ref[] = χ
+    copyto!(s, n)
     ## set `d`, scale it in place, and set `xs` and `mod_fxs` in backtracking
     copyto!(d, _d)
     @unpack fxn, backtracking_factor, rhs_factor, strict_backtracking = step_cache;
-    r, χ = backtrack!(d, mod, xn, xs, fxn, mod_fxs, lb, ub, χ, Δ, backtracking_factor, rhs_factor, Val(strict_backtracking))
+    @ignoraise χ = backtrack!(d, mod, xn, xs, fxn, mod_fxs, lb, ub, χ, Δ, backtracking_factor, rhs_factor, Val(strict_backtracking))
     crit_ref[] = χ
-    @. s = n + d
-    return r
+    @. s += d
+    return nothing
 end
 
 function backtrack!(
@@ -469,7 +471,7 @@ function backtrack!(
 ) where strict_backtracking
     if χ <= 0
         d .*= 0
-        return nothing, 0
+        return 0
     end
     ## initialize stepsize `σ=1`
     T = eltype(d)
@@ -483,8 +485,8 @@ function backtrack!(
     xs .= xn .+ d
     project_into_box!(xs, lb, ub)
     d .= xs .- xn
-    @serve objectives!(fxn, mod, xn)
-    @serve objectives!(fxs, mod, xs)
+    @ignoraise objectives!(fxn, mod, xn)
+    @ignoraise objectives!(fxs, mod, xs)
 
     ## avoid re-computation of maximum for non-strict test:
     _fxn = strict_backtracking ? fxn : maximum(fxn)
@@ -500,10 +502,10 @@ function backtrack!(
         xs .= xn .+ d       # d = xs - xn
         project_into_box!(xs, lb, ub)
         d .= xs .- xn
-        @serve objectives!(fxs, mod, xs)
+        @ignoraise objectives!(fxs, mod, xs)
     end
     _χ = σ < σ_min ? 0 : χ
-    return nothing, _χ
+    return _χ
 end
 
 armijo_condition(strict::Val{true}, fxn, fxs, rhs) = all(fxn .-  fxs .>= rhs)

@@ -1,6 +1,13 @@
 abstract type AbstractStoppingCriterion end
 
+mutable struct WrappedStoppingCriterion{F} <: AbstractStoppingCriterion
+    crit :: F
+    source :: LineNumberNode
+    has_logged :: Bool
+end
 struct NoUserCallback <: AbstractStoppingCriterion end
+
+stop_message(::AbstractStoppingCriterion)=nothing
 
 check_pre_iteration(crit::AbstractStoppingCriterion)=false
 #src check_post_normal_step(crit::AbstractStoppingCriterion)=false
@@ -192,13 +199,3 @@ function evaluate_stopping_criterion(
 end
 
 struct InfeasibleStopping <: AbstractStoppingCriterion end
-
-struct GenericStopping{F} <: AbstractStoppingCriterion 
-    ret :: F
-end
-
-function GenericStopping(ret, log_level)
-    @logmsg log_level "$(ret)"
-    return GenericStopping(ret)
-end
-
