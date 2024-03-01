@@ -346,7 +346,6 @@ function _rbf_poly_mat!(
     Π::AbstractMatrix, deg, features::AbstractMatrix;
     check_sizes::Bool=true,
     check_dim_fields::Bool=false
-
 )
     if check_sizes
         _n_x, dim_π = size(Π)

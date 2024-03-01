@@ -14,3 +14,6 @@ end
 @safetestset "Misc" begin
     include("misc.jl")
 end
+@safetestset "Matrix Factorizations" begin
+    include("matrix_factorizations.jl")
+end

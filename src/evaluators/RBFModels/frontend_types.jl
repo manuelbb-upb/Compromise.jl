@@ -157,11 +157,11 @@ Base.@kwdef struct RBFTrainingBuffers{T<:Real}
 
     "`max_points` × `max_points` buffer for RBF basis matrix."
     Φ :: Matrix{T}
-    "`dim_x + 1` × `dim_π` buffer for (transpose) Polynomial basis matrix."
-    Π :: Matrix{T}
+    #src "`dim_x + 1` × `dim_π` buffer for (transpose) Polynomial basis matrix."
+    #src Π :: Matrix{T}
     
     "Workspace for repeated QR decomposition."
-    qr_ws_max_points :: Union{Nothing, QRWYWs{T, Matrix{T}}}
+    qr_ws_min_points :: Union{Nothing, QRWYWs{T, Matrix{T}}}
     "`max_points` × `max_points` buffer for full Q factor."
     Q :: Matrix{T}
     "`dim_π` × `dim_π` buffer for truncated R factor."
@@ -189,7 +189,7 @@ end
 
 function Base.copyto!(dst::RBFTrainingBuffers, src::RBFTrainingBuffers)
   for fn in (
-    :lb, :ub, :FX, :xZ, :db_index, :not_db_flags, :Φ, :Π, :Q, :R, :Qj, :Rj,
+    :lb, :ub, :FX, :xZ, :db_index, :not_db_flags, :Φ, :Q, :R, :Qj, :Rj, #src :Π
     :NΦ, :NΦN, :L, :Linv, :v1, :v2
   )
     copyto!(getfield(dst, fn), getfield(src, fn))
@@ -198,8 +198,8 @@ function Base.copyto!(dst::RBFTrainingBuffers, src::RBFTrainingBuffers)
   if !isnothing(dst.qr_ws_dim_x) && !isnothing(src.qr_ws_dim_x)
     copyto!(dst.qr_ws_dim_x, src.qr_ws_dim_x)
   end
-  if !isnothing(dst.qr_ws_max_points) && !isnothing(src.qr_ws_max_points)
-    copyto!(dst.qr_ws_max_points, src.qr_ws_max_points)
+  if !isnothing(dst.qr_ws_min_points) && !isnothing(src.qr_ws_min_points)
+    copyto!(dst.qr_ws_min_points, src.qr_ws_min_points)
   end
 end
 
@@ -291,6 +291,7 @@ function rbf_params_and_buffers(
   min_points = dim_x + 1
   max_points = max(min_points, max_points)
   max_dim_N = max_points - dim_π
+  min_dim_N = min_points - dim_π
 
   n_X_ref = MutableNumber(0)
   
@@ -319,8 +320,8 @@ function rbf_params_and_buffers(
   else
     nothing
   end
-  qr_ws_max_points = if T isa BlasFloat
-    QRWYWs(X)
+  qr_ws_min_points = if T isa BlasFloat
+    QRWYWs(@view(X[:, 1:min_points]))
   else
     nothing
   end
@@ -333,7 +334,7 @@ function rbf_params_and_buffers(
   not_db_flags = ones(Bool, min_points) 
 
   Φ = array(T, max_points, max_points)
-  Π = array(T, min_points, dim_π)
+  #src Π = array(T, min_points, dim_π)
 
   Q = array(T, max_points, max_points)
   R = array(T, dim_π, dim_π)
@@ -341,8 +342,8 @@ function rbf_params_and_buffers(
   Qj = array(T, max_points, dim_π + 1)
   Rj = array(T, dim_π + 1, dim_π)
 
-  NΦ = array(T, max_dim_N, max_points)
-  NΦN = array(T, max_dim_N, max_dim_N)
+  NΦ = array(T, min_dim_N, min_points)
+  NΦN = array(T, min_dim_N, min_dim_N)
   
   L = array(T, max_dim_N, max_dim_N)
   Linv = array(T, 
@@ -357,7 +358,7 @@ function rbf_params_and_buffers(
 
   buffers = RBFTrainingBuffers(;
     dim_x, dim_y, dim_π, max_points, min_points,
-    qr_ws_dim_x, lb, ub, FX, xZ, db_index, not_db_flags, Φ, Π, qr_ws_max_points,
+    qr_ws_dim_x, lb, ub, FX, xZ, db_index, not_db_flags, Φ, qr_ws_min_points,
     Q, R, Qj, Rj, NΦ, NΦN, L, Linv, v1, v2, x0_db_index_ref
   )
 

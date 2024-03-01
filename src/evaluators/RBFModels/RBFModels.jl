@@ -52,7 +52,7 @@ CE.requires_hessians(::RBFConfig)=false
     cπ = coeff_π[1:dim_π, 1:dim_y]
 
     Φ = buffers.Φ[1, 1:n_X]
-    Π = buffers.Π[1, 1:dim_π]
+    Π = buffers.Qj[1, 1:dim_π]
 
     x_in = buffers.xZ
     x_in .= x .- x0

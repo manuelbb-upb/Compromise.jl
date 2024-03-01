@@ -33,16 +33,18 @@ evaluated at all columns in `X[:, 1:n_X]`.
 function initial_qr_for_cholesky_test!(
     ## modified
     _Φ :: AbstractMatrix,
-    _Π :: AbstractMatrix,
+    #src _Π :: AbstractMatrix,
     _Q :: AbstractMatrix,
     _R :: AbstractMatrix,
     qr_ws,
-    _Qj :: AbstractMatrix,  # missused as a buffer here. needs at least size `min_points` × `dim_π`
+    _Qj :: AbstractMatrix,  
+    # _Qj missused as a buffer here. needs at least size `min_points` × `dim_π`
     ## not modified
     _X :: AbstractMatrix;
     kernel, poly_deg, ε, n_X, 
+    dim_π,
     dim_x = size(_X, 1),
-    dim_π = size(_Π, 2)
+    #src dim_π = size(_Π, 2)
 )
     @assert size(_X, 1) == dim_x
 
@@ -55,12 +57,14 @@ function initial_qr_for_cholesky_test!(
     @assert size(_R, 1) >= dim_π
     @assert size(_R, 2) >= dim_π
     
-    @assert size(_Π, 1) >= n_X
-    @assert size(_Π, 2) >= dim_π
+    #src @assert size(_Π, 1) >= n_X
+    #src @assert size(_Π, 2) >= dim_π
+    @assert size(_Qj, 1) >= n_X
+    @assert size(_Qj, 2) >= dim_π
 
     Φ = @view(_Φ[1:n_X, 1:n_X])
     X = @view(_X[1:dim_x, 1:n_X])
-    Π = @view(_Π[1:n_X, 1:dim_π])
+    Π = @view(_Qj[1:n_X, 1:dim_π])
     R = @view(_R[1:dim_π, 1:dim_π])
     Q = @view(_Q[1:n_X, 1:n_X])
 
@@ -70,7 +74,7 @@ function initial_qr_for_cholesky_test!(
     )
     _rbf_poly_mat!(Π, poly_deg, X)
 
-    qr!(Q, R, Π, qr_ws, _Qj)
+    qr!(Q, R, Π, qr_ws, Π)  # the last argument is also modified in place, but we don't need Π anymore so that is okay
     return nothing
 end
 
@@ -117,7 +121,7 @@ function initial_cholesky_for_test!(
     @assert size(_Linv, 1) >= dim_N
     @assert size(_Linv, 2) >= dim_N
 
-    N = @view(_Q[1:n_X, dim_π+1:end])
+    N = @view(_Q[1:n_X, dim_π+1:n_X])
     NΦ = @view(_NΦ[1:dim_N, 1:n_X])
     NΦN = @view(_NΦN[1:dim_N, 1:dim_N])
     Φ = LA.Symmetric(@view(_Φ[1:n_X, 1:n_X]), :U)

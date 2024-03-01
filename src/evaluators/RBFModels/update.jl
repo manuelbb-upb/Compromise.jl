@@ -307,7 +307,7 @@ end
 function least_squares_model!(rbf, n_X; log_level)
     @unpack params, buffers, min_points, dim_y, dim_π, kernel, poly_deg = rbf
     @unpack X = params
-    @unpack FX, Φ, Π = buffers
+    @unpack FX, Φ, Qj = buffers
     ε = val(params.shape_parameter_ref)
 
     use_col_flags = buffers.not_db_flags
@@ -316,8 +316,8 @@ function least_squares_model!(rbf, n_X; log_level)
     @unpack coeff_φ, coeff_π = params
     cφ = @view(coeff_φ[1:n_X, 1:dim_y])
     cπ = @view(coeff_π[1:dim_π, 1:dim_y])
-    _Π = @view(Π[1:n_X, 1:dim_π])
-    _Φ = @view(Π[1:n_X, 1:n_X])
+    _Π = @view(Qj[1:n_X, 1:dim_π])
+    _Φ = @view(Φ[1:n_X, 1:n_X])
     _rbf_poly_mat!(_Π, poly_deg, _X)
     _rbf_kernel_mat!(_Φ, kernel, _X, _X, ε; centers_eq_features=true)
     _rbf_solve_normal_eqs!(cφ, cπ, hcat(_Φ, _Π), _Y)
@@ -329,12 +329,12 @@ function cholesky_point_search!(rbf, x0, n_X; log_level)
     @unpack params, buffers, database = rbf
     @unpack min_points, max_points, dim_x, dim_y, dim_π, kernel, poly_deg, th_cholesky = rbf
     @unpack X = params
-    @unpack FX, Φ, Π, L, Linv, Q, R, qr_ws_max_points, Qj = buffers
+    @unpack FX, Φ, L, Linv, Q, R, qr_ws_min_points, Qj = buffers
     
     ε = val(params.shape_parameter_ref)
     
     initial_qr_for_cholesky_test!(
-        Φ, Π, Q, R, qr_ws_max_points, Qj, X;
+        Φ, Q, R, qr_ws_min_points, Qj, X;
         kernel, poly_deg, ε, n_X, dim_x, dim_π
     )
     
