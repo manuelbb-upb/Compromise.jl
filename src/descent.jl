@@ -398,8 +398,8 @@ function solve_steepest_descent_problem(
 
     JuMP.@objective(opt, Min, β)
     if descent_step_norm == Inf
-        JuMP.@constraint(opt, -Δ .<= d)
-        JuMP.@constraint(opt, d .<= Δ)
+        JuMP.@constraint(opt, -1 .<= d)
+        JuMP.@constraint(opt, d .<= 1)
     end
 
     ## descent constraints, ∇f(x)*d ≤ β
@@ -431,9 +431,7 @@ function solve_steepest_descent_problem(
 
     JuMP.optimize!(opt)
     _d = JuMP.value.(d)  # this allocation should be negligible
-    #src @show d_norm = LA.norm(_d, descent_step_norm)
-    #srcχ = iszero(d_norm) ? d_norm : @show(-JuMP.value(β))/d_norm
-    χ = abs(JuMP.value(β)) / Δ
+    χ = abs(JuMP.value(β))
     return χ, _d
 end
 
@@ -485,7 +483,7 @@ function backtrack!(
     σ_min = nextfloat(zero(T), 2)   # TODO make configurable
 
     ## pre-compute RHS for Armijo test
-    rhs = χ * rhs_factor * Δ
+    rhs = χ * rhs_factor * σ
 
     ## evaluate objectives at `xn` and trial point `xs`
     xs .= xn .+ d

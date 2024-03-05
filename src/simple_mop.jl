@@ -446,7 +446,8 @@ end
 # These helpers make an operator respect scaling by returning `ScaledOperator`:
 scale_wrap_op(scaler::IdentityScaler, op, mcfg, dim_in, dim_out, T)=op
 function scale_wrap_op(scaler, op, mcfg, dim_in, dim_out, T)
-    ξ = zeros(T, dim_in, CE.num_parallel_evals(mcfg))
+    #ξ = zeros(T, dim_in, CE.num_parallel_evals(mcfg))
+    ξ = zeros(T, dim_in)
     return ScaledOperator(op, scaler, ξ)
 end
 

@@ -461,3 +461,28 @@ end
     @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
 
 end
+
+@testset "Variable Bounds" begin
+    algo_opts = AlgorithmOptions(; stop_delta_min=1e-11)
+
+    function objective_function(x)
+        return [
+            sum( (x .- 1).^2 ),
+            sum( (x .+ 1).^2 ),
+        ]
+    end
+
+    lb = -10 * rand(2)
+    ub = 5 * rand(2)
+
+    mop = MutableMOP(; num_vars=2, lb, ub)
+    @test mop.lb == lb
+    @test mop.ub == ub
+
+    randx(n=2) = lb .+ (ub .- lb) .* rand(n)
+    add_objectives!(mop, objective_function, :rbf; dim_out=2, func_iip=false)
+    final_vals, _ = optimize(mop, randx(); algo_opts)
+    ξ = final_vals.ξ
+    @test all(lb .- 1e-5 .<= ξ)
+    @test all(ξ .<= ub .- 1e-5)
+end
