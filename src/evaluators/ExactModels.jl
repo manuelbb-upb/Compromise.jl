@@ -2,9 +2,9 @@ module ExactModels
 
 using ..Compromise.CompromiseEvaluators
 const CE = CompromiseEvaluators
-import Compromise: @ignoraise
+import Compromise: @ignoraise, RVec
 
-Base.@kwdef struct ExactModel{O,P} <: AbstractSurrogateModel#{O<:AbstractNonlinearOperator, P}
+Base.@kwdef struct ExactModel{O, P} <: AbstractSurrogateModel
     op :: O
     params :: P = nothing
 end
@@ -19,16 +19,15 @@ function CE.init_surrogate(::ExactModelConfig, op, dim_in, dim_out, params, T; k
     return ExactModel(op, params)
 end
 
-function CE.model_op!(y::AbstractVector, surr::ExactModel, x::AbstractVector)
+function CE.eval_op!(y::RVec, surr::ExactModel, x::RVec)
     return func_vals!(y, surr.op, x, surr.params)
 end
-function CE.model_grads!(Dy, surr::ExactModel, x)
+function CE.eval_grads!(Dy, surr::ExactModel, x)
     return func_grads!(Dy, surr.op, x, surr.params)
 end
-function CE.model_op_and_grads!(y, Dy, surr::ExactModel, x)
+function CE.eval_op_and_grads!(y, Dy, surr::ExactModel, x)
     return func_vals_and_grads!(y, Dy, surr.op, x, surr.params)
 end
-CE.supports_partial_evaluation(::ExactModel)=false
 
 function CE.update!(
     surr::ExactModel, op, Δ, x, fx, lb, ub; kwargs...

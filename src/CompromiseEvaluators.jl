@@ -20,25 +20,41 @@ Alternatively, this functionality can be provided by utility types implementing 
 
 abstract type AbstractNonlinearOperator end
 
-# A function can have parameters that are constant in a single optimization run, and 
-# the type structure reflects this distinction:
+# A function can have parameters that are constant in a single optimization run.
+# Previously, there was a type hierachy like
+#=
+```julia
 abstract type AbstractNonlinearOperatorWithParams <: AbstractNonlinearOperator end
 abstract type AbstractNonlinearOperatorNoParams <: AbstractNonlinearOperator end
+```
+=#
+# **This is no longer the case!**
+# We now have a “trait”:
+abstract type AbstractNonlinearOperatorTrait end
 
-const Vec = AbstractVector
-const Mat = AbstractMatrix
+abstract type AbstractNonlinearOperatorManyColumnsTrait <: AbstractNonlinearOperatorTrait end
+struct OperatorSequential <: AbstractNonlinearOperatorManyColumnsTrait end
+struct OperatorParallel <: AbstractNonlinearOperatorManyColumnsTrait end
+optrait_multi(op::AbstractNonlinearOperator) = OperatorSequential()
 
-# ### Common Methods
-# Both, `AbstractNonlinearOperatorWithParams` and `AbstractNonlinearOperatorNoParams`
-# have methods like `eval_op!`.
-# The signatures look different, though.
-# That is why there is a separate section for both types.
-# The below methods have the same signature for both operator supertypes:
-#
+abstract type AbstractNonlinearOperatorHasParamsTrait <: AbstractNonlinearOperatorTrait end
+struct IsParametricOperator <: AbstractNonlinearOperatorHasParamsTrait end
+struct IsNonparametricOperator <: AbstractNonlinearOperatorHasParamsTrait end
+
+function optrait_params(op::AbstractNonlinearOperator)::NonlinearOperatorHasParamsTrait
+    return IsNonparametricOperator()
+end
+
+import ..Compromise: RVec, RVecOrMat, RMat, @ignoraise
+
 # Evaluation of derivatives is optional if evaluation-based models are used.
 # We have functions to indicate if an operator implements `eval_grads!`, `eval_hessians!`:
-provides_grads(op::AbstractNonlinearOperator)=false
-provides_hessians(op::AbstractNonlinearOperator)=false
+function provides_grads(op::AbstractNonlinearOperator)
+    return false
+end
+function provides_hessians(op::AbstractNonlinearOperator)
+    return false
+end
 
 # In certain situations (nonlinear subproblems relying on minimization of scalar-valued 
 # objective or constraint compoments) it might be beneficial if only certain outputs
@@ -47,33 +63,10 @@ provides_hessians(op::AbstractNonlinearOperator)=false
 # If it returns `true`, the feature is assumed to be available for derivatives as well.
 # In this situation, the type should implment methods starting with `partial_`, see below
 # for details.
-supports_partial_evaluation(op::AbstractNonlinearOperator) = false
-
-# Stopping based on the number of evaluations is surprisingly hard if we don't
-# want to give up most of the flexibility and composability of Operators and(/in) Problems
-# and models.
-# To implement such a stopping mechanism, we would like the operator to 
-# count the number of evaluations.
-is_counted(op::AbstractNonlinearOperator)=false
-# If `is_counted` returns true, we assume that we can safely call
-# `num_calls` and get a 3-tuple of values:
-# the number of function evaluations, gradient evaluations and Hessian evaluations:
-num_calls(op::AbstractNonlinearOperator)::NTuple{3, <:Integer}=nothing
-# In addition, there should be a method to (re-)set the counters:
-set_num_calls!(op::AbstractNonlinearOperator,vals::Tuple{Int,Int,Int})=nothing
-# Stopping based on the number of evaluations is so fundamental, I make it 
-# part of the interface:
-const MCALLS = typemax(Int)
-max_calls(op::AbstractNonlinearOperator)::NTuple{3, <:Integer}=(MCALLS, MCALLS, MCALLS)
-
-# !!! note
-#     Whether or not `max_calls` is respected depends on the implementation of 
-#     `AbstractMOPSurrogate` or the implementation of `update!` for `AbstractSurrogateModel`...
-
-
-# ### Methods for `AbstractNonlinearOperatorWithParams`
-# !!! note 
-#     The evaluation methods should respect `is_counted` and internally increase any counters.
+abstract type NonlinearOperatorPartialEvaluationTrait <: AbstractNonlinearOperatorTrait end
+struct OperatorSupportsPartialEvaluation <: NonlinearOperatorPartialEvaluationTrait end
+struct OperatorOnlyFullEvaluation <: NonlinearOperatorPartialEvaluationTrait end
+optrait_partial(op::AbstractNonlinearOperator)=OperatorOnlyFullEvaluation()
 
 # The methods below should be implemented to evaluate parameter dependent operators: 
 """
@@ -82,17 +75,18 @@ max_calls(op::AbstractNonlinearOperator)::NTuple{3, <:Integer}=(MCALLS, MCALLS, 
 Evaluate the operator `op` at variable vector `x` with parameters `p`
 and mutate the target vector `y` to contain the result.
 """
-function eval_op!(y::Vec, op::AbstractNonlinearOperatorWithParams, x::Vec, p)
+function eval_op!(y::RVec, op::AbstractNonlinearOperator, x::RVec, p)
     return error("No implementation of `eval_op!` for operator $op.")
 end
 
-# Optional Parallel Evaluation:
-function eval_op!(Y::AbstractMatrix, op::AbstractNonlinearOperatorWithParams, X::AbstractMatrix, p)
-    for (x, y) = zip(eachcol(X), eachcol(Y))
-        c = eval_op!(y, op, x)
-        !isnothing(c) && return c
-    end
-    return nothing 
+"""
+    eval_op!(y, op, x)
+
+Evaluate the parameterless operator `op` at variable vector `x`
+and mutate the target vector `y` to contain the result.
+"""
+function eval_op!(y::RVec, op::AbstractNonlinearOperator, x::RVec)
+    return error("No implementation of `eval_op!` for operator $op.")
 end
 
 """
@@ -102,20 +96,21 @@ Compute the gradients of the operator `op` at variable vector `x` with parameter
 and mutate the target matrix `Dy` to contain the gradients w.r.t. `x` in its columns. 
 That is, `Dy` is the transposed Jacobian at `x`.
 """
-function eval_grads!(Dy, op::AbstractNonlinearOperatorWithParams, x, p)
+function eval_grads!(Dy, op::AbstractNonlinearOperator, x, p)
     return error("No implementation of `eval_grads!` for operator $op.")
 end
 
-# The combined forward-function `eval_op_and_grads!` is derived from `eval_op!` and 
-# `eval_grads!`, but can be customized easily:
-## helper macro `@ignoraise` instead of `return`
-import ..Compromise: @ignoraise
+"""
+    eval_grads!(Dy, op, x)
 
-function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x, p)
-    @ignoraise eval_op!(y, val, x, p)
-    @ignoraise eval_grads!(Dy, val, x, p)
-    return nothing
+Compute the gradients of the parameterless operator `op` at variable vector `x`
+and mutate the target matrix `Dy` to contain the gradients w.r.t. `x` in its columns. 
+That is, `Dy` is the transposed Jacobian at `x`.
+"""
+function eval_grads!(Dy, op::AbstractNonlinearOperator, x)
+    return error("No implementation of `eval_grads!` for operator $op.")
 end
+
 
 # If Hessian matrices are needed, implement `eval_hessians!(H, op, x, p)`.
 # Assume `H` to be a 3D array, where the last index iterates over the function outputs.
@@ -135,348 +130,168 @@ Compute the Hessians of the operator `op` at variable vector `x` with parameters
 and mutate the target array `H` to contain the Hessians along its last index.
 That is, `H[:,:,i]` is the Hessian at `x` and `p` w.r.t. `x` of output `i`.
 """
-function eval_hessians!(H, op::AbstractNonlinearOperatorWithParams, x, p)
+function eval_hessians!(H, op::AbstractNonlinearOperator, x, p)
     return error("No implementation of `eval_hessians!` for operator $op.")
 end
 
-# The combined forward-function `eval_op_and_grads_and_hessians!` 
-# is derived from `eval_op_and_grads!` and `eval_hessians!`,
-# but can be customized easily:
-function eval_op_and_grads!(y, Dy, H, op::AbstractNonlinearOperatorWithParams, x, p)
-    @ignoraise eval_op_and_grads!(Dy, y, op, x, p)
-    @ignoraise eval_hessians!(H, val, x, p)
-    return nothing
+"""
+    eval_hessians!(H, op, x, p)
+
+Compute the Hessians of the parameterless operator `op` at variable vector `x`
+and mutate the target array `H` to contain the Hessians along its last index.
+That is, `H[:,:,i]` is the Hessian at `x` and `p` w.r.t. `x` of output `i`.
+"""
+function eval_hessians!(H, op::AbstractNonlinearOperator, x)
+    return error("No implementation of `eval_hessians!` for operator $op.")
 end
 
 # Some operators might support partial evaluation. 
 # They should implement these methods, if `supports_partial_evaluation` returns `true`.
 # The argument `outputs` is an iterable of output indices, assuming `1` to be the first output.
 # `y` is the full length vector, and `partial_op!` should set `y[outputs]`.
-function partial_op!(y, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
-    ## length(y)==length(outputs)
+function eval_op!(y::RVec, op::AbstractNonlinearOperator, x::RVec, outputs::Vector{Bool})
     return error("Partial evaluation not implemented.")
 end
-function partial_grads!(Dy, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
-    ## size(Dy)==(length(x), length(outputs))
+function eval_op!(y::RVec, op::AbstractNonlinearOperator, x::RVec, params, outputs::Vector{Bool})
+    return error("Partial evaluation not implemented.")
+end
+
+function eval_grads!(Dy, op::AbstractNonlinearOperator, x, outputs::Vector{Bool})
     return error("Partial Jacobian not implemented.")
 end
-function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
-    @ignoraise partial_op!(y, op, x, p, outputs)
-    @ignoraise partial_grads!(Dy, op, x, p, outputs)
-    return nothing
-end
-function partial_hessians!(H, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
-    return error("Partial Hessians not implemented.")
-end
-function partial_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
-    @ignoraise partial_op_and_grads!(y, Dy, op, x, p, outputs)
-    @ignoraise partial_hessians!(H, op, x, p, outputs)
-    return nothing
+function eval_grads!(Dy, op::AbstractNonlinearOperator, x, params, outputs::Vector{Bool})
+    return error("Partial Jacobian not implemented.")
 end
 
-# From the above, we derive safe-guarded functions, that can be used to pass `outputs`
-# whenever convenient.
-# Note, that these are defined for `AbstractNonlinearOperator`.
-# By implementing the parametric-interface for `AbstractNonlinearOperatorNoParams`, 
-# they work out-of-the box for non-paremetric operators, too:
-import ..Compromise: AbstractStoppingCriterion, stop_message
-struct BudgetExhausted <: AbstractStoppingCriterion
-    ni :: Int
-    mi :: Int
-    order :: Int
-end
-function BudgetExhausted(op, order)
-    mcalls = max_calls(op)
-    ncalls = num_calls(op)
-    i = order + 1
-    return BudgetExhausted(ncalls[i], mcalls[i], order)
-end
-function stop_message(crit::BudgetExhausted)
-    return "Maximum evaluation count reached, order=$(crit.order), is=$(crit.ni), max=$(crit.mi)."
-end
-
-function check_num_calls(op, order::Integer)::Union{Nothing, BudgetExhausted}
-    order < 0 && return nothing
-    order > 2 && return nothing
-    !is_counted(op) && return nothing
-    call_budget = budget_num_calls(op, order)
-    isnothing(call_budget) || call_budget > 0 && return nothing
-    return BudgetExhausted(op, order)
-end
-
-function budget_num_calls(op, order::Integer, do_checks::Val{true})
-    order < 0 && return nothing
-    order > 2 && return nothing
-    !is_counted(op) && return nothing
-    return budget_num_calls(op, order)
-end
-
-function budget_num_calls(op, order::Integer)
-    mcalls = max_calls(op)
-    ncalls = num_calls(op)
-    if isnothing(ncalls)
-        @warn "`is_counted(op), but `num_calls(op)` is nothing."
-        return nothing
-    end
-    i = order + 1
-    return mcalls[i] - ncalls[i] 
-end
-
-function func_vals!(
-    y::AbstractVector, op::AbstractNonlinearOperator, x::AbstractVector, p; 
-    outputs=nothing
-)
-    @ignoraise check_num_calls(op, 0)
-    if !isnothing(outputs) && supports_partial_evaluation(op)
-        return partial_op!(y, op, x, p, outputs)
-    end
-    return eval_op!(y, op, x, p)
-end
-
-function func_vals!(
-    y::AbstractMatrix, op::AbstractNonlinearOperator, x::AbstractMatrix, p; 
-    outputs=nothing
-)
-    n_rem = budget_num_calls(op, 0, Val(true))
-    if n_rem <= 0
-        return BudgetExhausted(op, 0)
-    end
-    n_x = size(x, 2)
-    Y, X = if n_rem < n_x
-        @view(y[:, 1:n_rem]), @view(x[:, 1:n_rem])
-    else
-        y, x
-    end
-    return eval_op!(Y, op, X, p)
-end
-
-function func_grads!(
-    Dy, op::AbstractNonlinearOperator, x, p; 
-    outputs=nothing
-)
-    @ignoraise check_num_calls(op, 0)
-    if !isnothing(outputs) && supports_partial_evaluation(op)
-        return partial_grads!(Dy, op, x, p, outputs)
-    end
-    return eval_grads!(Dy, op, x, p)
-end
-function func_vals_and_grads!(
-    y, Dy, op::AbstractNonlinearOperator, x, p; 
-    outputs=nothing
-)
-    @ignoraise check_num_calls(op, 0)
-    @ignoraise check_num_calls(op, 1)
-    if !isnothing(outputs) && supports_partial_evaluation(op)
-        return partial_op_and_grads!(y, Dy, op, x, p, outputs)
-    end
-    return eval_op_and_grads!(y, Dy, op, x, p)
-end
-function func_hessians!(
-    H, op::AbstractNonlinearOperator, x, p; 
-    outputs=nothing
-)
-    @ignoraise check_num_calls(op, 2)
-    if !isnothing(outputs) && supports_partial_evaluation(op)
-        return partial_hessians!(H, op, x, p, outputs)
-    end
-    return eval_hessians!(H, op, x, p)
-end
-function func_vals_and_grads_and_hessians!(
-    y, Dy, H, op::AbstractNonlinearOperator, x, p; 
-    outputs=nothing
-)
-    @ignoraise check_num_calls(op, 0)
-    @ignoraise check_num_calls(op, 1)
-    @ignoraise check_num_calls(op, 2)
-    if !isnothing(outputs) && supports_partial_evaluation(op)
-        return partial_op_and_grads_and_hessians!(y, Dy, H, op, x, p, outputs)
-    end
-    return eval_op_and_grads_and_hessians!(y, Dy, H, op, x, p)
-end
-
-# ### Methods `AbstractNonlinearOperatorNoParams`
-# 
-# The interface for operators without parameters is very similar to what's above.
-# In fact, we could always treat it as a special case of `AbstractNonlinearOperatorWithParams`
-# and simply ignore the parameter vector.
-# However, in some situation it might be desirable to have the methods without `p`
-# readily at hand.
-# This also makes writing extensions a tiny bit easier.
-
-#src The below methods have been written by ChatGPT according to what is above:
-function eval_op!(y::Vec, op::AbstractNonlinearOperatorNoParams, x::Vec)
-    return error("No implementation of `eval_op!` for operator $op.")
-end
-function eval_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x)
-    return error("No implementation of `eval_grads!` for operator $op.")
-end
 # Optional Parallel Evaluation:
-function eval_op!(Y::Mat, op::AbstractNonlinearOperatorWithParams, X::Mat)
-    for (x, y) = zip(eachcol(X), eachcol(Y))
-        c = eval_op!(y, op, x)
-        !isnothing(c) && return c
-    end
-    return nothing 
+function eval_op!(Y::RMat, op::AbstractNonlinearOperator, X::RMat)
+    error("`eval_op!` not implemented for matrices.")
 end
-# Optional, derived method for values and gradients:
-function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x)
-    @ignoraise eval_op!(y, op, x)
-    @ignoraise eval_grads!(Dy, op, x)
-    return nothing
+function eval_op!(Y::RMat, op::AbstractNonlinearOperator, X::RMat, params)
+    error("`eval_op!` not implemented for matrices.")
 end
-# Same for Hessians:
-function eval_hessians!(H, op::AbstractNonlinearOperatorNoParams, x)
-    return error("No implementation of `eval_hessians!` for operator $op.")
+function eval_op!(Y::RMat, op::AbstractNonlinearOperator, X::RMat, params, outputs::Vector{Bool})
+    error("`eval_op!` not implemented for matrices.")
 end
-function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorNoParams, x)
-    @ignoraise eval_op_and_grads!(y, Dy, op, x)
-    @ignoraise eval_hessians!(H, op, x)
-    return nothing
-end
-# Some operators might support partial evaluation. 
-# They should implement these methods, if `supports_partial_evaluation` returns `true`:
-function partial_op!(y, op::AbstractNonlinearOperatorNoParams, x, outputs)
-    return error("Partial evaluation not implemented.")
-end
-function partial_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x, outputs)
-    return error("Partial Jacobian not implemented.")
-end
-function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x, outputs)
-    @ignoraise partial_op!(y, op, x, outputs)
-    @ignoraise partial_grads!(Dy, op, x, outputs)
-    return nothing
-end
-function partial_hessians!(H, op::AbstractNonlinearOperatorNoParams, x, outputs)
-    return error("Partial Hessians not implemented.")
-end
-function partial_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorNoParams, x, outputs)
-    @ignoraise partial_op_and_grads!(y, Dy, op, x, outputs)
-    @ignoraise partial_hessians!(H, op, x, outputs)
+
+# The combined forward-function `eval_op_and_grads!` is derived from `eval_op!` and 
+# `eval_grads!`, but can be customized easily:
+
+function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperator, x, args...)
+    @ignoraise eval_op!(y, op, x, args...)
+    @ignoraise eval_grads!(Dy, op, x, args...)
     return nothing
 end
 
-# #### Parameter-Methods for Non-Parametric Operators
-# To also be able to use non-parametric operators in the more general setting, 
-# implement the parametric-interface:
-
-function eval_op!(y::Vec, op::AbstractNonlinearOperatorNoParams, x::Vec, p)
-    return eval_op!(y, op, x)
-end
-function eval_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x, p)
-    return eval_grads!(Dy, op, x)
-end
-function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x, p)
-    return eval_op_and_grads!(y, Dy, op, x)
-end
-function eval_hessians!(H, op::AbstractNonlinearOperatorNoParams, x, p)
-    return eval_hessians!(H, op, x)
-end
-function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorNoParams, x, p)
-    return eval_op_and_grads_and_hessians!(y, Dy, H, op, x)
+function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperator, x, args...)
+    @ignoraise eval_op_and_grads!(y, Dy, op, x, args...)
+    @ignoraise eval_hessians!(H, op, x, args...)
+    return nothing
 end
 
-# Partial evaluation or differentiation:
-function partial_op!(y, op::AbstractNonlinearOperatorNoParams, x, p, outputs)
-    return partial_op!(y, op, x, outputs)
-end
-function partial_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x, p, outputs)
-    return partial_grads!(Dy, op, x, outputs)
-end
-function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x, p, outputs)
-    return partial_op_and_grads!(y, Dy, op, x, outputs)
-end
-function partial_hessians!(H, op::AbstractNonlinearOperatorNoParams, x, p, outputs)
-    return partial_hessians!(H, op, x, outputs)
-end
-function partial_op_and_grads_and_hessians!(
-    y, Dy, H, op::AbstractNonlinearOperatorNoParams, x, p, outputs
-)
-    return partial_op_and_grads_and_hessians!(y, Dy, H, op, x, outputs)
-end
-
-# The safe-guarded methods can now simply forward to the parametric versions 
-# and pass `nothing` parameters:
+# # Safe-Guarded Functions
 function func_vals!(
-    y, op::AbstractNonlinearOperator, x; 
-    outputs=nothing
+    y::RVecOrMat, op::AbstractNonlinearOperator, x::RVecOrMat, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
-    return func_vals!(y, op, x, nothing; outputs)
+    return _func_vals_multi!(y, op::AbstractNonlinearOperator, optrait_multi(op), x, params, outputs)
 end
+
+# If vectors are used, we can forward to `eval_op!` in both cases (OperatorParallel(), OperatorSequential):
+function _func_vals_multi!(
+    y::RVec, op::AbstractNonlinearOperator, ::Union{OperatorParallel, OperatorSequential}, x::RVec, params, outputs
+)
+    @ignoraise _func_vals!(y, op, optrait_params(op), optrait_partial(op), x, params, outputs)
+    return nothing
+end
+# For matrices, we can forward only if `OperatorParallel()` trait is present:
+function _func_vals_multi!(
+    y::RMat, op::AbstractNonlinearOperator, ::OperatorParallel, x::RMat, params, outputs
+)
+    @ignoraise _func_vals!(y, op, optrait_params(op), optrait_partial(op), x, params, outputs)
+    return nothing
+end
+# Otherwise, we have a simple fallback:
+function _func_vals_multi!(
+    Y::RMat, op::AbstractNonlinearOperator, ::OperatorSequential, X::RMat, params, outputs
+)
+    for (y, x) = zip(eachcol(Y), eachcol(X))
+        @ignoraise _func_vals!(y, op, optrait_params(op), optrait_partial(op), x, params, outputs)
+    end
+end
+
 function func_grads!(
-    Dy, op::AbstractNonlinearOperator, x; 
-    outputs=nothing
+    Dy, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
-    return func_grads!(Dy, op, x, nothing; outputs)
+    @ignoraise _func_grads!(Dy, op, optrait_params(op), optrait_partial(op), x, params, outputs)
+    return nothing
 end
+
 function func_vals_and_grads!(
-    y, Dy, op::AbstractNonlinearOperator, x; 
-    outputs=nothing
+    y, Dy, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
-    return func_vals_and_grads!(y, Dy, op, x, nothing; outputs)
+    @ignoraise _func_vals_and_grads!(y, Dy, op, optrait_params(op), optrait_partial(op), x, params, outputs)
+    return nothing
 end
+
 function func_hessians!(
-    H, op::AbstractNonlinearOperator, x; 
-    outputs=nothing
+    H, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
-    return func_hessians!(H, op, x, nothing; outputs)
+    @ignoraise _func_hessians!(H, op, optrait_params(op), optrait_partial(op), x, params, outputs)
+    return nothing
 end
+
 function func_vals_and_grads_and_hessians!(
-    y, Dy, H, op::AbstractNonlinearOperator, x; 
-    outputs=nothing
+    y, Dy, H, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
-    return func_vals_and_grads_and_hessians!(y, Dy, H, op, x, nothing; outputs)
-end
-# #### Non-Parametric Methods for Parametric Operators
-# These should only be used when you know what you are doing, as we set the parameters
-# to `nothing`.
-# This is safe only if we now that an underlying function is not-parametric, but somehow
-# wrapped in something implementing `AbstractNonlinearOperatorWithParams`.
-function eval_op!(y, op::AbstractNonlinearOperatorWithParams, x)
-    return eval_op!(y, op, x, nothing)
-end 
-function eval_grads!(Dy, op::AbstractNonlinearOperatorWithParams, x)
-    return eval_grads!(Dy, op, x, nothing)
+    @ignoraise _func_vals_and_grads_and_hessians!(y, Dy, H, op, optrait_params(op), optrait_partial(op), x, params, outputs)
+    return nothing
 end
 
-function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x)
-    return eval_op_and_grads!(y, Dy, op, x, nothing)
-end
+for (new_name, inner_name, mod_args, in_arg) in 
+    (
+        (:_func_vals!, :eval_op!, (:y,), :x),
+        (:_func_grads!, :eval_grads!, (:Dy,), :x),
+        (:_func_hessians!, :eval_hessians!, (:Dy,), :x),
+        (:_func_vals_and_grads!, :eval_op_and_grads!, (:y, :Dy,), :x),
+        (:_func_vals_and_grads_and_hessians!, :eval_op_and_grads_and_hessians!, (:y, :Dy, :H), :x),
+    )
 
-function eval_hessians!(H, op::AbstractNonlinearOperatorWithParams, x)
-    return eval_hessians!(H, op, x, nothing)
-end
+    inner_args = Any[in_arg,]
+    for (i, params_trait) in enumerate((:(::IsNonparametricOperator), :(::IsParametricOperator)))
+        if i == 2
+            push!(inner_args, :params)
+        end
+        for (j, partial_trait) in enumerate((:(::OperatorOnlyFullEvaluation), :(::OperatorSupportsPartialEvaluation)))
+            _inner_args = copy(inner_args)
+            if j == 2
+                push!(_inner_args, :outputs)
+            end
 
-function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWithParams, x)
-    return eval_op_and_grads_and_hessians!(y, Dy, H, op, x, nothing)
-end
-
-function partial_op!(y, op::AbstractNonlinearOperatorWithParams, x, outputs)
-    return partial_op!(y, op, x, nothing, outputs)
-end
-function partial_grads!(Dy, op::AbstractNonlinearOperatorWithParams, x, outputs)
-    return partial_grads!(Dy, op, x, nothing, outputs)
-end
-function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x, outputs)
-    return partial_op_and_grads!(y, Dy, op, x, nothing, outputs)
-end
-function partial_hessians!(H, op::AbstractNonlinearOperatorWithParams, x, outputs)
-    return partial_hessians!(H, op, x, nothing, outputs)
-end
-function partial_op_and_grads_and_hessians!(
-    y, Dy, H, op::AbstractNonlinearOperatorWithParams, x, outputs
-)
-    return partial_op_and_grads_and_hessians!(y, Dy, H, op, x, nothing, outputs)
+            @eval function $(new_name)(
+                $(mod_args...), op::AbstractNonlinearOperator, $(params_trait), $(partial_trait), 
+                x::RVecOrMat, params, outputs
+            )
+                $(inner_name)($(mod_args...), op, $(_inner_args...))
+            end
+        end
+    end
 end
 
 # ## Types and Methods for Surrogate Models
 
 # An `AbstractSurrogateModel` is similar to `AbstractNonlinearOperator`.
 # Such a surrogate model is always non-parametric, as parameters of operators are assumed 
-# to be fix in between runs.
-abstract type AbstractSurrogateModel end
+# to be fix in-between optimization runs.
+abstract type AbstractSurrogateModel <: AbstractNonlinearOperator end
+optrait_params(::AbstractSurrogateModel)=IsNonparametricOperator()
+optrait_partial(::AbstractSurrogateModel)=OperatorOnlyFullEvaluation()
+optrait_multi(::AbstractSurrogateModel)=OperatorSequential()
+
+provides_grads(::AbstractSurrogateModel)=true
 
 # We also want to be able to define the behavior of models with light-weight objects:
 abstract type AbstractSurrogateModelConfig end
+num_parallel_evals(::AbstractSurrogateModelConfig)::Integer=1
 
 # ### Indicator Methods
 # Functions to indicate the order of the surrogate model:
@@ -557,97 +372,21 @@ function update!(
 end
 
 # ### Evaluation
-# In place evaluation and differentiation, similar to `AbstractNonlinearOperatorNoParams`.
 # Mandatory:
-function model_op!(y::Vec, surr::AbstractSurrogateModel, x::Vec)
-    return nothing
-end
-# Mandatory:
-function model_grads!(Dy, surr::AbstractSurrogateModel, x)
-    return nothing
-end
-# Optional:
-function model_op_and_grads!(y, Dy, surr::AbstractSurrogateModel, x)
-    model_op!(y, surr, x )
-    model_grads!(Dy, surr, x)
-    return nothing
-end
-# #### Optional Partial Evaluation
-supports_partial_evaluation(::AbstractSurrogateModel)=false
-function model_op!(y, surr::AbstractSurrogateModel, x, outputs)
-    return error("Surrogate model does not support partial evaluation.")
-end
-function model_grads!(y, surr::AbstractSurrogateModel, x, outputs)
-    return error("Surrogate model does not support partial Jacobian.")
-end
-function model_op_and_grads!(y, Dy, surr::AbstractSurrogateModel, x, outputs)
-    model_op!(y, surr, x, outputs)
-    model_grads!(y, surr, x, outputs)
-    return nothing
-end
-
-# #### Optional Parallel Evaluation
-function model_op!(Y::Mat, surr::AbstractSurrogateModel, X::Mat)
-    for (x, y) = zip(eachcol(X), eachcol(Y))
-        c = model_op!(y, surr, x)
-        if !isnothing(c)
-            return c
-        end
-    end
-    return nothing
-end
-
-# #### Safe-guarded, internal Methods
-# The methods below are used in the algorithm and have the same signature as 
-# the corresponding methods for `AbstractNonlinearOperator`.
-# Thus, we do not have to distinguish types in practice.
-function func_vals!(y, surr::AbstractSurrogateModel, x, p=nothing;
-    outputs=nothing
-)
-    if !isnothing(outputs)
-        if supports_partial_evaluation(surr)
-            return model_op!(y, surr, x, outputs)
-        ## else
-        ##     @warn "Partial evaluation not supported by surrogate model."
-        end
-    end
-    return model_op!(y, surr, x)
-end
-function func_grads!(
-    Dy, surr::AbstractSurrogateModel, x, p=nothing,
-    outputs=nothing
-)
-    if !isnothing(outputs)
-        if supports_partial_evaluation(surr)
-            return model_grads!(Dy, surr, x, outputs)
-        ## else
-        ##     @warn "Partial evaluation not supported by surrogate model."
-        end
-    end
-    return model_grads!(Dy, surr, x)
-end
-function func_vals_and_grads!(
-    y, Dy, surr::AbstractSurrogateModel, x, p=nothing;
-    outputs=nothing
-)
-    if !isnothing(outputs)
-        if supports_partial_evaluation(surr)
-            return model_op_and_grads!(y, Dy, surr, x, outputs)
-        ## else
-        ##     @warn "Partial evaluation not supported by surrogate model."
-        end
-    end
-    return model_op_and_grads!(y, Dy, surr, x)
-end
-
+#=
+```julia
+eval_op!(y::RVec, surr::AbstractSurrogateModel, x::RVec)=nothing
+eval_grads!(Dy, surr::AbstractSurrogateModel, x)=nothing
+eval_op_and_grads!(y, Dy, surr::AbstractSurrogateModel, x)
+```
+=#
 # ## Module Exports
-export AbstractNonlinearOperator, AbstractNonlinearOperatorNoParams, AbstractNonlinearOperatorWithParams
+export AbstractNonlinearOperator 
 export AbstractSurrogateModel, AbstractSurrogateModelConfig
 export supports_partial_evaluation, provides_grads, provides_hessians, requires_grads, requires_hessians
 export func_vals!, func_grads!, func_hessians!, func_vals_and_grads!, func_vals_and_grads_and_hessians!
 export eval_op!, eval_grads!, eval_hessians!, eval_op_and_grads!, eval_op_and_grads_and_hessians!
 export func_vals!, func_grads!, func_vals_and_grads!, func_vals_and_grads_and_hessians!
-export model_op!, model_grads!, model_op_and_grads!
 export init_surrogate, update!
 
 end#module

@@ -8,7 +8,7 @@
 # ## Meta-Data
 # For convenience, we'd like to have the same meta information available 
 # as for the original MOP:
-precision(::AbstractMOPSurrogate)::Type{<:AbstractFloat}=DEFAULT_PRECISION
+float_type(::AbstractMOPSurrogate)::Type{<:AbstractFloat}=DEFAULT_PRECISION
 dim_objectives(::AbstractMOPSurrogate)::Int=0            # mandatory
 dim_nl_eq_constraints(::AbstractMOPSurrogate)::Int=0     # optional
 dim_nl_ineq_constraints(::AbstractMOPSurrogate)::Int=0   # optional
@@ -16,7 +16,6 @@ dim_nl_ineq_constraints(::AbstractMOPSurrogate)::Int=0   # optional
 # Additionally, we require information on the model variability
 # and if we can build models for the scaled domain:
 depends_on_radius(::AbstractMOPSurrogate)::Bool=true
-supports_scaling(T::Type{<:AbstractMOPSurrogate})=NoScaling()
 
 # ## Construction
 # Define a function to return a model for some MOP.
@@ -94,7 +93,7 @@ for (dim_func, prealloc_func) in (
     @eval function $(prealloc_func)(mod::AbstractMOPSurrogate)
         dim = $(dim_func)(mod) 
         if dim > 0
-            T = precision(mod)
+            T = float_type(mod)
             return Vector{T}(undef, dim)
         else
             return nothing
@@ -187,7 +186,7 @@ end
 # ### Gradient Pre-Allocation
 # We also would like to have pre-allocated gradient arrays ready:
 function prealloc_objectives_grads(mod::AbstractMOPSurrogate, n_vars)
-    T = precision(mod)
+    T = float_type(mod)
     return Matrix{T}(undef, n_vars, dim_objectives(mod))
 end
 ## These are defined below (and I put un-specific definitions here for the Linter)
@@ -200,7 +199,7 @@ for (dim_func, prealloc_func) in (
     @eval function $(prealloc_func)(mod::AbstractMOPSurrogate, n_vars)
         n_out = $(dim_func)(mod)
         if n_out > 0
-            T = precision(mod)
+            T = float_type(mod)
             return Matrix{T}(undef, n_vars, n_out)
         else
             return nothing

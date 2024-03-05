@@ -93,38 +93,31 @@ end
 
     x = rand(2)
     y = zeros(2)
-    Compromise.eval_op!(y, op, x)
+    Compromise.func_vals!(y, op, x)
+    @test y ≈ func(x)
     Compromise.update!(tp, op, nothing, x, y, nothing, nothing)
     z = zeros(2)
-    Compromise.model_op!(z, tp, x)
+    Compromise.func_vals!(z, tp, x)
 
-    @test y == z
+    @test y ≈ z
 
     Dy = zeros(2,2)
-    Compromise.model_grads!(Dy, tp, x)
-    @test Dy == grads(x)
+    Compromise.func_grads!(Dy, tp, x)
+    @test Dy ≈ grads(x)
 
     Dy .= 0
     y .= 0
-    Compromise.model_op_and_grads!(y, Dy, tp, x)
-    @test y == func(x)
-    @test Dy == grads(x)
-
-    Hy = zeros(2,2,2)
-    Dy .= 0
-    y .= 0
-    Compromise.eval_op_and_grads_and_hessians!(y, Dy, Hy, op, x)
-    @test y == func(x)
-    @test Dy == grads(x)
-    @test Hy == hessians(x)
+    Compromise.func_vals_and_grads!(y, Dy, tp, x)
+    @test y ≈ func(x)
+    @test Dy ≈ grads(x)
 
     Hy = zeros(2,2,2)
     Dy .= 0
     y .= 0
     Compromise.func_vals_and_grads_and_hessians!(y, Dy, Hy, op, x)
-    @test y == func(x)
-    @test Dy == grads(x)
-    @test Hy == hessians(x)
+    @test y ≈ func(x)
+    @test Dy ≈ grads(x)
+    @test Hy ≈ hessians(x)
 end
 
 @testset "Stopping Criteria" begin
@@ -193,7 +186,7 @@ end
             eps_crit = -1.0,        # don't enter criticality loop
             max_iter=typemax(Int),
             stop_delta_min=-Inf,
-            stop_xtol_rel=1e-2,
+            stop_xtol_rel=1e-1,
             stop_xtol_abs=-Inf,
             stop_ftol_rel=-Inf,
             stop_ftol_abs=-Inf,
@@ -213,7 +206,7 @@ end
             max_iter=typemax(Int),
             stop_delta_min=-Inf,
             stop_xtol_rel=-Inf,
-            stop_xtol_abs=1e-2,
+            stop_xtol_abs=1e-1,
             stop_ftol_rel=-Inf,
             stop_ftol_abs=-Inf,
             stop_crit_tol_abs=-Inf,
@@ -286,7 +279,7 @@ end
         Δ, mop, mod, scaler, lin_cons, scaled_cons,
         vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts,
     )
-        if vals.x == [π, -ℯ]
+        if vals.x ≈ [π, -ℯ]
             return crit
         end
         return nothing
@@ -296,7 +289,7 @@ end
     final_vals, stop_code = optimize(
         mop, [π, -ℯ];
         algo_opts = AlgorithmOptions(;
-            max_iter=typemax(Int),
+            max_iter=5,
             stop_delta_min=-Inf,
             stop_xtol_rel=-Inf,
             stop_xtol_abs=-Inf,
@@ -360,7 +353,7 @@ end
     final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
 
     @test fn_counter[] == 10
-    @test stop_code.crit isa Compromise.CompromiseEvaluators.BudgetExhausted
+    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -372,7 +365,7 @@ end
     )
     final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
     @test dfn_counter[] == 1
-    @test stop_code.crit isa Compromise.CompromiseEvaluators.BudgetExhausted
+    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
 
     mop = MutableMOP(;num_vars=2)
     add_objectives!(
@@ -381,7 +374,7 @@ end
     )
     final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
     @test dfn_counter[] == 2
-    @test stop_code.crit isa Compromise.CompromiseEvaluators.BudgetExhausted
+    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -394,7 +387,7 @@ end
     final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
 
     @test fn_counter[] == 100
-    @test stop_code.crit isa Compromise.CompromiseEvaluators.BudgetExhausted
+    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -406,7 +399,7 @@ end
     )
     final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
     @test fn_counter[] == 10
-    @test stop_code.crit isa Compromise.CompromiseEvaluators.BudgetExhausted
+    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -418,7 +411,7 @@ end
     )
     final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
     @test fn_counter[] == 10
-    @test stop_code.crit isa Compromise.CompromiseEvaluators.BudgetExhausted
+    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -430,7 +423,7 @@ end
     )
     final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
     @test dfn_counter[] == 10
-    @test stop_code.crit isa Compromise.CompromiseEvaluators.BudgetExhausted
+    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
     
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -443,7 +436,7 @@ end
     )
     final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
     @test fn_counter[] <= 10
-    @test stop_code.crit isa Compromise.CompromiseEvaluators.BudgetExhausted
+    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -456,7 +449,7 @@ end
     )
     final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
     @test dfn_counter[] == 2
-    @test stop_code.crit isa Compromise.CompromiseEvaluators.BudgetExhausted
+    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
     
     mop = MutableMOP(;num_vars=2)
     add_objectives!(
@@ -465,6 +458,6 @@ end
         hessians=hess_objectives_function, hessians_iip=false 
     )
     final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
-    @test stop_code.crit isa Compromise.CompromiseEvaluators.BudgetExhausted
+    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
 
 end

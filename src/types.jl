@@ -27,15 +27,6 @@ abstract type AbstractAffineScaler end
 abstract type AbstractConstantAffineScaler <: AbstractAffineScaler end
 abstract type AbstractDynamicAffineScaler <: AbstractAffineScaler end
 
-# Supertypes to indicate if a model supports scaling:
-abstract type AbstractScalingIndicator end
-abstract type AbstractAffineScalingIndicator <: AbstractScalingIndicator end
-
-# Available return values for `supports_scaling(model)`:
-struct NoScaling <: AbstractScalingIndicator end
-struct ConstantAffineScaling <: AbstractAffineScalingIndicator end
-struct DynamicAffineScaling <: AbstractAffineScalingIndicator end
-
 # ## Step Computation
 # Supertypes to configure and cache descent step computation.
 # A config is meant to be provided by the user, and the cache is passed internally.

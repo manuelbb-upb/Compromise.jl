@@ -3,7 +3,7 @@ import .C.RBFModels as R
 import ForwardDiff as FD
 
 import Compromise.RBFModels: add_to_database!, val, val!
-import Compromise: NonlinearFunction, eval_op!, model_op!, model_grads!
+import Compromise: NonlinearFunction, func_vals!, func_grads! 
 
 using Test
 
@@ -294,7 +294,7 @@ end
             @test val(rbf.params.is_fully_linear_ref) == false
             x0 = rand(dim_x)
             fx0 = zeros(dim_y)
-            eval_op!(fx0, op, x0)
+            func_vals!(fx0, op, x0)
 
             #update_rbf_model!(rbf, op, Δ, x0, fx0)
             C.update!(rbf, op, Δ, x0, fx0, nothing, nothing,)
@@ -309,8 +309,8 @@ end
                 xi = X[:, ii]
                 @test LA.norm(xi) <= max(cfg.sampling_factor, cfg.search_factor) * Δ
                 xi .+= x0
-                eval_op!(fx0, op, xi)
-                model_op!(yi, rbf, xi)
+                func_vals!(fx0, op, xi)
+                func_vals!(yi, rbf, xi)
                 @test isapprox(fx0, yi; rtol=1e-6)
             end 
             rbf0 = deepcopy(rbf)
@@ -330,8 +330,8 @@ end
                 xi = X[:, ii]
                 @test LA.norm(xi) <= max(cfg.sampling_factor, cfg.search_factor) * Δ
                 xi .+= x0
-                eval_op!(fx0, op, xi)
-                model_op!(yi, rbf, xi)
+                func_vals!(fx0, op, xi)
+                func_vals!(yi, rbf, xi)
                 @test fx0 ≈ yi
             end 
             for fn in (:n_X_ref, :has_z_new_ref, :is_fully_linear_ref, :z_new, :x0, :delta_ref, 
@@ -343,7 +343,7 @@ end
             for i = 1:2*n_X
                 xi = randx()
                 _xi = copy(xi)
-                eval_op!(yi, op, xi)
+                func_vals!(yi, op, xi)
                 @test xi == _xi
                 add_to_database!(rbf.database, xi, yi)
                 @test xi == _xi
@@ -362,9 +362,9 @@ end
                 xi = X[:, ii]
                 xi .+= x0
                 _xi = copy(xi)
-                eval_op!(fx0, op, xi)
+                func_vals!(fx0, op, xi)
                 @test xi == _xi
-                model_op!(yi, rbf, xi)
+                func_vals!(yi, rbf, xi)
                 @test xi == _xi
                 isapprox(fx0, yi; rtol=1e-6)
             end
@@ -377,11 +377,11 @@ end
                 xi = randx()
                 jac = FD.jacobian(xi) do x
                     y = zeros(Real, dim_y)
-                    model_op!(y, _rbf, x)
+                    func_vals!(y, _rbf, x)
                     y
                 end
                
-                model_grads!(Dy, rbf, xi)
+                func_grads!(Dy, rbf, xi)
                 @test isapprox(jac, Dy'; rtol=1e-6)
             end
         end

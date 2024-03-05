@@ -38,7 +38,7 @@ initialize(mop::AbstractMOP, ξ0::RVec)=mop
 
 # ## Meta-Data
 # The optional function `precision` returns the type of result and derivative vectors:
-precision(::AbstractMOP)::Type{<:AbstractFloat}=DEFAULT_PRECISION
+float_type(::AbstractMOP)::Type{<:AbstractFloat}=DEFAULT_PRECISION
 
 # We would also like to deterministically query the expected surrogate model types:
 model_type(::AbstractMOP)::Type{<:AbstractMOPSurrogate}=AbstractMOPSurrogate
@@ -139,7 +139,7 @@ lin_ineq_constraints!(res::RVec, mat_vec::Nothing, mop::AbstractMOP, x::RVec)=li
 # Why do we also allow `nothing` as the target for constraints?
 # Because that is the default cache returned if there are none:
 function prealloc_objectives_vector(mop::AbstractMOP)
-    T = precision(mop)
+    T = float_type(mop)
     return Vector{T}(undef, dim_objectives(mop))
 end
 ## hx = nonlinear equality constraints at x
@@ -160,7 +160,7 @@ for (dim_func, prealloc_func) in (
     @eval function $(prealloc_func)(mop::AbstractMOP)
         dim = $(dim_func)(mop) 
         if dim > 0
-            T = precision(mop)
+            T = float_type(mop)
             return Vector{T}(undef, dim)
         else
             return nothing

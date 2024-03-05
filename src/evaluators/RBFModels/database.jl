@@ -197,19 +197,12 @@ end
 
 function evaluate!(rbf_database, op)
     @unpack database_x, database_y, flags_x, flags_y, state = rbf_database
-    budget = only(CE.budget_num_calls(op, 1)) 
-    if isnothing(budget)
-        budget = Inf
-    end
-    
+   
     ## find those entries, where `x` is set, but `y` is missing
     ## TODO in case of parallelization, get rid of the for loop(s)
     for (i, xset) = enumerate(flags_x)
         if xset > 0
             if flags_y[i] < flags_x[i]
-                if budget <= 0
-                    return "RBF Training: No sampling budget. Aborting."
-                end
                 x = @view(database_x[:, i])
                 y = @view(database_y[:, i])
                 @ignoraise func_vals!(y, op, x)
@@ -218,7 +211,6 @@ function evaluate!(rbf_database, op)
                 val!(state, hash(y, _state))
                 
                 flags_y[i] = flags_x[i]
-                budget -= 1
             end
         end
     end

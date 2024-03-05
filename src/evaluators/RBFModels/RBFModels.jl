@@ -3,7 +3,7 @@ module RBFModels
 using ..Compromise.CompromiseEvaluators
 const CE = CompromiseEvaluators
 import ..Compromise: @ignoraise, DEFAULT_PRECISION, project_into_box!
-import ..Compromise: subscript, supscript, pretty_row_vec
+import ..Compromise: subscript, supscript, pretty_row_vec, RVec
 import Printf: @sprintf
 
 using ElasticArrays
@@ -62,7 +62,7 @@ CE.requires_hessians(::RBFConfig)=false
     return vec2row(Φ), vec2row(Π), vec2col(x_in), centers, cφ, cπ, ε, n_X
 end
 
-function CE.model_op!(y::AbstractVector, rbf::RBFModel, x::AbstractVector)
+function CE.eval_op!(y::RVec, rbf::RBFModel, x::RVec)
     Φ, Π, x_in, centers, cφ, cπ, ε, n_X = prepare_eval_buffers(rbf, x)
 
     _rbf_eval!(
@@ -77,7 +77,7 @@ function CE.model_op!(y::AbstractVector, rbf::RBFModel, x::AbstractVector)
     return nothing
 end
 
-function CE.model_grads!(Dy, rbf::RBFModel, x)
+function CE.eval_grads!(Dy, rbf::RBFModel, x)
     _, _, x_in, centers, cφ, cπ, ε, _ = prepare_eval_buffers(rbf, x)
     Δx = @view rbf.buffers.v1[1:rbf.dim_x]
     _rbf_diff!(

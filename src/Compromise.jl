@@ -121,12 +121,8 @@ function init_scaler(scaler_cfg::Symbol, mod_type, lin_cons, dim)
 end
 
 function init_scaler(::Val{:box}, mod_type, lin_cons, dim)
-    if supports_scaling(mod_type) isa AbstractAffineScalingIndicator
-        @unpack lb, ub = lin_cons
-        return init_box_scaler(lb, ub, dim)
-    end
-    @warn "Problem structure does not support scaling according to `scaler_cfg=:box`. Proceeding without."
-    return IdentityScaler(dim)    
+    @unpack lb, ub = lin_cons
+    return init_box_scaler(lb, ub, dim)
 end
 init_scaler(::Val{:none}, mod_type, lin_cons, dim) = IdentityScaler(dim)
 
@@ -188,7 +184,7 @@ function constraint_violation(hx, gx, Eres, Ares)
 end
 
 function init_vals(mop, scaler, ξ0)
-    T = precision(mop)
+    T = float_type(mop)
     
     ## make unscaled variables have correct type
     ξ = T.(ξ0)
@@ -304,7 +300,7 @@ function optimize(
     
     ## INITIALIZATION (Iteration 0)
     mop = initialize(MOP, ξ0)
-    T = precision(mop)
+    T = float_type(mop)
     n_vars = length(ξ0)
 
     ## struct holding constant linear constraint informaton (lb, ub, A_b, E_c)

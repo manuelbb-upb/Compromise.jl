@@ -5,7 +5,7 @@ using Parameters: @with_kw
 using ..Compromise.CompromiseEvaluators
 const CE = CompromiseEvaluators
 
-import ..Compromise: @ignoraise
+import ..Compromise: @ignoraise, RVec
 
 struct TaylorPolynomial1{
     X <: AbstractVector{<:Real},
@@ -74,7 +74,7 @@ CE.depends_on_radius(::TaylorPoly)=false
 CE.requires_hessians(cfg::TaylorPolynomialConfig)=(cfg.degree>=2)
 CE.requires_grads(::TaylorPolynomialConfig)=true
 
-function CE.model_op!(y::AbstractVector, tp::TaylorPolynomial1, x::AbstractVector)
+function CE.eval_op!(y::RVec, tp::TaylorPolynomial1, x::RVec)
     Δx = tp.Δx
     Δx .= x .- tp.x0
 
@@ -84,8 +84,8 @@ function CE.model_op!(y::AbstractVector, tp::TaylorPolynomial1, x::AbstractVecto
     return nothing
 end
 
-function CE.model_op!(y::AbstractVector, tp::TaylorPolynomial2, x::AbstractVector)
-    model_op!(y, tp.tp, x)
+function CE.eval_op!(y::RVec, tp::TaylorPolynomial2, x::RVec)
+    eval_op!(y, tp.tp, x)
     Δx = tp.tp.Δx
     H = tp.Hfx
     @views for i = axes(H, 3)
@@ -94,14 +94,14 @@ function CE.model_op!(y::AbstractVector, tp::TaylorPolynomial2, x::AbstractVecto
     return nothing
 end
 
-function CE.model_grads!(Dy, tp::TaylorPolynomial1, x)
+function CE.eval_grads!(Dy, tp::TaylorPolynomial1, x)
     Dy .= tp.Dfx
     return nothing
 end
 
-function CE.model_grads!(Dy, tp::TaylorPolynomial2, x)
+function CE.eval_grads!(Dy, tp::TaylorPolynomial2, x)
     tp1 = tp.tp
-    model_grads!(Dy, tp1, x)
+    eval_grads!(Dy, tp1, x)
     Δx = tp1.Δx
     Δx .= x .- tp1.x0
     H = tp.Hfx
@@ -113,7 +113,7 @@ function CE.model_grads!(Dy, tp::TaylorPolynomial2, x)
     return nothing
 end
 
-function CE.model_op_and_grads!(y, Dy, tp::TaylorPolynomial1, x)
+function CE.eval_op_and_grads!(y, Dy, tp::TaylorPolynomial1, x)
     Δx = tp.Δx
     Δx .= x .- tp.x0
 
@@ -123,9 +123,9 @@ function CE.model_op_and_grads!(y, Dy, tp::TaylorPolynomial1, x)
     return nothing
 end
 
-function CE.model_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
+function CE.eval_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
     tp1 = tp.tp
-    model_op_and_grads!(y, Dy, tp1, x)
+    eval_op_and_grads!(y, Dy, tp1, x)
     Δx = tp1.Δx
     H = tp.Hfx
     HΔx = tp.xtmp

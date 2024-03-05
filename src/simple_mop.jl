@@ -18,86 +18,62 @@
 # A `ScaledOperator` wraps some other `AbstractNonlinearOperator` and enables caching
 # of (un-)scaling results as well taking care of the chain rule for derivatives:
 
-struct ScaledOperator{O, S, XI, D, H} <: AbstractNonlinearOperatorNoParams
+struct ScaledOperator{F<:AbstractFloat, O, S} <: AbstractNonlinearOperator
     op :: O
     scaler :: S
     ## cache for unscaled site
-    ξ :: XI
-    ## cache for gradients of `op` at `ξ`
-    Dy :: D
-    ## cache for Hessians of `op` at `ξ`, multiplied by unscaling matrix
-    Hy :: H
+    ξ :: Vector{F}      # TODO (elastic) matrix for parallel evaluation
 end
-
-CE.is_counted(sop::ScaledOperator)=CE.is_counted(sop.op)
-CE.num_calls(sop::ScaledOperator)=CE.num_calls(sop.op)
-CE.max_calls(sop::ScaledOperator)=CE.max_calls(sop.op)
-CE.set_num_calls!(sop::ScaledOperator, vals::Tuple{Int,Int,Int})=CE.set_num_calls!(sop.op, vals)
-
-# Consider ``f: ℝ^n → ℝ^m`` and the unscaling map ``u: ℝ^n → ℝ^n``.
-# By the chain rule we have ``∇(f∘u)(x) = ∇f(ξ)*T``, where ``T`` is 
-# the Jacobian of ``u``.
-# As we are actually working with transposed Jacobians `Dy`, we compute
-# `T'Dy`:
-function scale_grads!(Dy, sop)
-    LA.mul!(Dy, transpose(unscaling_matrix(sop.scaler)), sop.Dy)
-    return nothing
-end
-
-# Usually, the chain rule for second-order derivatives is more complicated:
-# ```math
-#   ∇²(f∘u)(x) = Tᵀ∇²f(ξ)T + ∑ₖ ∇fₖ(ξ) ∇²u
-# ```
-# But ``u`` is affine, so the second term vanishes and we are left with 
-# the matrix-matrix-matrix product:
-function scale_hessians!(H, sop)
-    T = unscaling_matrix(sop.scaler)
-    for i = axes(H, 3)
-        LA.mul!(sop.Hy[:, :, i], transpose(T), H[:, :, i])
-        LA.mul!(H[:, :, i], sop.Hy[:, :, i], T)
-    end
-    return nothing
-end
+CE.optrait_params(sop::ScaledOperator)=CE.optrait_params(sop.op)
+CE.optrait_partial(sop::ScaledOperator)=CE.optrait_partial(sop.op)
+CE.provides_grads(sop)=CE.provides_grads(sop.op)
+CE.provides_hessians(sop)=CE.provides_hessians(sop.op)
 
 # ### Operator Interface
 
 # Evaluation of a `ScaledOperator` is straight-forward:
-function CE.eval_op!(y, sop::ScaledOperator, x)
-    unscale!(sop.ξ, sop.scaler, x)
-    return eval_op!(y, sop.op, sop.ξ)
+function prepare_scaled_op(sop, x)
+    @unpack op, scaler, ξ = sop
+    unscale!(ξ, scaler, x)
+    return ξ, op, scaler
+end
+function CE.eval_op!(y::RVec, sop::ScaledOperator, x::RVec, args...)
+    ξ, op, _ = prepare_scaled_op(sop, x)
+    return eval_op!(y, op, ξ, args...)
 end
 
 # With the above chain-rule functions, it is now easy to implement the 
 # complete operator interface for `ScaledOperator`.
 # Taking gradients requires unscaling of the variables, differentiation at 
 # the unscaled site and a re-scaling of the gradients:
-function CE.eval_grads!(Dy, sop::ScaledOperator, x)
-    unscale!(sop.ξ, sop.scaler, x)
-    r = eval_grads!(sop.Dy, sop.op, sop.ξ)
-    scale_grads!(Dy, sop)
-    return r
+function CE.eval_grads!(Dy, sop::ScaledOperator, x, args...)
+    ξ, op, scaler = prepare_scaled_op(sop, x)
+    @ignoraise eval_grads!(Dy, op, ξ, args...)
+    scale_grads!(Dy, scaler)
+    return nothing
 end
 # We don't have to unscale twice when evaluating and differentiating:
-function CE.eval_op_and_grads!(y, Dy, sop::ScaledOperator, x)
-    unscale!(sop.ξ, sop.scaler, x)
-    r = eval_op_and_grads!(y, sop.Dy, sop.op, sop.ξ)
-    scale_grads!(Dy, sop)
-    return r
+function CE.eval_op_and_grads!(y, Dy, sop::ScaledOperator, x, args...)
+    ξ, op, scaler = prepare_scaled_op(sop, x)
+    @ignoraise eval_op_and_grads!(y, Dy, op, ξ, args...)
+    scale_grads!(Dy, scaler)
+    return nothing
 end
 
 # The procedure is similar for Hessians:
-function CE.eval_hessians!(H, sop::ScaledOperator, x)
-    unscale!(sop.ξ, sop.scaler, x)
-    r = eval_hessians!(H, sop.op, sop.ξ)
-    scale_hessians!(H, sop)
-    return r
+function CE.eval_hessians!(H, sop::ScaledOperator, x, args...)
+    ξ, op, scaler = prepare_scaled_op(sop, x)
+    @ignoraise eval_hessians!(H, op, ξ, args...)
+    scale_hessians!(H, scaler)
+    return nothing
 end
-function CE.eval_op_and_grads_and_hessians!(y, Dy, H, sop, x)
-    unscale!(sop.ξ, sop.scaler, x)
-    r = eval_op_and_grads_and_hessians!(y, sop.Dy, H, sop.op, sop.ξ)
-    scale_grads!(Dy, sop)
-    scale_hessians!(H, sop)
-    return r
+
+function CE.eval_op_and_grads_and_hessians!(y, Dy, H, sop, x, args...)
+    ξ, op, scaler = prepare_scaled_op(sop, x)
+    @ignoraise eval_op_and_grads_and_hessians!(y, Dy, H, op, ξ, args...)
+    scale_grads!(Dy, scaler)
+    scale_hessians!(H, scaler)
+    return nothing
 end
 
 # ## `SimpleMOP`
@@ -470,18 +446,8 @@ end
 # These helpers make an operator respect scaling by returning `ScaledOperator`:
 scale_wrap_op(scaler::IdentityScaler, op, mcfg, dim_in, dim_out, T)=op
 function scale_wrap_op(scaler, op, mcfg, dim_in, dim_out, T)
-    ξ = zeros(T, dim_in)
-    Dy = if requires_grads(mcfg)
-        zeros(T, dim_in, dim_out)
-    else
-        nothing
-    end
-    Hy = if requires_hessians(mcfg)
-        zeros(T, dim_in, dim_in, dim_out)
-    else
-        nothing
-    end
-    return ScaledOperator(op, scaler, ξ, Dy, Hy)
+    ξ = zeros(T, dim_in, CE.num_parallel_evals(mcfg))
+    return ScaledOperator(op, scaler, ξ)
 end
 
 # We use the `ScaledOperator` in the `SimpleMOPSurrogate` to make writing models
