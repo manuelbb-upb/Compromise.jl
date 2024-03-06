@@ -130,10 +130,10 @@ function init_lin_cons(mop, n_vars)
         error("Variable bounds inconsistent.")
     end
 
-    A = lin_eq_constraints_matrix(mop)
-    b = lin_eq_constraints_vector(mop)
-    E = lin_ineq_constraints_matrix(mop)
-    c = lin_ineq_constraints_vector(mop)
+    A = lin_ineq_constraints_matrix(mop)
+    b = lin_ineq_constraints_vector(mop)
+    E = lin_eq_constraints_matrix(mop)
+    c = lin_eq_constraints_vector(mop)
 
     return LinearConstraints(n_vars, lb, ub, A, b, E, c)
 end
@@ -419,22 +419,11 @@ function do_iteration!(
         @logmsg log_level "ITERATION $(it_index): Updating Surrogates."
         @ignoraise update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts) log_level
         @ignoraise eval_and_diff_mod!(mod_vals, mod, vals.x) log_level
-
-        if vals.theta_ref[] > 0
-            @logmsg log_level "ITERATION $(it_index): Computing a normal step."
-        end 
-
-        @ignoraise do_normal_step!(
-            step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
-            log_level)
-       
-        if vals.theta_ref[] > 0
-            @logmsg log_level """
-                ITERATION $(it_index): Found normal step $(vec2str(step_vals.n)). 
-                                    Hence xn=$(vec2str(step_vals.xn))."""
-        end
-        
     end
+    @ignoraise do_normal_step!(
+        step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
+        it_index, log_level
+    )
 
     n_is_compatible = compatibility_test(step_vals.n, algo_opts, Δ)
 
@@ -443,7 +432,7 @@ function do_iteration!(
         @logmsg log_level "ITERATION $(it_index): Normal step incompatible. Trying restoration."
         add_to_filter!(filter, vals.theta_ref[], vals.phi_ref[])
         return do_restoration(
-            mop, Δ, mod, scaler, scaled_cons,
+            mop, Δ, mod, scaler, lin_cons, scaled_cons,
             vals, vals_tmp, step_vals, mod_vals, filter, step_cache, update_results, 
             stop_crits, user_callback, algo_opts;
             it_index

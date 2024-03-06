@@ -51,7 +51,7 @@ function criticality_routine(
                 @ignorebreak stop_code = eval_and_diff_mod!(mod_valsj, modj, vals.x)
                 @ignorebreak do_normal_step!(
                     step_cachej, step_valsj, Δj, mop, modj, scaler, lin_cons, scaled_cons, 
-                    vals, mod_valsj; log_level
+                    vals, mod_valsj; log_level, it_index
                 )
             end
             if !compatibility_test(step_valsj.n, algo_opts, Δj)

@@ -326,7 +326,7 @@ Return a model subtyping `AbstractSurrogateModel`, as defined by
 `model_config::AbstractSurrogateModelConfig`, for the nonlinear operator `nonlin_op`.
 The operator (and model) has input dimension `dim_in` and output dimension `dim_out`.
 `params` is the current parameter object for `nonlin_op` and is cached.
-`T` is a subtype of `AbstractFloat` to indicate precision of cache arrays.
+`T` is a subtype of `AbstractFloat` to indicate float_type of cache arrays.
 """
 function init_surrogate(
     ::AbstractSurrogateModelConfig, op, dim_in, dim_out, params, T;

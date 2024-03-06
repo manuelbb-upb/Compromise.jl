@@ -1,5 +1,5 @@
 function do_restoration(
-    mop, Δ, mod, scaler, scaled_cons,
+    mop, Δ, mod, scaler, lin_cons, scaled_cons,
     vals, vals_tmp, step_vals, mod_vals, filter, step_cache, update_results, 
     stop_crits, 
     user_callback, 
@@ -7,9 +7,14 @@ function do_restoration(
     it_index
 )
     @logmsg algo_opts.log_level "Iteration $(it_index): Starting restoration."
-    update_results.it_stat_post = RESTORATION
+    update_results.it_stat = RESTORATION
 
-	(θ_opt, xr_opt, ret) = solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, vals.x, algo_opts.nl_opt)
+    if dim_nl_eq_constraints(mop) > 0 || dim_nl_ineq_constraints(mop) > 0
+	    (θ_opt, xr_opt, ret) = solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, vals.x, algo_opts.nl_opt)
+    else
+        xr_opt = step_vals.xn
+        ret = :SUCCESS
+    end
     if ret in (
         :SUCCESS, 
         :STOPVAL_REACHED, 
@@ -19,8 +24,9 @@ function do_restoration(
 		:MAXTIME_REACHED
     )
         @ignoraise postproccess_restoration(
-            xr_opt, Δ, update_results, mop, mod, scaler, scaled_cons,
-            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts
+            xr_opt, Δ, update_results, mop, mod, scaler, lin_cons, scaled_cons,
+            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
+            it_index
         )
     else
         return InfeasibleStopping()
@@ -28,9 +34,10 @@ function do_restoration(
     @ignoraise finish_iteration(
         stop_crits, user_callback,
         update_results, mop, mod, scaler, lin_cons, scaled_cons,
-        vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
+        mod_vals, vals, vals_tmp, step_vals, filter, algo_opts;
         it_index
     )
+    
     accept_trial_point!(vals, vals_tmp)
     return nothing
 end
@@ -78,13 +85,15 @@ function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, nl_opt
 end
 
 function postproccess_restoration(
-    xr_opt, Δ, update_results, mop, mod, scaler, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts
+    xr_opt, Δ, update_results, mop, mod, scaler, lin_cons, scaled_cons,
+    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
+    it_index
 )
+    @unpack log_level = algo_opts
     ## the nonlinear problem was solved successfully.
     ## pretend, trial point was next iterate and set values
     copyto!(vals_tmp.x, xr_opt)
-    @ignoraise eval_mop!(vals, mop, scaler)
+    @ignoraise eval_mop!(vals_tmp, mop, scaler)
 
     @. update_results.diff_x = vals.x - vals_tmp.x
     @. update_results.diff_fx = vals.fx - vals_tmp.fx
@@ -101,7 +110,8 @@ function postproccess_restoration(
 
         @ignoraise do_normal_step!(
             step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals_tmp, mod_vals;
-            log_level)
+            it_index, log_level
+        )
 
         @unpack c_delta, c_mu, mu, delta_max = algo_opts
         n = step_vals.n
@@ -125,7 +135,7 @@ function postproccess_restoration(
             end                
         end
         if n_is_compatible
-            finalize_update_results!(update_results, _Δ, RESTORATION, point_has_changed=true)
+            finalize_update_results!(update_results, _Δ, RESTORATION, true)
             
             @. step_vals.n = vals_tmp.x - vals.x
             @. step_vals.d = 0

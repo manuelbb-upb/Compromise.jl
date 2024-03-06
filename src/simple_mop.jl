@@ -136,7 +136,8 @@ MutableMOP(num_vars::Int)=MutableMOP(;num_vars)
 struct TypedMOP{
     O, NLEC,NLIC,
     MTO, MTNLEC, MTNLIC,
-    LB, UB, EC, AB
+    LB, UB, 
+    EType, CType, AType, BType
 } <: SimpleMOP
     objectives :: O
     nl_eq_constraints :: NLEC
@@ -155,14 +156,14 @@ struct TypedMOP{
     lb :: LB
     ub :: UB
 
-    E_c :: EC
-    A_b :: AB
+    E :: EType
+    c :: CType
+    A :: AType
+    b :: BType
 end
 
 # This initialization really is just a forwarding of all fields:
 function initialize(mop::MutableMOP, ξ0::RVec)
-    E_c = lin_eq_constraints(mop)
-    A_b = lin_ineq_constraints(mop)
     return TypedMOP(
         mop.objectives,
         mop.nl_eq_constraints,
@@ -176,8 +177,8 @@ function initialize(mop::MutableMOP, ξ0::RVec)
         mop.mcfg_nl_ineq_constraints,
         mop.lb,
         mop.ub,
-        E_c,
-        A_b
+        mop.E, mop.c,
+        mop.A, mop.b
    )
 end
 
@@ -323,7 +324,7 @@ end
 
 # ### Interface Implementation
 # Define the most basic Getters:
-precision(::SimpleMOP) = Float64
+float_type(::SimpleMOP) = Float64
 model_type(::SimpleMOP) = SimpleMOPSurrogate
 
 # Box constraints are easy:
@@ -339,25 +340,10 @@ end
 
 # Linear constraints are returned only if the matrix is not nothing.
 # If the offset vector is nothing, we return zeros:
-function lin_eq_constraints(mop::MutableMOP)
-    isnothing(mop.E) && return nothing
-    if isnothing(mop.c)
-        mop.c = zeros(Float64, size(E, 1))
-    end
-    return mop.E, mop.C
-end
-
-function lin_ineq_constraints(mop::MutableMOP)
-    isnothing(mop.A) && return nothing
-    if isnothing(mop.b)
-        mop.b = zeros(Float64, size(A, 1))
-    end
-    return mop.A, mop.b
-end
-
-# The `TypedMOP` stores tuples (of a matrix and a vector instead):
-lin_eq_constraints(mop::TypedMOP) = mop.E_c
-lin_ineq_constraints(mop::TypedMOP) = mop.A_b
+lin_eq_constraints_matrix(mop::Union{TypedMOP, MutableMOP})=mop.E
+lin_eq_constraints_vector(mop::Union{TypedMOP, MutableMOP})=mop.c
+lin_ineq_constraints_matrix(mop::Union{TypedMOP, MutableMOP})=mop.A
+lin_ineq_constraints_vector(mop::Union{TypedMOP, MutableMOP})=mop.b
 
 # Because we store `AbstractNonlinearOperator`s, evaluation can simply be redirected:
 function eval_objectives!(y::RVec, mop::SimpleMOP, x::RVec)
@@ -378,7 +364,9 @@ end
 # We additionally store the operators, because we might wrap them as
 # `ScaledOperator` and don't want to modify the original problem.
 # (Also, I am not sure if the scaler is available when the problem is initialized).
-struct SimpleMOPSurrogate{O, NLEC, NLIC, MO, MNLEC, MNLIC} <: AbstractMOPSurrogate
+struct SimpleMOPSurrogate{
+    O, NLEC, NLIC, MO, MNLEC, MNLIC,
+} <: AbstractMOPSurrogate
     objectives :: O
     nl_eq_constraints :: NLEC
     nl_ineq_constraints :: NLIC
@@ -390,11 +378,11 @@ struct SimpleMOPSurrogate{O, NLEC, NLIC, MO, MNLEC, MNLIC} <: AbstractMOPSurroga
 
     mod_objectives :: MO
     mod_nl_eq_constraints :: MNLEC
-    mod_nl_ineq_constraints :: MNLIC 
+    mod_nl_ineq_constraints :: MNLIC
 end
 
-# The precision is again fixed:
-precision(mod::SimpleMOPSurrogate)=Float64
+# The float_type is again fixed:
+float_type(mod::SimpleMOPSurrogate)=Float64
 
 # Getters are generated automatically:
 for dim_func in (:dim_objectives, :dim_nl_eq_constraints, :dim_nl_ineq_constraints)

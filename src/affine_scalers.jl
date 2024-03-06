@@ -81,6 +81,8 @@ scale!(x::RVec, scaler::IdentityScaler, ξ::RVec)=copyto!(x, ξ)
 unscale!(ξ::RVec, scaler::IdentityScaler, x::RVec)=copyto!(ξ, x)
 scaling_matrix(scaler::IdentityScaler) = LA.I(scaler.dim)
 unscaling_matrix(scaler::IdentityScaler) = LA.I(scaler.dim)
+scaling_offset(scaler::IdentityScaler) = 0
+unscaling_offset(scaler::IdentityScaler) = 0
 
 ## ξ = Tx + b
 ## x = T⁻¹(ξ - b) = T⁻¹ξ - T⁻¹b

@@ -109,7 +109,7 @@ Base.@kwdef struct AlgorithmOptions{_T <: Number, SC}
 	"Acceptance threshold."
 	nu_accept :: _T = 0.01 			# 1e-2 is suggested by Fletcher et. al. 
 	"Success threshold."
-	nu_success :: _T = 0.9 			# 0.9 is suggested by Fletcher et. al. 
+	nu_success :: _T = 0.4 			# 0.9 is suggested by Fletcher et. al. 
 	
 	# compatibilty parameters
 	"Factor for normal step compatibility test. The smaller `c_delta`, the stricter the test."

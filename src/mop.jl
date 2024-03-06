@@ -37,7 +37,7 @@ In the code, we often follow this notation:
 initialize(mop::AbstractMOP, ξ0::RVec)=mop
 
 # ## Meta-Data
-# The optional function `precision` returns the type of result and derivative vectors:
+# The optional function `float_type` returns the type of result and derivative vectors:
 float_type(::AbstractMOP)::Type{<:AbstractFloat}=DEFAULT_FLOAT_TYPE
 
 # We would also like to deterministically query the expected surrogate model types:

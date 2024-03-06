@@ -16,12 +16,23 @@ end
 function do_normal_step!(
     step_cache::AbstractStepCache, step_vals,
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
-    log_level
+    it_index, log_level
 )
-    @ignoraise compute_normal_step!(
-        step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, 
-        scaled_cons, vals, mod_vals; log_level
-    )
+    if vals.theta_ref[] > 0
+        @logmsg log_level "ITERATION $(it_index): Computing a normal step."
+    
+
+        @ignoraise compute_normal_step!(
+            step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, 
+            scaled_cons, vals, mod_vals; log_level
+        )
+        @logmsg log_level """
+            ITERATION $(it_index): Found normal step $(vec2str(step_vals.n)). 
+            Hence xn=$(vec2str(step_vals.xn))."""
+
+    else
+        step_vals.n .= 0
+    end
     step_vals.xn .= vals.x .+ step_vals.n
     nothing
 end
@@ -295,7 +306,7 @@ function solve_steepest_descent_problem(
     opt = JuMP.Model(qp_opt)
     JuMP.set_silent(opt)
 
-    JuMP.@variable(opt, β)
+    JuMP.@variable(opt, β <= 0)
     JuMP.@variable(opt, d[1:n_vars])
 
     JuMP.@objective(opt, Min, β)
@@ -332,7 +343,7 @@ function solve_steepest_descent_problem(
     JuMP.optimize!(opt)
 
     if MOI.get(opt, MOI.TerminationStatus()) == MOI.INFEASIBLE
-        return fill(eltype(xn)(NaN), n_vars)
+        return 0, zero(xn)
     end
     χ = abs(JuMP.value(β))
     return χ, JuMP.value.(d)
