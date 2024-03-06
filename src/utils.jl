@@ -72,6 +72,25 @@ macro ignorebreak(ex)
 	end
 end
 
+universal_copy!(trgt, src)=nothing
+function universal_copy!(trgt::AbstractArray{T, N}, src::AbstractArray{F, N}) where{T, F, N}
+	copyto!(trgt, src)
+	return nothing
+end
+function universal_copy!(trgt::Base.RefValue{T}, src::Base.RefValue{F}) where {T, F}
+	trgt[] = src[]
+	nothing
+end
+
+"""
+	`var_bounds_valid(lb, ub)`
+Return `true` if lower bounds `lb` and upper bounds `ub` are consistent.
+"""
+var_bounds_valid(lb, ub)=true
+var_bounds_valid(lb::Nothing, ub::RVec)=!(any(isequal(-Inf), ub))
+var_bounds_valid(lb::RVec, ub::Nothing)=!(any(isequal(Inf), lb))
+var_bounds_valid(lb::RVec, ub::RVec)=all(lb .<= ub)
+
 function project_into_box!(x, lb, ub)
 	project_into_lower_bounds!(x, lb)
 	project_into_upper_bounds!(x, ub)

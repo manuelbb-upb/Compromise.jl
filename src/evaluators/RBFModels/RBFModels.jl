@@ -2,8 +2,9 @@ module RBFModels
 
 using ..Compromise.CompromiseEvaluators
 const CE = CompromiseEvaluators
-import ..Compromise: @ignoraise, DEFAULT_PRECISION, project_into_box!
+import ..Compromise: @ignoraise, DEFAULT_FLOAT_TYPE, project_into_box!
 import ..Compromise: subscript, supscript, pretty_row_vec, RVec
+import ..Compromise: trust_region_bounds!, intersect_box, AbstractStoppingCriterion, stop_message
 import Printf: @sprintf
 
 using ElasticArrays
@@ -13,6 +14,9 @@ using Parameters: @with_kw, @unpack
 using StructHelpers: @batteries
 
 import Logging: @logmsg, Info
+
+struct RBFConstructionImpossible <: AbstractStoppingCriterion end
+stop_message(::RBFConstructionImpossible)="Exit, update of RBFModels no longer possible."
 
 const NumOrVec = Union{Number, AbstractVector}
 const VecOrMat = Union{AbstractVector, AbstractMatrix}
@@ -117,7 +121,7 @@ function CE.update!(
     update_rbf_model!(rbf, op, Δ, x, fx, lb, ub; log_level, norm_p=Inf)
 end
 
-function CE.copy_model(rbf::RBFModel)
+function CE.universal_copy(rbf::RBFModel)
     @unpack dim_x, dim_y, dim_π, min_points, max_points, delta_max, poly_deg, kernel = rbf
     @unpack shape_parameter_function, enforce_fully_linear, search_factor = rbf
     @unpack max_search_factor, sampling_factor, max_sampling_factor, th_qr, th_cholesky = rbf
@@ -132,7 +136,7 @@ function CE.copy_model(rbf::RBFModel)
     )
 end
 
-function CE.copyto_model!(mod_trgt::RBFModel, mod_src::RBFModel)
+function CE.universal_copy!(mod_trgt::RBFModel, mod_src::RBFModel)
     copyto!(mod_trgt.params, mod_src.params)
 end
 

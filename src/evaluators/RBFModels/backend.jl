@@ -97,7 +97,7 @@ _poly_dim(dim_x, poly_deg) = binomial(dim_x + poly_deg, dim_x)
     @assert dim_y >= 1
 end
 
-function _rbf_params(rbf::RBFSurrogate, T = DEFAULT_PRECISION; kwargs...)
+function _rbf_params(rbf::RBFSurrogate, T = DEFAULT_FLOAT_TYPE; kwargs...)
     @unpack dim_x, dim_y, dim_φ, dim_π, kernel = rbf
     return _rbf_params(T, dim_x, dim_y, dim_φ, dim_π, kernel)
 end
@@ -124,7 +124,7 @@ function _rbf_params(
     )
 end
 
-function _rbf_eval_caches(rbf::RBFSurrogate, n_x, n_y, T = DEFAULT_PRECISION)
+function _rbf_eval_caches(rbf::RBFSurrogate, n_x, n_y, T = DEFAULT_FLOAT_TYPE)
     @unpack dim_x, dim_y, dim_φ, dim_π = rbf
     return _rbf_eval_caches(T, n_x, n_y, dim_x, dim_y, dim_φ, dim_π, )
 end
@@ -156,7 +156,7 @@ num2vec(x::Number)=[x,]
 function _rbf_eval(rbf::RBFSurrogate, x, params)
     x = vec2col(x)
     dim_x, n_x = size(x)
-    T = Base.promote_eltype(DEFAULT_PRECISION, eltype(x))
+    T = Base.promote_eltype(DEFAULT_FLOAT_TYPE, eltype(x))
     y = zeros(T, rbf.dim_y, n_x)
     _rbf_eval!(y, rbf, x, params)
     return y
@@ -251,7 +251,7 @@ function _rbf_diff(rbf::RBFSurrogate, x::NumOrVec, params)
     x = num2vec(x)
     dim_x = length(x)
     @assert dim_x == rbf.dim_x
-    T = Base.promote_eltype(DEFAULT_PRECISION, eltype(x))
+    T = Base.promote_eltype(DEFAULT_FLOAT_TYPE, eltype(x))
     Dy = zeros(T, dim_x, rbf.dim_y)
     _rbf_diff!(Dy, rbf, x, params)
     return Dy
@@ -552,7 +552,7 @@ end
 function _rbf_fit(
     rbf::RBFSurrogate, features, targets, centers=nothing, ε=nothing
 )
-    T = Base.promote_type(DEFAULT_PRECISION, eltype(features), eltype(targets))
+    T = Base.promote_type(DEFAULT_FLOAT_TYPE, eltype(features), eltype(targets))
     params = _rbf_params(rbf, T; centers, ε)
     @unpack coeff_φ, coeff_π, centers, ε = params
 

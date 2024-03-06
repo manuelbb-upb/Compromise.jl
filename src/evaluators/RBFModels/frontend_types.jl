@@ -285,7 +285,7 @@ function array(T::Type, size...)
 end
 
 function rbf_params_and_buffers(
-  dim_x, dim_y, dim_π, max_points, T=DEFAULT_PRECISION
+  dim_x, dim_y, dim_π, max_points, T=DEFAULT_FLOAT_TYPE
 )
   
   min_points = dim_x + 1
@@ -378,21 +378,21 @@ function rbf_init_model(
     search_factor :: Real, max_search_factor :: Real,
     sampling_factor :: Real, max_sampling_factor :: Real,
     th_qr :: Real, th_cholesky :: Real,
-    T :: Type{<:Number} = DEFAULT_PRECISION;
+    T :: Type{<:Number} = DEFAULT_FLOAT_TYPE;
 )
     @assert th_qr >=  0
     @assert th_cholesky >= 0
     @assert search_factor >= 1
     @assert max_search_factor >= 1
     min_points = dim_x + 1
-    if !isnothing(max_points) && max_points < min_points
-        @warn "`max_points` must be at least $(min_points)."
-        max_points = min_points
-    end
     if isnothing(max_points)
         max_points = 2 * min_points
     end
 
+    if max_points < min_points
+        @warn "`max_points` must be at least $(min_points)."
+        max_points = min_points
+    end
     surrogate = RBFSurrogate(; dim_x, dim_y, kernel, poly_deg, dim_φ=-1)
     database = init_rbf_database(dim_x, dim_y, database_size, database_chunk_size, T)
 

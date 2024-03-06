@@ -1,74 +1,143 @@
 function test_trial_point!(
-    mop, scaler, iter_meta, filter, vals, mod_vals, vals_tmp, step_vals, algo_opts
+    update_results, vals_tmp, Δ, mop, scaler, filter, vals, mod_vals, step_vals, algo_opts
 )
-    # During step computation, `step_vals` was set to contain
-    # the step vectors `n`, `xn`, `d` and `xs`.
-    # We also have the model objective value vector `fxs`.
-    xs = step_vals.xs
-    mod_fxs = step_vals.fxs
-    
+    @unpack diff_x, diff_fx, diff_fx_mod, it_index = update_results
+    @unpack strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success, log_level = algo_opts
+
     # Use `vals_tmp` to hold the true values at `xs`:
-    copyto!(vals_tmp.x, xs)
+    copyto!(vals_tmp.x, step_vals.xs)
     @ignoraise eval_mop!(vals_tmp, mop, scaler)
+    
+    @unpack x, fx = vals
+    xs, fxs = vals_tmp.x, vals_tmp.fx
 
-    # To test the trial point against the filter, extract
-    # current values and trial point values
-    θx, Φx = vals.θ[], vals.Φ[]
-    θxs, Φxs = vals_tmp.θ[], vals_tmp.Φ[]
+    θx, Φx = vals.theta_ref[], vals.phi_ref[]
+    θxs, Φxs = vals_tmp.theta_ref[], vals_tmp.phi_ref[]
 
+    fx_mod = mod_vals.fx
+    fxs_mod = step_vals.fxs
+
+    new_it_stat = test_trial_point!(
+        diff_x, diff_fx, diff_fx_mod,
+        filter, x, xs, fx, fxs, fx_mod, fxs_mod, θx, θxs, Φx, Φxs;
+        strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success, log_level,
+        it_index
+    )
+
+    @unpack gamma_grow, gamma_shrink, gamma_shrink_much, delta_max = algo_opts
+    finalize_update_results!(
+        update_results, Δ, new_it_stat;
+        point_has_changed = Int(new_it_stat) > 0,
+        gamma_grow, gamma_shrink, gamma_shrink_much, delta_max
+    )
+    return nothing
+end
+
+function finalize_update_results!(
+    update_results, Δ, new_it_stat, point_has_changed
+)
+    update_results.point_has_changed = point_has_changed
+    update_results.it_stat = new_it_stat
+    update_results.Δ_pre = update_results.Δ_post
+    update_results.Δ_post = Δ
+
+    update_results.norm2_x = LA.norm(update_results.diff_x)
+    update_results.norm2_fx = LA.norm(update_results.diff_fx)
+    update_results.norm2_fx_mod = LA.norm(update_results.diff_fx_mod)
+    update_results.it_index += 1
+    return nothing
+end
+
+function finalize_update_results!(
+    update_results, Δ, new_it_stat
+    ;
+    point_has_changed::Bool, 
+    gamma_grow::Real, 
+    gamma_shrink::Real, 
+    gamma_shrink_much::Real, 
+    delta_max::Real
+)
+    finalize_update_results!(update_results, Δ, new_it_stat, point_has_changed)
+
+    update_results.Δ_post = update_radius(
+        Δ, new_it_stat; gamma_grow, gamma_shrink, gamma_shrink_much, delta_max)
+    return nothing    
+end
+
+function test_trial_point!(
+    diff_x, diff_fx, diff_fx_mod,
+    # not modified
+    filter, x, xs, fx, fxs, fx_mod, fxs_mod, θx, θxs, Φx, Φxs;
+    strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success, log_level,
+    it_index
+)
+    
     fits_filter = is_acceptable(filter, θxs, Φxs, θx, Φx)
     
-    ## compute the full difference vectors for stopping criteria
-    @. iter_meta.vals_diff_vec = vals.fx - vals_tmp.fx
-    @. iter_meta.mod_vals_diff_vec = mod_vals.fx .- mod_fxs
+    @. diff_x = x - xs
+    @. diff_fx = fx - fxs
+    @. diff_fx_mod = fx_mod .- fxs_mod
 
-    if fits_filter
-        @unpack strict_acceptance_test, kappa_theta, psi_theta, nu_accept = algo_opts
+    new_it_stat = if !fits_filter
+        @logmsg log_level "ITERATION $(it_index): Trial point does not fit filter."
+        FILTER_FAIL
+    else
         objf_decrease, model_decrease = if strict_acceptance_test
-            iter_meta.vals_diff_vec, iter_meta.mod_vals_diff_vec
+            (
+                diff_fx, 
+                diff_fx_mod
+            )
         else
-            maximum(vals.fx) - maximum(vals_tmp.fx),
-                maximum(mod_vals.fx) - maximum(mod_fxs) 
+            (
+                maximum(fx) - maximum(fxs),
+                maximum(fx_mod) - maximum(fxs_mod) 
+            )
         end
+
         rho = minimum( objf_decrease ./ model_decrease )            
         model_decrease_condition = all(model_decrease .>= kappa_theta * θx^psi_theta)
         sufficient_decrease_condition = rho >= nu_accept
-    end
 
-    @unpack it_index = iter_meta
-    iter_meta.it_stat_post = if !fits_filter
-        @logmsg algo_opts.log_level "ITERATION $(it_index): Trial point does not fit filter."
-        FILTER_FAIL
-    else
-        @logmsg algo_opts.log_level "ITERATION $(it_index): Trial point is filter-acceptable."
+        @logmsg log_level "ITERATION $(it_index): Trial point is filter-acceptable."
         if model_decrease_condition
             if !sufficient_decrease_condition
-                @logmsg algo_opts.log_level "ITERATION $(it_index): Step INACCEPTABLE."
+                @logmsg log_level "ITERATION $(it_index): Step INACCEPTABLE."
                 INACCEPTABLE
             else
-                @unpack nu_success = algo_opts
                 if rho < nu_success
-                    @logmsg algo_opts.log_level "ITERATION $(it_index): Step ACCEPTABLE."
+                    @logmsg log_level "ITERATION $(it_index): Step ACCEPTABLE."
                     ACCEPTABLE
                 else
-                    @logmsg algo_opts.log_level "ITERATION $(it_index): Step SUCCESSFUL."
+                    @logmsg log_level "ITERATION $(it_index): Step SUCCESSFUL."
                     SUCCESSFUL
                 end
             end
         else
             if !sufficient_decrease_condition
-                @logmsg algo_opts.log_level "ITERATION $(it_index): Model decrease insufficient and bad step, FILTER_ADD_SHRINK."
+                @logmsg log_level "ITERATION $(it_index): Model decrease insufficient and bad step, FILTER_ADD_SHRINK."
                 FILTER_ADD_SHRINK
             else
-                @logmsg algo_opts.log_level "ITERATION $(it_index): Model decrease insufficient, okay step, FILTER_ADD."
+                @logmsg log_level "ITERATION $(it_index): Model decrease insufficient, okay step, FILTER_ADD."
                 FILTER_ADD
             end
         end
     end
-    
-    iter_meta.args_diff_len = LA.norm(step_vals.s)
-    iter_meta.vals_diff_len = LA.norm(iter_meta.vals_diff_vec)
-    iter_meta.mod_vals_diff_len = LA.norm(iter_meta.mod_vals_diff_vec)
 
-    return nothing
+    return new_it_stat
+end
+
+function update_radius(
+    Δ, it_stat;
+    gamma_grow, gamma_shrink, gamma_shrink_much, delta_max
+)
+    _Δ = if it_stat == FILTER_ADD_SHRINK || it_stat == INACCEPTABLE
+        gamma_shrink_much * Δ
+    elseif it_stat == ACCEPTABLE || it_stat == FILTER_FAIL
+        gamma_shrink * Δ
+    elseif it_stat == SUCCESSFUL
+        min(gamma_grow * Δ, delta_max)
+    else
+        Δ
+    end
+    return _Δ
 end

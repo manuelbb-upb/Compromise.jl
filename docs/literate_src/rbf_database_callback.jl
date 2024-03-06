@@ -26,7 +26,7 @@ function Compromise.evaluate_stopping_criterion(
         crit.mod = mod
         crit.active = false
     else
-        Compromise._copyto_model!(mod, crit.mod)
+        Compromise.universal_copy_model!(mod, crit.mod)
         crit.active = false
     end
     return nothing

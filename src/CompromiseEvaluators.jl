@@ -45,7 +45,7 @@ function optrait_params(op::AbstractNonlinearOperator)::NonlinearOperatorHasPara
     return IsNonparametricOperator()
 end
 
-import ..Compromise: RVec, RVecOrMat, RMat, @ignoraise
+import ..Compromise: RVec, RVecOrMat, RMat, @ignoraise, universal_copy!
 
 # Evaluation of derivatives is optional if evaluation-based models are used.
 # We have functions to indicate if an operator implements `eval_grads!`, `eval_hessians!`:
@@ -340,19 +340,19 @@ end
 # `depends_on_radius` returns `true`.
 # Note, that the returned object does not have to be an “independent” copy, we allow 
 # for shared objects (like mutable database arrays or something of that sort)...
-copy_model(mod_src)=deepcopy(mod_src)
+universal_copy(mod::AbstractSurrogateModel)=mod
 
 # A function to copy parameters between source and target models, like `Base.copy!` or 
-# `Base.copyto!`. Relevant mostly for trainable parameters.
-copyto_model!(mod_trgt::AbstractSurrogateModel, mod_src::AbstractSurrogateModel)=mod_trgt
+# `Base.copyto!`. Relevant mostly for implicit trainable parameters.
+universal_copy!(mod_trgt::AbstractSurrogateModel, mod_src::AbstractSurrogateModel)=mod_trgt
 
-function _copy_model(mod)
-    depends_on_radius(mod) && return copy_model(mod)
+function universal_copy_model(mod)
+    depends_on_radius(mod) && return universal_copy(mod)
     return mod
 end
 
-function _copyto_model!(mod_trgt, mod_src)
-    depends_on_radius(mod_trgt) && return copyto_model!(mod_trgt, mod_src)
+function universal_copy_model!(mod_trgt, mod_src)
+    depends_on_radius(mod_trgt) && return universal_copy!(mod_trgt, mod_src)
     return mod_trgt
 end
 

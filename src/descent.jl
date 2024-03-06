@@ -10,7 +10,7 @@ function compute_normal_step!(
     fx, hx, gx,             ## true objective, nonlinear equality and inequality constraint vectors (or nothing)
     mod_fx, mod_hx, mod_gx, ## surrogate objective and constraint values
     mod_Dfx, mod_Dhx, mod_Dgx, ## surrogate objective and constraint Jacobians
-    Eres, Ex, Ares, Ax,     ## scaled linear constraint residuals and lhs products
+    Ex_min_c, Ex, Ax_min_b, Ax,     ## scaled linear constraint residuals and lhs products
     lb, ub, E_c, A_b,          ## scaled linear constraints
     ## use `mod` to evaluate the surrogates in the scaled domain,
     mod,
@@ -31,7 +31,7 @@ function compute_descent_step!(
     fx, hx, gx,             ## true objective, nonlinear equality and inequality constraint vectors (or nothing)
     mod_fx, mod_hx, mod_gx, ## surrogate objective and constraint values
     mod_Dfx, mod_Dhx, mod_Dgx, ## surrogate objective and constraint Jacobians
-    Eres, Ex, Ares, Ax,     ## scaled linear constraint residuals and lhs products
+    Ex_min_c, Ex, Ax_min_b, Ax,     ## scaled linear constraint residuals and lhs products
     lb, ub, E_c, A_b,          ## scaled linear constraints
     ## use `mod` to evaluate the surrogates in the scaled domain,
     mod,
@@ -106,7 +106,7 @@ end
 } <: AbstractStepConfig
     
     backtracking_factor :: BT = 1//2
-    rhs_factor :: RT = DEFAULT_PRECISION(0.001)
+    rhs_factor :: RT = DEFAULT_FLOAT_TYPE(0.001)
     normalize_gradients :: Bool = false
     strict_backtracking :: Bool = true    
     
@@ -124,7 +124,15 @@ end
 @batteries SteepestDescentConfig selfconstructor=false
 
 Base.@kwdef struct SteepestDescentCache{
-    T, DN, NN, EN, AN, HN, GN, QPOPT} <: AbstractStepCache
+    T<:Real, 
+    DN<:Real, 
+    NN<:Real, 
+    EN<:RVec, 
+    AN<:RVec, 
+    HN<:RVec, 
+    GN<:RVec, 
+    QPOPT
+} <: AbstractStepCache
     ## static information
     backtracking_factor :: T
     rhs_factor :: T
@@ -335,7 +343,7 @@ end
 function compute_normal_step!(
     step_cache::SteepestDescentCache, n, xn, Δ, θ, ξ, x, fx, hx, gx, 
     mod_fx, mod_hx, mod_gx, mod_Dfx, mod_Dhx, mod_Dgx, 
-    Eres, Ex, Ares, Ax, lb, ub, E_c, A_b, mod
+    Ex_min_c, Ex, Ax_min_b, Ax, lb, ub, E_c, A_b, mod
 )
     ## initialize assuming a zero step
     n .= 0
@@ -358,8 +366,8 @@ function compute_normal_step(
     @unpack x = vals
     @unpack xn, n = step_vals
     copyto!(xn, x)
-    if vals.θ[] > 0
-        @logmsg algo_opts.log_level "ITERATION $(iter_meta.it_index): θ=$(vals.θ[]), computing normal step."
+    if vals.theta_ref[] > 0
+        @logmsg algo_opts.log_level "ITERATION $(iter_meta.it_index): θ=$(vals.theta_ref[]), computing normal step."
 
         @unpack Ax, Ex = vals
         @unpack lb, ub, A_b, E_c = scaled_cons
@@ -444,7 +452,7 @@ end
 function compute_descent_step!(
     step_cache::SteepestDescentCache, d, s, xs, mod_fxs, crit_ref,
     Δ, θ, ξ, x, n, xn, fx, hx, gx, mod_fx, mod_hx, mod_gx, mod_Dfx, mod_Dhx, mod_Dgx,
-    Eres, Ex, Ares, Ax, lb, ub, E_c, A_b, mod, mop, scaler
+    Ex_min_c, Ex, Ax_min_b, Ax, lb, ub, E_c, A_b, mod, mop, scaler
 )
     @unpack En, An, Hn, Gn, normalize_gradients, descent_step_norm = step_cache;
 

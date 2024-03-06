@@ -118,7 +118,7 @@ function sample_along_Z!(
         z[j_col_Z] = 1
         LA.lmul!(qr.Q, z)
         ## scale into box:
-        fit_z_into_box!(z, x0, lb, ub; norm_p, th_qr)
+        @ignoraise fit_z_into_box!(z, x0, lb, ub; norm_p, th_qr)
         n_X += 1
     end
     return n_X - _n_X, qr 
@@ -129,14 +129,25 @@ function fit_z_into_box!(
     norm_p=Inf,
     th_qr
 )
-    σ = intersect_box(x0, z, lb, ub)
+    σ = stepsize_in_box(x0, z, lb, ub)
     z .*= σ
     norm_z = LA.norm(z, norm_p)
-    if norm_z < th_qr
+    if iszero(norm_z) 
+        return RBFConstructionImpossible()
+    elseif norm_z < th_qr
         ## c * norm_z = th_qr ⇔ c = th_qr / norm_z
         c = th_qr / norm_z
         @warn "Incompatible box constraints, changing σ from $σ to $(c*σ)."
         z .*= c
     end
     return z
+end
+
+function stepsize_in_box(x, z, lb, ub)
+    σ_min, σ_max = intersect_box(x, z, lb, ub)
+    if abs(σ_min) > abs(σ_max)
+        return σ_min
+    else
+        return σ_max
+    end
 end

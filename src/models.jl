@@ -8,7 +8,7 @@
 # ## Meta-Data
 # For convenience, we'd like to have the same meta information available 
 # as for the original MOP:
-float_type(::AbstractMOPSurrogate)::Type{<:AbstractFloat}=DEFAULT_PRECISION
+float_type(::AbstractMOPSurrogate)::Type{<:AbstractFloat}=DEFAULT_FLOAT_TYPE
 dim_objectives(::AbstractMOPSurrogate)::Int=0            # mandatory
 dim_nl_eq_constraints(::AbstractMOPSurrogate)::Int=0     # optional
 dim_nl_ineq_constraints(::AbstractMOPSurrogate)::Int=0   # optional
@@ -41,11 +41,15 @@ end
 
 # If a model is radius-dependent, 
 # we also need a function to copy the parameters from a source model to a target model:
-copy_model(mod::AbstractMOPSurrogate)=deepcopy(mod)
-copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=mod_trgt
+universal_copy(mod::AbstractMOPSurrogate)=mod
+universal_copy!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=mod_trgt
 # These internal helpers are derived:
-_copy_model(mod::AbstractMOPSurrogate)=depends_on_radius(mod) ? copy_model(mod) : mod
-_copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=depends_on_radius(mod_trgt) ? copyto_model!(mod_trgt, mod_src) : mod_trgt
+function universal_copy_model(mod::AbstractMOPSurrogate)
+    depends_on_radius(mod) ? universal_copy(mod) : mod
+end
+function universal_copy_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)
+    depends_on_radius(mod_trgt) ? universal_copy!(mod_trgt, mod_src) : mod_trgt
+end
 
 # ## Evaluation
 
@@ -70,33 +74,35 @@ end
 function objectives!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
     eval_objectives!(y, mop, x)
 end
-function nl_eq_constraints!(y::Nothing, mop::AbstractMOPSurrogate, x::RVec)
-    nothing
-end
-function nl_ineq_constraints!(y::Nothing, mop::AbstractMOPSurrogate, x::RVec)
-    nothing
-end
 function nl_eq_constraints!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+    dim_nl_eq_constraints(mop) <= 0 && return nothing
     eval_nl_eq_constraints!(y, mop, x) 
 end
 function nl_ineq_constraints!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+    dim_nl_ineq_constraints(mop) <= 0 && return nothing
     eval_nl_ineq_constraints!(y, mop, x)
 end
 
 # ## Pre-Allocation
 # The preallocation functions look the same as for `AbstractMOP`:
-for (dim_func, prealloc_func) in (
-    (:dim_objectives, :prealloc_objectives_vector),
-    (:dim_nl_eq_constraints, :prealloc_nl_eq_constraints_vector),
-    (:dim_nl_ineq_constraints, :prealloc_nl_ineq_constraints_vector),
+for (dim_func, func_suffix) in (
+    (:dim_objectives, :objectives_vector),
+    (:dim_nl_eq_constraints, :nl_eq_constraints_vector),
+    (:dim_nl_ineq_constraints, :nl_ineq_constraints_vector),
 )
-    @eval function $(prealloc_func)(mod::AbstractMOPSurrogate)
-        dim = $(dim_func)(mod) 
-        if dim > 0
-            T = float_type(mod)
+    func_name = Symbol("prealloc_", func_suffix)
+    yoink_name = Symbol("yoink_", func_suffix)
+    @eval begin 
+        function $(func_name)(mop::AbstractMOPSurrogate)
+            dim = $(dim_func)(mop) 
+            T = float_type(mop)
             return Vector{T}(undef, dim)
-        else
-            return nothing
+        end
+
+        function $(yoink_name)(mop::AbstractMOPSurrogate)
+            y = $(func_name)(mop) :: RVec
+            @assert eltype(y) == float_type(mop) "Vector eltype does not match problem float type."
+            return y
         end
     end
 end
@@ -117,10 +123,14 @@ end
 
 # Here, the names of the wrapper functions start with “diff“.
 diff_objectives!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=grads_objectives!(Dy, mod, x)
-diff_nl_eq_constraints!(Dy::Nothing, mod::AbstractMOPSurrogate, x::RVec)=nothing
-diff_nl_ineq_constraints!(Dy::Nothing, mod::AbstractMOPSurrogate, x::RVec)=nothing
-diff_nl_eq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=grads_nl_eq_constraints!(Dy, mod, x)
-diff_nl_ineq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=grads_nl_ineq_constraints!(Dy, mod, x)
+function diff_nl_eq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+    dim_nl_eq_constraints(mod) <= 0 && return nothing
+    return grads_nl_eq_constraints!(Dy, mod, x)
+end
+function diff_nl_ineq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+    dim_nl_ineq_constraints(mod) <= 0 && return nothing
+    return grads_nl_ineq_constraints!(Dy, mod, x)
+end
 
 # Optionally, we can have evaluation and differentiation in one go:
 function eval_and_grads_objectives!(y::RVec, Dy::RMat, mod::M, x::RVec) where {M<:AbstractMOPSurrogate}
@@ -142,16 +152,12 @@ end
 function vals_diff_objectives!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
     eval_and_grads_objectives!(y, Dy, mod, x)
 end
-function vals_diff_nl_eq_constraints!(y::Nothing, Dy::Nothing, mod::AbstractMOPSurrogate, x::RVec)
-    nothing
-end
-function vals_diff_nl_ineq_constraints!(y::Nothing, Dy::Nothing, mod::AbstractMOPSurrogate, x::RVec)
-    nothing
-end
 function vals_diff_nl_eq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+    dim_nl_eq_constraints(mod) <= 0 && return nothing
     eval_and_grads_nl_eq_constraints!(y, Dy, mod, x)
 end
 function vals_diff_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+    dim_nl_ineq_constraints(mod) <= 0 && return nothing
     eval_and_grads_nl_ineq_constraints!(y, Dy, mod, x)
 end
 
@@ -185,24 +191,28 @@ end
 
 # ### Gradient Pre-Allocation
 # We also would like to have pre-allocated gradient arrays ready:
-function prealloc_objectives_grads(mod::AbstractMOPSurrogate, n_vars)
-    T = float_type(mod)
-    return Matrix{T}(undef, n_vars, dim_objectives(mod))
-end
 ## These are defined below (and I put un-specific definitions here for the Linter)
+function prealloc_objectives_grads(mod, n_vars) end
 function prealloc_nl_eq_constraints_grads(mod, n_vars) end
 function prealloc_nl_ineq_constraints_grads(mod, n_vars) end
-for (dim_func, prealloc_func) in (
-    (:dim_nl_eq_constraints, :prealloc_nl_eq_constraints_grads),
-    (:dim_nl_ineq_constraints, :prealloc_nl_ineq_constraints_grads),
-)
-    @eval function $(prealloc_func)(mod::AbstractMOPSurrogate, n_vars)
-        n_out = $(dim_func)(mod)
-        if n_out > 0
+for (dim_func, func_suffix) in (
+    (:dim_objectives, :objectives_grads),
+    (:dim_nl_eq_constraints, :nl_eq_constraints_grads),
+    (:dim_nl_ineq_constraints, :nl_ineq_constraints_grads),
+)   
+    func_name = Symbol("prealloc_", func_suffix)
+    yoink_name = Symbol("yoink_", func_suffix)
+    @eval begin
+        function $(func_name)(mod::AbstractMOPSurrogate, n_vars)
+            n_out = $(dim_func)(mod)
             T = float_type(mod)
             return Matrix{T}(undef, n_vars, n_out)
-        else
-            return nothing
+        end
+
+        function $(yoink_name)(mod::AbstractMOPSurrogate, n_vars)
+            y = $(func_name)(mod, n_vars) :: RMat
+            @assert eltype(y) == float_type(mod) "Vector eltype does not match problem float type."
+            return y
         end
     end
 end

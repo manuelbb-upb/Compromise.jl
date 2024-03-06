@@ -29,22 +29,6 @@ end
     degree :: Int = 1
     @assert 1 <= degree <= 2 "Taylor polynomial must have degree 1 or 2."
 end    
-#=
-CE.copy_model(tp::Union{TaylorPolynomial1,TaylorPolynomial2})=deepcopy(tp)
-function CE.copyto_model!(tp_trgt::TaylorPolynomial1, tp_src::TaylorPolynomial1)
-    Base.copyto!(tp_trgt.x0, tp_src.x0)
-    Base.copyto!(tp_trgt.Δx, tp_src.Δx)
-    Base.copyto!(tp_trgt.fx, tp_src.fx)
-    Base.copyto!(tp_trgt.Dfx, tp_src.Dfx)
-    return nothing
-end
-function CE.copyto_model!(tp_trgt::TaylorPolynomial2, tp_src::TaylorPolynomial2)
-    CE.copyto_model!(tp_trgt.tp1, tp_src.tp1)
-    Base.copyto!(tp_trgt.xtmp, tp_src.xtmp)
-    Base.copyto!(tp_trgt.Hfx, tp_src.Hfx)
-    return nothing
-end
-=#
 
 function TaylorPolynomial1(dim_in, dim_out, T)
     x0 = fill(T(NaN), dim_in)

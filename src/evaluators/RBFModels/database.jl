@@ -34,7 +34,7 @@ function filtered_view_y(db::RBFDatabase)
     return view(entries_y(db), :, db.filter_flags)
 end
 
-function init_rbf_database(rbf_cfg, dim_x, dim_y, T=DEFAULT_PRECISION)
+function init_rbf_database(rbf_cfg, dim_x, dim_y, T=DEFAULT_FLOAT_TYPE)
     @unpack database_size, database_chunk_size = rbf_cfg
     return init_rbf_database(dim_x, dim_y, database_size, database_chunk_size, T)
 end
@@ -43,7 +43,7 @@ function init_rbf_database(
     dim_x::Integer, dim_y::Integer, 
     database_size::Union{Nothing,Integer},
     database_chunk_size::Union{Nothing, Integer}, 
-    ::Type{T}=DEFAULT_PRECISION
+    ::Type{T}=DEFAULT_FLOAT_TYPE
 ) where {T<:Number}
     min_points = dim_x + 1 :: Integer
 

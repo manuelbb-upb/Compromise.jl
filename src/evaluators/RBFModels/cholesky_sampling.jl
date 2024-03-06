@@ -361,37 +361,45 @@ function set_coefficients!(
     n_X = size(_coeff_φ, 1),
     dim_y = size(_coeff_φ, 2),
     dim_π = size(_coeff_π, 1)
-)
-    dim_N = n_X - dim_π
-    @assert size(_Linv, 1) >= dim_N
-    @assert size(_Linv, 2) >= dim_y
+)   
+    try
+        dim_N = n_X - dim_π
+        @assert size(_Linv, 1) >= dim_N
+        @assert size(_Linv, 2) >= dim_y
 
-    Q = @view(_Q[1:n_X, 1:dim_π])
-    R = LA.UpperTriangular(@view(_R[1:dim_π, 1:dim_π]))
-    N = @view(_Q[1:n_X, dim_π + 1 : dim_π + dim_N])
-    L = LA.LowerTriangular(@view(_L[1:dim_N, 1:dim_N])) 
-    NΦN = LA.Cholesky(L) 
-    FX = @view(_FX[1:dim_y, 1:n_X])
+        Q = @view(_Q[1:n_X, 1:dim_π])
+        R = LA.UpperTriangular(@view(_R[1:dim_π, 1:dim_π]))
+        N = @view(_Q[1:n_X, dim_π + 1 : dim_π + dim_N])
+        L = LA.LowerTriangular(@view(_L[1:dim_N, 1:dim_N])) 
+        NΦN = LA.Cholesky(L) 
+        FX = @view(_FX[1:dim_y, 1:n_X])
 
-    ## RBF
-    ## 1) solve NΦN * w = N' * FX'
-    ## 2) set coeff_φ = N * w
-    coeff_φ = @view(_coeff_φ[1:n_X, 1:dim_y])
-    rhs_φ = @view(_Linv[1:dim_N, 1:dim_y])      # dim_N × dim_y
-    LA.mul!(rhs_φ', FX, N)                      
-    w = @view(_Linv[1:dim_N, 1:dim_y])
-    LA.ldiv!(w, NΦN, rhs_φ)
-    LA.mul!(coeff_φ, N, w)
+        ## RBF
+        ## 1) solve NΦN * w = N' * FX'
+        ## 2) set coeff_φ = N * w
+        coeff_φ = @view(_coeff_φ[1:n_X, 1:dim_y])
+        rhs_φ = @view(_Linv[1:dim_N, 1:dim_y])      # dim_N × dim_y
+        LA.mul!(rhs_φ', FX, N)                      
+        w = @view(_Linv[1:dim_N, 1:dim_y])
+        LA.ldiv!(w, NΦN, rhs_φ)
+        LA.mul!(coeff_φ, N, w)
 
-    ## Polynomial
-    ## RHS is Q'(FX' - Φ*coeff_φ)
-    coeff_π = @view(_coeff_π[1:dim_π, 1:dim_y])
-    Φ = @view(_Φ[1:n_X, 1:n_X])
-    LA.mul!(FX', Φ, coeff_φ, -1, 1)     
-    ## FX' is n_X × dim_y, Q' * FX' has dim_π × dim_y
-    rhs_π = @view(_Linv[1:dim_π, 1:dim_y])
-    LA.mul!(rhs_π, Q', FX')
-    LA.ldiv!(coeff_π, R, rhs_π)
+        ## Polynomial
+        ## RHS is Q'(FX' - Φ*coeff_φ)
+        coeff_π = @view(_coeff_π[1:dim_π, 1:dim_y])
+        Φ = @view(_Φ[1:n_X, 1:n_X])
+        LA.mul!(FX', Φ, coeff_φ, -1, 1)     
+        ## FX' is n_X × dim_y, Q' * FX' has dim_π × dim_y
+        rhs_π = @view(_Linv[1:dim_π, 1:dim_y])
+        LA.mul!(rhs_π, Q', FX')
+        LA.ldiv!(coeff_π, R, rhs_π)
+    catch err 
+        if err isa LA.LAPACKException
+            return RBFConstructionImpossible()
+        else
+            rethrow(err)
+        end
+    end
 
     return nothing
 end

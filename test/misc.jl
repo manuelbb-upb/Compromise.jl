@@ -23,7 +23,7 @@ using Compromise
 
     cfg_default = Compromise.SteepestDescentConfig()
     @test cfg_default.backtracking_factor == 1//2
-    @test cfg_default.rhs_factor == Compromise.DEFAULT_PRECISION(0.001)
+    @test cfg_default.rhs_factor == Compromise.DEFAULT_FLOAT_TYPE(0.001)
     @test cfg_default.normalize_gradients == false
     @test cfg_default.strict_backtracking == true
     @test cfg_default.descent_step_norm == Inf
@@ -32,7 +32,7 @@ using Compromise
 
     cfg_2 = Compromise.SteepestDescentConfig(
         backtracking_factor = 0.5,
-        rhs_factor = Compromise.DEFAULT_PRECISION(0.001),
+        rhs_factor = Compromise.DEFAULT_FLOAT_TYPE(0.001),
         normalize_gradients = false,
         strict_backtracking = true, 
         descent_step_norm = Inf,

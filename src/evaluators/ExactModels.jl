@@ -35,10 +35,6 @@ function CE.update!(
     #src return CE.check_num_calls(op, (1,2)) #TODO think about this
     return nothing
 end
-#=
-CE.copy_model(mod::ExactModel)=mod
-CE.copyto_model!(mod_trgt::ExactModel, mod_src::ExactModel)=mod_trgt
-=#
 export ExactModel, ExactModelConfig
 
 end#module

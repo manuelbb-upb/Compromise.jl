@@ -405,9 +405,11 @@ end
 
 # The model container is dependent on the trust-region if any of the models is:
 function depends_on_radius(mod::SimpleMOPSurrogate)
-    return CE.depends_on_radius(mod.mod_objectives) ||
+    return (
+        CE.depends_on_radius(mod.mod_objectives) ||
         CE.depends_on_radius(mod.mod_nl_eq_constraints) ||
         CE.depends_on_radius(mod.mod_nl_ineq_constraints)
+    )
 end
 
 # At the moment, I have not yet thought about what we would need to change for dynamic scaling:
@@ -490,7 +492,7 @@ function update_models!(
     return nothing
 end
 
-function copy_model(mod::SimpleMOPSurrogate)
+function universal_copy(mod::SimpleMOPSurrogate)
     return SimpleMOPSurrogate(
         mod.objectives,
         mod.nl_eq_constraints,
@@ -499,15 +501,17 @@ function copy_model(mod::SimpleMOPSurrogate)
         mod.dim_objectives,
         mod.dim_nl_eq_constraints,
         mod.dim_nl_ineq_constraints,
-        CE._copy_model(mod.mod_objectives),
-        CE._copy_model(mod.mod_nl_eq_constraints),
-        CE._copy_model(mod.mod_nl_ineq_constraints),
+        CE.universal_copy_model(mod.mod_objectives),
+        CE.universal_copy_model(mod.mod_nl_eq_constraints),
+        CE.universal_copy_model(mod.mod_nl_ineq_constraints),
     )
 end
 
-function copyto_model!(mod_trgt::SimpleMOPSurrogate, mod_src::SimpleMOPSurrogate)
-    CE._copyto_model!(mod_trgt.mod_objectives, mod_src.mod_objectives)
-    CE._copyto_model!(mod_trgt.mod_nl_eq_constraints, mod_src.mod_nl_eq_constraints)
-    CE._copyto_model!(mod_trgt.mod_nl_ineq_constraints, mod_src.mod_nl_ineq_constraints)
+function universal_copy!(
+    mod_trgt::SimpleMOPSurrogate, mod_src::SimpleMOPSurrogate
+)
+    CE.universal_copy_model!(mod_trgt.mod_objectives, mod_src.mod_objectives)
+    CE.universal_copy_model!(mod_trgt.mod_nl_eq_constraints, mod_src.mod_nl_eq_constraints)
+    CE.universal_copy_model!(mod_trgt.mod_nl_ineq_constraints, mod_src.mod_nl_ineq_constraints)
     return mod_trgt
 end

@@ -32,7 +32,10 @@ scale!(x::Nothing, scaler::AbstractAffineScaler, ξ::Nothing) = nothing
 unscale!(ξ::Nothing, scaler::AbstractAffineScaler, x::Nothing) = nothing
 
 "Make `Aξ + b ? 0` applicable in scaled domain via `A(inv(T)*x - inv(T)*t) + b ? 0`."
-@views function scale_eq!((_A, _b), scaler::AbstractAffineScaler, (A,b))
+@views function scale_eq!(
+    _A::AbstractMatrix, _b::AbstractVector, 
+    scaler::AbstractAffineScaler, A::AbstractMatrix, b::AbstractVector
+)
     Tinv = unscaling_matrix(scaler)
     tinv = unscaling_offset(scaler)
     _b .= b
@@ -40,7 +43,7 @@ unscale!(ξ::Nothing, scaler::AbstractAffineScaler, x::Nothing) = nothing
     LA.mul!(_A, A, Tinv)
     return nothing
 end
-scale_eq!(::Nothing, scaler::AbstractAffineScaler, ::Nothing)=nothing
+scale_eq!(_A, _b, scaler::AbstractAffineScaler, A, b)=nothing
 
 # Consider ``f: ℝ^n → ℝ^m`` and the unscaling map ``u: ℝ^n → ℝ^n``.
 # By the chain rule we have ``∇(f∘u)(x) = ∇f(ξ)*T``, where ``T`` is 

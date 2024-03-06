@@ -9,69 +9,114 @@ struct NoUserCallback <: AbstractStoppingCriterion end
 
 stop_message(::AbstractStoppingCriterion)=nothing
 
-check_pre_iteration(crit::AbstractStoppingCriterion)=false
-#src check_post_normal_step(crit::AbstractStoppingCriterion)=false
-check_post_descent_step(crit::AbstractStoppingCriterion)=false
-check_post_iteration(crit::AbstractStoppingCriterion)=false
-check_pre_crit_loop(crit::AbstractStoppingCriterion)=false
-#src check_post_crit_loop_normal_step(crit::AbstractStoppingCriterion)=false
-check_post_crit_loop(crit::AbstractStoppingCriterion)=false
+abstract type AbstractStopPoint end
+
+struct CheckPreIteration <: AbstractStopPoint end
+struct CheckPostIteration <: AbstractStopPoint end
+struct CheckPostDescentStep <: AbstractStopPoint end
+struct CheckPreCritLoop <: AbstractStopPoint end
+struct CheckPostCritLoop <: AbstractStopPoint end
 
 function evaluate_stopping_criterion(
-    crit::AbstractStoppingCriterion,
-    Δ, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts,
+    crit::AbstractStoppingCriterion, ::CheckPreIteration,
+    mop, scaler, lin_cons, scaled_cons,
+    vals, filter, algo_opts;
+    it_index::Int, delta::Real
 )
     return nothing
 end
 
-function _evaluate_stopping_criterion(
-    crit::AbstractStoppingCriterion,
-    args...
+function evaluate_stopping_criterion(
+    crit::AbstractStoppingCriterion, ::CheckPostDescentStep,
+    mop, mod, scaler, lin_cons, scaled_cons,
+    vals, mod_vals, step_vals, filter, algo_opts;
+    it_index::Int, delta::Real
 )
-    # TODO safeguards and sanity checks...
-    return evaluate_stopping_criterion(crit, args...)
+    return nothing
+end
+
+function evaluate_stopping_criterion(
+    crit::AbstractStoppingCriterion, ::Union{CheckPreCritLoop, CheckPostCritLoop},
+    mop, mod, scaler, lin_cons, scaled_cons,
+    vals, mod_vals, step_vals, filter, algo_opts;
+    it_index::Int, delta::Real, num_crit_loops::Int
+)
+    return nothing
+end
+
+function evaluate_stopping_criterion(
+    crit::AbstractStoppingCriterion, ::CheckPostIteration,
+    update_results,
+    mop, mod, scaler, lin_cons, scaled_cons,
+    vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
+    it_index
+)
+    return nothing
+end
+
+function check_stopping_criterion(
+    crit::AbstractStoppingCriterion,
+    stop_point::AbstractStopPoint,
+    args...;
+    kwargs...
+)
+    return evaluate_stopping_criterion(crit, stop_point, args...; kwargs...)
+end
+
+function check_stopping_criteria(crits, stop_point::AbstractStopPoint, args...; kwargs...)
+    for crit in crits
+        @ignoraise check_stopping_criterion(crit, stop_point, args...;kwargs...)
+    end
+    return nothing
 end
 
 @with_kw struct MaxIterStopping <: AbstractStoppingCriterion
     num_max_iter :: Int = 500
 end
 
-check_pre_iteration(crit::MaxIterStopping)=true
+stop_message(crit::MaxIterStopping)="EXIT, reached maximum number of iterations."
 
 function evaluate_stopping_criterion(
-    crit::MaxIterStopping,
-    Δ, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts;
+    crit::MaxIterStopping, ::CheckPreIteration,
+    mop, scaler, lin_cons, scaled_cons,
+    vals, filter, algo_opts;
+    it_index::Int, delta::Real
 )
-    @unpack it_index = iter_meta
-    if it_index <= crit.num_max_iter
-        return nothing
-    else
-        @logmsg algo_opts.log_level "ITERATION $(it_index): EXIT, reached maximum number of iterations ($(crit.num_max_iter))."
+    if it_index > crit.num_max_iter
         return crit
     end
+    return nothing
 end
 
 @with_kw struct MinimumRadiusStopping{F} <: AbstractStoppingCriterion
     delta_min :: F = eps(Float64)
 end
-
-check_pre_iteration(crit::MinimumRadiusStopping)=true
-check_post_crit_loop(crit::MinimumRadiusStopping)=true
+function stop_message(crit::MinimumRadiusStopping)
+    "EXIT, trust region radius reduced to below `delta_min` ($(crit.delta_min))."
+end
 
 function evaluate_stopping_criterion(
-    crit::MinimumRadiusStopping,
-    Δ, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts;
+    crit::MinimumRadiusStopping, ::CheckPreIteration,
+    mop, scaler, lin_cons, scaled_cons,
+    vals, filter, algo_opts;
+    it_index::Int, delta::Real
 )
-    @unpack it_index = iter_meta
-    if Δ >= crit.delta_min
-        return nothing
-    else
-        @logmsg algo_opts.log_level "ITERATION $(it_index): EXIT, trust region radius $(Δ) reduced to below `delta_min` ($(crit.delta_min))."
+    if delta < crit.delta_min
         return crit
     end
+    return nothing
+end
+
+function evaluate_stopping_criterion(
+    crit::MinimumRadiusStopping, ::CheckPreCritLoop,
+    mop, mod, scaler, lin_cons, scaled_cons,
+    vals, mod_vals, step_vals, filter, algo_opts;
+    it_index::Int, delta::Real, num_crit_loops::Int
+)
+    if delta < crit.delta_min
+        return crit
+    end
+    return nothing
 end
 
 @with_kw struct ArgsRelTolStopping{F} <: AbstractStoppingCriterion
@@ -79,15 +124,17 @@ end
     only_if_point_changed :: Bool = true
 end
 
-check_post_iteration(crit::ArgsRelTolStopping)=true
 function evaluate_stopping_criterion(
-    crit::ArgsRelTolStopping,
-    Δ, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts;
+    crit::ArgsRelTolStopping,::CheckPostIteration,
+    update_results,
+    mop, mod, scaler, lin_cons, scaled_cons,
+    vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
+    it_index
 )
-    @unpack it_index, point_has_changed = iter_meta
+    @unpack x = vals
+    @unpack norm2_x, point_has_changed = update_results
     if !crit.only_if_point_changed || point_has_changed
-        if iter_meta.args_diff_len <= crit.tol * LA.norm(vals.x)
+        if norm2_x <= crit.tol * LA.norm(x)
             @logmsg algo_opts.log_level "ITERATION $(it_index): EXIT, relative parameter tolerance criterion."
             return crit
         end
@@ -100,15 +147,16 @@ end
     only_if_point_changed :: Bool = true
 end
 
-check_post_iteration(crit::ArgsAbsTolStopping)=true
 function evaluate_stopping_criterion(
-    crit::ArgsAbsTolStopping,
-    Δ, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts;
+    crit::ArgsAbsTolStopping, ::CheckPostIteration,
+    update_results,
+    mop, mod, scaler, lin_cons, scaled_cons,
+    vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
+    it_index
 )
-    @unpack it_index, point_has_changed = iter_meta
+    @unpack point_has_changed, norm2_x = update_results
     if !crit.only_if_point_changed || point_has_changed
-        if iter_meta.args_diff_len <= crit.tol
+        if norm2_x <= crit.tol
             @logmsg algo_opts.log_level "ITERATION $(it_index): EXIT, absolute parameter tolerance criterion."
             return crit
         end
@@ -121,15 +169,17 @@ end
     only_if_point_changed :: Bool = true
 end
 
-check_post_iteration(crit::ValsRelTolStopping)=true
 function evaluate_stopping_criterion(
-    crit::ValsRelTolStopping,
-    Δ, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts;
+    crit::ValsRelTolStopping,::CheckPostIteration,
+    update_results,
+    mop, mod, scaler, lin_cons, scaled_cons,
+    vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
+    it_index
 )
-    @unpack it_index, point_has_changed = iter_meta
+    @unpack fx = vals
+    @unpack norm2_fx, point_has_changed = update_results
     if !crit.only_if_point_changed || point_has_changed
-        if iter_meta.vals_diff_len <= crit.tol * LA.norm(vals.fx)
+        if norm2_fx <= crit.tol * LA.norm(fx)
             @logmsg algo_opts.log_level "ITERATION $(it_index): EXIT, relative value tolerance criterion."
             return crit
         end
@@ -142,15 +192,16 @@ end
     only_if_point_changed :: Bool = true
 end
 
-check_post_iteration(crit::ValsAbsTolStopping)=true
 function evaluate_stopping_criterion(
-    crit::ValsAbsTolStopping,
-    Δ, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts;
+    crit::ValsAbsTolStopping,::CheckPostIteration,
+    update_results,
+    mop, mod, scaler, lin_cons, scaled_cons,
+    vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
+    it_index
 )
-    @unpack it_index, point_has_changed = iter_meta
+    @unpack norm2_fx, point_has_changed = update_results
     if !crit.only_if_point_changed || point_has_changed
-        if iter_meta.vals_diff_len <= crit.tol
+        if norm2_fx <= crit.tol
             @logmsg algo_opts.log_level "ITERATION $(it_index): EXIT, absolute value tolerance criterion."
             return crit
         end
@@ -163,20 +214,40 @@ end
     theta_tol :: F
 end
 
-check_post_descent_step(crit::CritAbsTolStopping)=true
-check_post_crit_loop(crit::CritAbsTolStopping)=true
+function evaluate_stopping_criterion(
+    crit::CritAbsTolStopping,::CheckPostDescentStep,
+    mop, mod, scaler, lin_cons, scaled_cons,
+    vals, mod_vals, step_vals, filter, algo_opts;
+    it_index::Int, delta::Real
+)
+    return crit_abs_tol_stopping(crit, step_vals, vals, it_index, algo_opts)
+end
 
 function evaluate_stopping_criterion(
-    crit::CritAbsTolStopping,
-    Δ, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts;
+    crit::CritAbsTolStopping,::CheckPostCritLoop,
+    mop, mod, scaler, lin_cons, scaled_cons,
+    vals, mod_vals, step_vals, filter, algo_opts;
+    it_index::Int, delta::Real, num_crit_loops::Int
 )
-    @unpack it_index = iter_meta
-    if abs(iter_meta.crit_val) <= crit.crit_tol && abs(vals.θ[]) <= crit.theta_tol
-        @logmsg algo_opts.log_level "ITERATION $(it_index): EXIT, absolute criticality tolerance criterion."
+
+    return crit_abs_tol_stopping(crit, step_vals, vals, it_index, algo_opts)
+end
+function crit_abs_tol_stopping(crit, step_vals, vals, it_index, algo_opts)
+    χ = abs(step_vals.crit_ref[])
+    θ = abs(vals.theta_ref[])
+    @unpack log_level = algo_opts
+    @unpack crit_tol, theta_tol = crit
+    if crit_abs_tol_stopping(χ, θ, crit_tol, theta_tol, log_level, it_index)
         return crit
     end
     return nothing
+end
+function crit_abs_tol_stopping(χ, θ, crit_tol, theta_tol, log_level, it_index)
+    if χ <= crit_tol && θ <= theta_tol
+        @logmsg log_level "ITERATION $(it_index): EXIT, absolute criticality tolerance criterion."
+        return true
+    end
+    return false
 end
 
 struct MaxCritLoopsStopping <: AbstractStoppingCriterion
@@ -186,13 +257,15 @@ end
 check_pre_crit_loop(crit::MaxCritLoopsStopping)=true
 
 function evaluate_stopping_criterion(
-    crit::MaxCritLoopsStopping,
-    Δ, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts;
+    crit::MaxCritLoopsStopping,::CheckPreCritLoop,
+    mop, mod, scaler, lin_cons, scaled_cons,
+    vals, mod_vals, step_vals, filter, algo_opts;
+    it_index::Int, delta::Real, num_crit_loops::Int
 )
-    @unpack it_index = iter_meta
-    if iter_meta.num_crit_loops >= crit.num
-        @logmsg algo_opts.log_level "ITERATION $(it_index): EXIT, maximum number of criticality loops."
+
+    @unpack log_level = algo_opts
+    if num_crit_loops >= crit.num
+        @logmsg log_level "ITERATION $(it_index): EXIT, maximum number of criticality loops."
         return crit
     end
     return nothing

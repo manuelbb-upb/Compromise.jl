@@ -2,6 +2,7 @@
 # In this file ("src/types.jl"), we define **all** abstract types and some concrete types.
 # Every concrete type that is not defined here should only depend on types declared within
 # this file.
+const DEFAULT_FLOAT_TYPE = Float64
 
 # ## Shorthands for Real Arrays
 # Our algorithm operates on real-valued vectors and matrices, these are shorthands:
@@ -43,7 +44,7 @@ Configure the optimization by passing keyword arguments:
 $(TYPEDFIELDS)
 """
 Base.@kwdef struct AlgorithmOptions{_T <: Number, SC}
-	T :: Type{_T} = DEFAULT_PRECISION
+	T :: Type{_T} = DEFAULT_FLOAT_TYPE
 
 	"Configuration object for descent and normal step computation."
     step_config :: SC = SteepestDescentConfig()
@@ -82,7 +83,7 @@ Base.@kwdef struct AlgorithmOptions{_T <: Number, SC}
 	"Lower bound for feasibility before entering Criticality Routine."
 	eps_theta :: _T = 0.1
 	"At the end of the Criticality Routine the radius is possibly set to `crit_B * χ`."
-	crit_B :: _T = 1000
+	crit_B :: _T = 100
 	"Criticality Routine runs until `Δ ≤ crit_M * χ`."
 	crit_M :: _T = 3*crit_B
 	"Trust region shrinking factor in criticality loops."
@@ -211,40 +212,70 @@ end
 function AlgorithmOptions{T}(; kwargs...) where T<:Real
 	AlgorithmOptions(; T, kwargs...)
 end
-# ## General Array Containers 
 
+# ## General Array Containers
 "A struct holding values computed for or derived from an `AbstractMOP`."
-struct ValueArrays{X, FX, HX, GX, EX, AX, THETA, PHI}
-	"Internal (scaled) variable vector."
-    ξ :: X
+Base.@kwdef struct ValueArrays{
+	F<:AbstractFloat,
+	FX<:AbstractVector{F},	# usually everything is a `Vector{F}`,
+							# but we allow the type to be set with 
+							# functions like `prealloc_objectives_vector`
+	HX<:AbstractVector{F},	
+	GX<:AbstractVector{F},
+}
 	"Unscaled variable vector used for evaluation."
-    x :: X
+    ξ :: Vector{F}
+	"Internal (scaled) variable vector."
+    x :: Vector{F}
 	"Objective value vector."
     fx :: FX
 	"Nonlinear equality constraints value vector."
     hx :: HX
 	"Nonlinear inequality constraints value vector."
     gx :: GX
-	"Linear equality constraints residual."
-    Eres :: EX
-    Ex :: EX
-	"Linear inequality constraints residual."
-    Ares :: AX
-    Ax :: AX
+    
+	Ex :: Vector{F}
+    Ax :: Vector{F}
+
+	Ax_min_b :: Vector{F}
+	Ex_min_c :: Vector{F}
+	
 	"Reference to maximum constraint violation."
-    θ :: THETA
+    theta_ref :: Base.RefValue{F}
 	"Reference to maximum function value."
-    Φ :: PHI
+    phi_ref :: Base.RefValue{F}
+
+	# meta data fields
+	n_vars :: Int = length(x)
+	dim_objectives :: Int = length(fx)
+	dim_lin_eq_constraints :: Int = length(Ex)
+	dim_lin_ineq_constraints :: Int = length(Ax)
+	dim_nl_eq_constraints :: Int = length(hx)
+	dim_nl_ineq_constraints :: Int = length(gx)
 end
 
-function Base.eltype(
-    ::ValueArrays{X, FX, HX, GX, EX, AX, THETA, PHI}
-) where {X, FX, HX, GX, EX, AX, THETA, PHI}
-	T = eltype(X)
-	return reduce(promote_modulo_nothing, (FX, HX, GX, EX, AX, THETA, PHI); init=T)
+function universal_copy!(
+	vals_trgt::ValueArrays, 
+	vals_src::ValueArrays
+)
+	for fn in fieldnames(ValueArrays)
+		universal_copy!(
+			getfield(vals_trgt, fn),
+			getfield(vals_src, fn)
+		)
+	end
+	return nothing
 end
 
-struct SurrogateValueArrays{FX, HX, GX, DFX, DHX, DGX}
+struct SurrogateValueArrays{
+	F <: AbstractFloat,
+	FX <: AbstractVector{F},
+	HX <: AbstractVector{F},
+	GX <: AbstractVector{F},
+	DFX <: AbstractMatrix{F},
+	DHX <: AbstractMatrix{F},
+	DGX <: AbstractMatrix{F}
+}
     fx :: FX
     hx :: HX
     gx :: GX
@@ -252,11 +283,14 @@ struct SurrogateValueArrays{FX, HX, GX, DFX, DHX, DGX}
     Dhx :: DHX
     Dgx :: DGX
 end
-function Base.copyto!(step_vals_trgt::SurrogateValueArrays, step_vals_src::SurrogateValueArrays)
+
+function universal_copy!(
+	mod_vals_trgt::SurrogateValueArrays, 
+	mod_vals_src::SurrogateValueArrays
+)
 	for fn in fieldnames(SurrogateValueArrays)
-		trgt_fn = getfield(step_vals_trgt, fn)
-		isnothing(trgt_fn) && continue
-		copyto!(trgt_fn, getfield(step_vals_src, fn))
+		trgt_fn = getfield(mod_vals_trgt, fn)
+		universal_copy!(trgt_fn, getfield(mod_vals_src, fn))
 	end
 	return nothing
 end
@@ -267,41 +301,47 @@ struct StepValueArrays{T}
     d :: Vector{T}
 	s :: Vector{T}
     xs :: Vector{T}
-    fxs :: Vector{T}
+	fxs :: Vector{T}
 	crit_ref :: Base.RefValue{T}
 end
 
-function Base.copyto!(step_vals_trgt::StepValueArrays, step_vals_src::StepValueArrays)
+function universal_copy!(
+	step_vals_trgt::StepValueArrays, step_vals_src::StepValueArrays
+)
 	for fn in fieldnames(StepValueArrays)
-		fn == :crit_ref && continue
 		trgt_fn = getfield(step_vals_trgt, fn)
-		isnothing(trgt_fn) && continue
-		copyto!(trgt_fn, getfield(step_vals_src, fn))
+		universal_copy!(trgt_fn, getfield(step_vals_src, fn))
 	end
-	step_vals_trgt.crit_ref[] = step_vals_src.crit_ref[]
 	return nothing
 end
 
-function StepValueArrays(x, fx)
-    T = Base.promote_eltype(x, fx)
-    nin = length(x)
-    nout = length(fx)
+function StepValueArrays(n_vars, n_objfs, T)
     return StepValueArrays(
-        zeros(T, nin),
-        zeros(T, nin),
-        zeros(T, nin),
-        zeros(T, nin),
-        zeros(T, nin),
-        zeros(T, nout),
+        zeros(T, n_vars),
+        zeros(T, n_vars),
+        zeros(T, n_vars),
+        zeros(T, n_vars),
+        zeros(T, n_vars),
+		zeros(T, n_objfs),
 		Ref(T(Inf))
     )
 end
 
-struct LinearConstraints{LB, UB, ABEQ, ABINEQ}
+struct LinearConstraints{
+	LB<:Union{Nothing, AbstractVector}, 
+	UB<:Union{Nothing, AbstractVector},
+	AType<:Union{Nothing, AbstractMatrix}, 
+	BType<:Union{Nothing, AbstractVector}, 
+	EType<:Union{Nothing, AbstractMatrix}, 
+	CType<:Union{Nothing, AbstractVector}, 
+}
+	n_vars :: Int
     lb :: LB
     ub :: UB
-    A_b :: ABEQ
-    E_c :: ABINEQ
+    A :: AType
+	b :: BType
+	E :: EType
+	c :: CType
 end
 
 @enum IT_STAT begin
@@ -316,42 +356,38 @@ end
 	CRITICAL_LOOP = 5
 end
 
-Base.@kwdef mutable struct IterationMeta{F}
+Base.@kwdef mutable struct UpdateResults{F<:AbstractFloat}
 	it_index :: Int
 	Δ_pre :: F
 	Δ_post :: F
 
-	crit_val :: F
-	num_crit_loops :: Int
-
-	it_stat_pre :: IT_STAT
-	it_stat_post :: IT_STAT
+	it_stat :: IT_STAT
 
 	point_has_changed :: Bool
 
-	vals_diff_vec :: Vector{F}
-	mod_vals_diff_vec :: Vector{F}
+	diff_x :: Vector{F}
+	diff_fx :: Vector{F}
+	diff_fx_mod :: Vector{F}
 
-	args_diff_len :: F
-	vals_diff_len :: F
-	mod_vals_diff_len :: F
+	norm2_x :: F
+	norm2_fx :: F
+	norm2_fx_mod :: F
 end
 
-function init_iter_meta(T, n_objfs, algo_opts)
-	return IterationMeta(;
+function init_update_results(T, n_vars, n_objfs, delta_init)
+	NaNT = T(NaN)
+	return UpdateResults(
 		it_index = 0,
-		Δ_pre = T(NaN),
-		Δ_post = T(algo_opts.delta_init),
-		crit_val = T(Inf),
-		num_crit_loops = 0,
-		it_stat_pre = INITIALIZATION,
-		it_stat_post = INITIALIZATION,
+		Δ_pre = NaNT,
+		Δ_post = T(delta_init),
+		it_stat = INITIALIZATION,
 		point_has_changed = true,
-		vals_diff_vec = fill(T(NaN), n_objfs),
-		mod_vals_diff_vec = fill(T(NaN), n_objfs),
-		args_diff_len = T(NaN),
-		vals_diff_len = T(NaN),
-		mod_vals_diff_len = T(NaN)
+		diff_x = fill(NaNT, n_vars),
+		diff_fx = fill(NaNT, n_objfs),
+		diff_fx_mod = fill(NaNT, n_objfs),
+		norm2_x = NaNT,
+		norm2_fx = NaNT,
+		norm2_fx_mod = NaNT
 	)
 end
 
@@ -388,13 +424,23 @@ Because of all these nuances, we rather use specific flags for acceptance and ra
 in the main loop.
 =#
 
-@enum RET_CODE begin
-	INFEASIBLE = -1
-    CONTINUE = 0
-	CRITICAL = 1
-	BUDGET = 2
-	TOLERANCE_X = 3
-	TOLERANCE_F = 4
+struct ReturnObject{V, S}
+	vals :: V
+	stop_code :: S
+end
+ 
+opt_vars(r::ReturnObject)=r.vals.ξ
+opt_objectives(r::ReturnObject)=r.vals.fx
+opt_nl_eq_constraints(r::ReturnObject)=r.vals.hx
+opt_nl_ineq_constraints(r::ReturnObject)=r.vals.gx
+opt_lin_eq_constraints(r::ReturnObject)=r.vals.Ex_min_c
+opt_lin_ineq_constraints(r::ReturnObject)=r.vals.Ax_min_b
+opt_constraint_violation(r::ReturnObject)=r.theta_ref[]
+function opt_stop_code(r::ReturnObject)
+	c = r.stop_code
+	while c isa WrappedStoppingCriterion
+		c = c.crit
+	end
+	return c
 end
 
-const DEFAULT_PRECISION=Float32

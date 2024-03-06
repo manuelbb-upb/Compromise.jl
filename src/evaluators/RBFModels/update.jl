@@ -22,9 +22,8 @@ function update_rbf_model!(
         @logmsg log_level " RBFModel: Starting surrogate update."
     end
 
-    n_X = affine_sampling!(rbf, Δ, x0, fx0, global_lb, global_ub; delta_max, norm_p, log_level)
-    
-    n_X, op_code = evaluate_and_update_db!(rbf, op, x0, n_X)
+    @ignoraise n_X = affine_sampling!(rbf, Δ, x0, fx0, global_lb, global_ub; delta_max, norm_p, log_level)
+    @ignoraise n_X = evaluate_and_update_db!(rbf, op, x0, n_X)
 
     if n_X < rbf.min_points
         @warn "Cannot make a fully linear RBF model."
@@ -33,7 +32,8 @@ function update_rbf_model!(
     @unpack shape_parameter_ref, delta_ref, database_state_ref = params;
     val!(shape_parameter_ref, model_shape_parameter(rbf, Δ))
    
-    n_X = find_additional_points!(rbf, x0, n_X; log_level)
+    @unpack max_search_factor = rbf
+    @ignoraise n_X = find_additional_points!(rbf, x0, n_X; log_level, delta=delta_max * max_search_factor)
     val!(delta_ref, Δ)
     val!(database_state_ref, val(rbf.database.state))
     params.x0 .= x0
@@ -41,7 +41,7 @@ function update_rbf_model!(
     val!(params.n_X_ref, n_X)
     val!(buffers.x0_db_index_ref, buffers.db_index[1])
  
-    return op_code
+    return nothing
 end
 
 function model_shape_parameter(rbf::RBFModel, Δ)
@@ -109,7 +109,7 @@ end
     _Y = FX[:, ix1:ix2][:, not_db_flags[ix1:ix2]]
     _Y[1, :] .= NaN
     _X .+= x0
-    op_code = func_vals!(_Y, op, _X)
+    @ignoraise op_code = func_vals!(_Y, op, _X)
 
     use_col_flags = not_db_flags
     n_X = 0
@@ -130,7 +130,7 @@ end
             n_X += 1
         end
     end
-    return n_X, op_code
+    return n_X
 end
 
 function affine_sampling!(
@@ -228,7 +228,7 @@ end
         ΔZ1 = sampling_factor .* Δ
         trust_region_bounds!(lb, ub, x0, ΔZ1, global_lb, global_ub)
 
-        n_new, qr = sample_along_Z!(X, qr_ws_dim_x, QRbuff, x0, lb, ub, th_qr;
+        @ignoraise n_new, qr = sample_along_Z!(X, qr_ws_dim_x, QRbuff, x0, lb, ub, th_qr;
             ix1=2, ix2=n_X, norm_p, qr, n_new = min_points - n_X
         )
         n_X += n_new
@@ -282,7 +282,7 @@ end
         ΔZ2 = max_sampling_factor .* delta_max
         trust_region_bounds!(lb, ub, x0, ΔZ2, global_lb, global_ub)
 
-        n_new, qr = sample_along_Z!(X, qr_ws_dim_x, QRbuff, x0, lb, ub, th_qr;
+        @ignoraise n_new, qr = sample_along_Z!(X, qr_ws_dim_x, QRbuff, x0, lb, ub, th_qr;
             ix1=2, ix2=n_X, norm_p, qr, n_new = min_points - n_X
         )
         n_X += n_new
@@ -294,13 +294,13 @@ end
 
 function find_additional_points!(
     rbf, x0, n_X;
-    log_level
+    log_level, delta
 )
     if n_X != rbf.min_points
         least_squares_model!(rbf, n_X; log_level)
         return n_X
     else
-        return cholesky_point_search!(rbf, x0, n_X; log_level)
+        return cholesky_point_search!(rbf, x0, n_X; log_level, delta)
     end
 end
 
@@ -324,7 +324,7 @@ function least_squares_model!(rbf, n_X; log_level)
     return nothing
 end
 
-function cholesky_point_search!(rbf, x0, n_X; log_level)
+function cholesky_point_search!(rbf, x0, n_X; log_level, delta)
     @assert n_X == rbf.min_points
     @unpack params, buffers, database = rbf
     @unpack min_points, max_points, dim_x, dim_y, dim_π, kernel, poly_deg, th_cholesky = rbf
@@ -370,13 +370,13 @@ function cholesky_point_search!(rbf, x0, n_X; log_level)
     end
     
     @unpack coeff_φ, coeff_π = params
-    set_coefficients!(
+    @ignoraise set_coefficients!(
         coeff_φ, coeff_π, FX, Linv, Φ, Q, R, L;
         n_X, dim_y, dim_π
     )
     n_new = n_X - rbf.min_points
     if n_new > 0
-        @logmsg log_level "   RBFModel: Found $(n_new) additional points."
+        @logmsg log_level "   RBFModel: Found $(n_new) additional points in radius $delta."
     end
     return n_X
 end
