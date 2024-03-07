@@ -4,16 +4,36 @@ function do_restoration(
     stop_crits, 
     user_callback, 
     algo_opts;
-    it_index
+    it_index, indent
 )
-    @logmsg algo_opts.log_level "Iteration $(it_index): Starting restoration."
+    indent += 1
+    pad_str = lpad("", indent)
+    @logmsg algo_opts.log_level "$(pad_str)Starting restoration."
     update_results.it_stat = RESTORATION
 
-    if dim_nl_eq_constraints(mop) > 0 || dim_nl_ineq_constraints(mop) > 0
-	    (θ_opt, xr_opt, ret) = solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, vals.x, algo_opts.nl_opt)
-    else
-        xr_opt = step_vals.xn
-        ret = :SUCCESS
+    ret = :TODO
+    if !any(isnan.(step_vals.n))
+        ret = :NOTNAN
+        @. vals_tmp.x = step_vals.xn
+        eval_mop!(vals_tmp, mop, scaler)
+        if iszero(vals_tmp.theta_ref[])
+            @logmsg algo_opts.log_level "$(pad_str) Using `xn` as next iterate."
+            xr_opt = copy(step_vals.xn)
+            ret = :SUCCESS
+        end
+    end
+
+    if ret != :SUCCESS
+        if dim_nl_eq_constraints(mop) > 0 || dim_nl_ineq_constraints(mop) > 0
+            @logmsg algo_opts.log_level "$(pad_str) Trying to solve nonlinear subproblem"
+            x0 = ret == :NONAN ? step_vals.xn : vals.x
+	        (θ_opt, xr_opt, ret) = solve_restoration_problem(
+                mop, vals_tmp, scaler, scaled_cons, x0, algo_opts.nl_opt
+            )
+        else
+            xr_opt = copy(step_vals.xn)
+            ret = :SUCCESS
+        end
     end
     if ret in (
         :SUCCESS, 
@@ -26,16 +46,16 @@ function do_restoration(
         @ignoraise postproccess_restoration(
             xr_opt, Δ, update_results, mop, mod, scaler, lin_cons, scaled_cons,
             vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
-            it_index
+            it_index, indent
         )
     else
-        return InfeasibleStopping()
+        return InfeasibleStopping(indent)
     end
     @ignoraise finish_iteration(
         stop_crits, user_callback,
         update_results, mop, mod, scaler, lin_cons, scaled_cons,
         mod_vals, vals, vals_tmp, step_vals, filter, algo_opts;
-        it_index
+        it_index, indent
     )
     
     accept_trial_point!(vals, vals_tmp)
@@ -56,7 +76,8 @@ function restoration_objective(mop, vals_tmp, scaler, scaled_cons)
         lin_cons!(Ex_min_c, Ex, E, c, xr)
         lin_cons!(Ax_min_b, Ax, A, b, xr)
         
-        return constraint_violation(hx, gx, Ex_min_c, Ax_min_b)
+        theta = constraint_violation(hx, gx, Ex_min_c, Ax_min_b)
+        return theta
     end
     return objf
 end
@@ -76,7 +97,8 @@ function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, nl_opt
     end
 	
     #src # TODO make some of these settings configurable
-    opt.xtol_rel = 1e-4
+    opt.xtol_rel = sqrt(eps(eltype(x)))
+    opt.xtol_abs = eps(eltype(x))
 	opt.maxeval = 50 * n_vars^2
 	opt.stopval = 0
 
@@ -87,7 +109,7 @@ end
 function postproccess_restoration(
     xr_opt, Δ, update_results, mop, mod, scaler, lin_cons, scaled_cons,
     vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
-    it_index
+    it_index, indent
 )
     @unpack log_level = algo_opts
     ## the nonlinear problem was solved successfully.
@@ -103,14 +125,14 @@ function postproccess_restoration(
     if is_acceptable(filter, vals_tmp.theta_ref[], vals_tmp.phi_ref[])
         ## make models valid at `x + r` and set model values
         ## also compute normal step based on models
-        @ignoraise update_models!(mod, Δ, mop, scaler, vals_tmp, scaled_cons, algo_opts)
+        @ignoraise update_models!(mod, Δ, mop, scaler, vals_tmp, scaled_cons, algo_opts; indent)
         @ignoraise eval_and_diff_mod!(mod_vals, mod, vals_tmp.x)
 
         @. update_results.diff_fx_mod -= mod_vals.fx
 
         @ignoraise do_normal_step!(
             step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals_tmp, mod_vals;
-            it_index, log_level
+            it_index, log_level, indent
         )
 
         @unpack c_delta, c_mu, mu, delta_max = algo_opts
@@ -144,5 +166,5 @@ function postproccess_restoration(
             return nothing
         end
     end
-    return InfeasibleStopping()
+    return InfeasibleStopping(indent)
 end

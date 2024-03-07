@@ -24,8 +24,9 @@ struct ScaledOperator{F<:AbstractFloat, O, S} <: AbstractNonlinearOperator
     ## cache for unscaled site
     ξ :: Vector{F}      # TODO (elastic) matrix for parallel evaluation
 end
-CE.optrait_params(sop::ScaledOperator)=CE.optrait_params(sop.op)
-CE.optrait_partial(sop::ScaledOperator)=CE.optrait_partial(sop.op)
+CE.operator_has_params(sop::ScaledOperator)=CE.operator_has_params(sop.op)
+CE.operator_can_partial(sop::ScaledOperator)=CE.operator_can_partial(sop.op)
+CE.operator_can_eval_multi(sop::ScaledOperator)=CE.operator_can_eval_multi(sop.op)
 CE.provides_grads(sop)=CE.provides_grads(sop.op)
 CE.provides_hessians(sop)=CE.provides_hessians(sop.op)
 
@@ -470,13 +471,14 @@ end
 # The sub-models are trained separately:
 function update_models!(
     mod::SimpleMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts;
+    indent::Int
 )
     @unpack x, fx, gx, hx = vals
     @unpack lb, ub = scaled_cons
     @unpack log_level = algo_opts
-    @ignoraise update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; log_level)
-    @ignoraise update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; log_level)
-    @ignoraise update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; log_level)
+    @ignoraise update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; log_level, indent)
+    @ignoraise update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; log_level, indent)
+    @ignoraise update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; log_level, indent)
     return nothing
 end
 

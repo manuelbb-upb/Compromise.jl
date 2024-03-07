@@ -107,13 +107,13 @@ Base.@kwdef struct AlgorithmOptions{_T <: Number, SC}
 	"Whether to require *all* objectives to be reduced or not."
 	strict_acceptance_test :: Bool = true
 	"Acceptance threshold."
-	nu_accept :: _T = 0.01 			# 1e-2 is suggested by Fletcher et. al. 
+	nu_accept :: _T = 1e-4 			# 1e-2 is suggested by Fletcher et. al. 
 	"Success threshold."
 	nu_success :: _T = 0.4 			# 0.9 is suggested by Fletcher et. al. 
 	
 	# compatibilty parameters
 	"Factor for normal step compatibility test. The smaller `c_delta`, the stricter the test."
-	c_delta :: _T = 0.7 				# 0.7 is suggested by Fletcher et. al. 
+	c_delta :: _T = 0.9 				# 0.7 is suggested by Fletcher et. al. 
 	"Factor for normal step compatibility test. The smaller `c_mu`, the stricter the test for small radii."
 	c_mu :: _T = 100.0 				# 100 is suggested by Fletcher et. al.
 	"Exponent for normal step compatibility test. The larger `mu`, the stricter the test for small radii."
@@ -129,7 +129,7 @@ Base.@kwdef struct AlgorithmOptions{_T <: Number, SC}
     scaler_cfg :: Symbol = :box
 
 	"NLopt algorithm symbol for restoration phase."
-    nl_opt :: Symbol = :LN_COBYLA    
+    nl_opt :: Symbol = :GN_DIRECT_L_RAND    
 end
 
 ## to be sure that equality is based on field values:
@@ -305,6 +305,7 @@ struct StepValueArrays{T}
 	crit_ref :: Base.RefValue{T}
 end
 
+
 function universal_copy!(
 	step_vals_trgt::StepValueArrays, step_vals_src::StepValueArrays
 )
@@ -323,8 +324,8 @@ function StepValueArrays(n_vars, n_objfs, T)
         zeros(T, n_vars),
         zeros(T, n_vars),
 		zeros(T, n_objfs),
-		Ref(T(Inf))
-    )
+		Ref(T(Inf)),
+	)
 end
 
 struct LinearConstraints{

@@ -30,7 +30,7 @@ macro ignoraise(ex, loglevelex=nothing)
 			else
 				ret_val
 			end
-			$(if loglevelex isa Symbol
+			$(if !isnothing(loglevelex)
 				quote
 					if !wrapped.has_logged
 						stop_msg = stop_message(wrapped.crit)
@@ -51,7 +51,7 @@ macro ignoraise(ex, loglevelex=nothing)
 	end
 end
 
-macro ignorebreak(ex)
+macro ignorebreak(ex, loglevelex=nothing)
 	has_lhs = false
 	if Meta.isexpr(ex, :(=), 2)
 		lhs, rhs = esc.(ex.args)
@@ -63,6 +63,20 @@ macro ignorebreak(ex)
 	return quote
 		ret_val = $(rhs)
 		do_break = isa(ret_val, AbstractStoppingCriterion)
+		$(if !isnothing(loglevelex)
+			quote
+				if ret_val isa WrappedStoppingCriterion
+					wrapped = ret_val
+					if !wrapped.has_logged
+						stop_msg = stop_message(wrapped.crit)
+						if !isnothing(stop_msg)
+							@logmsg $(esc(loglevelex)) stop_msg
+						end
+						wrapped.has_logged = true
+					end
+				end
+			end
+		end)
 		$(if has_lhs
 			:($(lhs) = ret_val)
 		else

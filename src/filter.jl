@@ -33,7 +33,7 @@ function is_acceptable(filter::StandardFilter, θ, Φ)
     for j=1:n_entries
         θj = filter.theta_vec[j]
         Φj = filter.phi_vec[j]
-        if θ > θj && Φj > Φ
+        if θ > θj && Φ > Φj
             return false
         end
     end

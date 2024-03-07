@@ -248,6 +248,7 @@ function compatibility_test(n, c_delta, c_mu, mu, Δ)
 end
 
 function compatibility_test(n, algo_opts, Δ)
+    any(isnan.(n)) && return false
     @unpack c_delta, c_mu, mu = algo_opts
     return compatibility_test(n, c_delta, c_mu, mu, Δ)
 end
@@ -258,8 +259,8 @@ end
 
 function stopping_criteria(algo_opts)
     return (
-        MaxIterStopping(algo_opts.max_iter),
-        MinimumRadiusStopping(algo_opts.stop_delta_min),
+        MaxIterStopping(;num_max_iter=algo_opts.max_iter),
+        MinimumRadiusStopping(;delta_min=algo_opts.stop_delta_min),
         ArgsRelTolStopping(;tol=algo_opts.stop_xtol_rel),
         ArgsAbsTolStopping(;tol=algo_opts.stop_xtol_abs),
         ValsRelTolStopping(;tol=algo_opts.stop_ftol_rel),
@@ -268,7 +269,7 @@ function stopping_criteria(algo_opts)
             crit_tol=algo_opts.stop_crit_tol_abs,
             theta_tol=algo_opts.stop_theta_tol_abs
         ),
-        MaxCritLoopsStopping(algo_opts.stop_max_crit_loops)
+        MaxCritLoopsStopping(;num=algo_opts.stop_max_crit_loops)
     )
 end
 
@@ -284,15 +285,15 @@ function optimize(
     ) = initialize_structs(MOP, ξ0, algo_opts)
 
     stop_code = nothing
+    @unpack log_level = algo_opts
     while true
-        isa(stop_code, AbstractStoppingCriterion) && break
+        @ignorebreak stop_code log_level
         stop_code = do_iteration!(      # assume `copyto_model!`, otherwise, `mod, stop_code = do_iteration!...`
             update_results, mop, mod, scaler, lin_cons, scaled_cons, 
             vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, 
             stop_crits, algo_opts, user_callback
         )
     end
-    
     return ReturnObject(vals, stop_code)
 end
 
@@ -328,7 +329,7 @@ function initialize_structs(
     vals.ξ .= ξ0
     project_into_box!(vals.ξ, lin_cons)
     scale!(vals.x, scaler, vals.ξ)
-    @ignoraise eval_mop!(vals, mop) log_level
+    @ignoraise eval_mop!(vals, mop)
 
     vals_tmp = deepcopy(vals)
  
@@ -389,11 +390,11 @@ function do_iteration!(
 
     @ignoraise check_stopping_criteria(
         stop_crits, CheckPreIteration(), mop, scaler, lin_cons, scaled_cons, vals, filter, algo_opts;
-        it_index, delta=Δ
+        it_index, delta=Δ, indent=0
     )
     @ignoraise check_stopping_criterion(
         user_callback, CheckPreIteration(), mop, scaler, lin_cons, scaled_cons, vals, filter, algo_opts;
-        it_index, delta=Δ
+        it_index, delta=Δ, indent=0
     )
 
     @logmsg log_level """\n
@@ -416,40 +417,40 @@ function do_iteration!(
     )
 
     if !models_valid
-        @logmsg log_level "ITERATION $(it_index): Updating Surrogates."
-        @ignoraise update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts) log_level
-        @ignoraise eval_and_diff_mod!(mod_vals, mod, vals.x) log_level
+        @logmsg log_level "* Updating Surrogates."
+        @ignoraise update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts; indent=0)
+        @ignoraise eval_and_diff_mod!(mod_vals, mod, vals.x)
     end
     @ignoraise do_normal_step!(
         step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
-        it_index, log_level
+        it_index, log_level, indent=0
     )
 
     n_is_compatible = compatibility_test(step_vals.n, algo_opts, Δ)
 
     if !n_is_compatible
         ## Try to do a restoration
-        @logmsg log_level "ITERATION $(it_index): Normal step incompatible. Trying restoration."
+        @logmsg log_level "* Normal step incompatible. Trying restoration."
         add_to_filter!(filter, vals.theta_ref[], vals.phi_ref[])
-        return do_restoration(
+        @ignoraise do_restoration(
             mop, Δ, mod, scaler, lin_cons, scaled_cons,
             vals, vals_tmp, step_vals, mod_vals, filter, step_cache, update_results, 
             stop_crits, user_callback, algo_opts;
-            it_index
+            it_index, indent=0
         )
     end
 
-    @logmsg log_level "ITERATION $(it_index): Computing a descent step."
+    @logmsg log_level "* Computing a descent step."
     @ignoraise do_descent_step!(
         step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
         log_level)
     
-    @logmsg log_level "\t Criticality χ=$(step_vals.crit_ref[]), ‖d‖₂=$(LA.norm(step_vals.d)), ‖s‖₂=$(LA.norm(step_vals.s))."
+    @logmsg log_level " - Criticality χ=$(step_vals.crit_ref[]), ‖d‖₂=$(LA.norm(step_vals.d)), ‖s‖₂=$(LA.norm(step_vals.s))."
 
     @ignoraise check_stopping_criteria(
         stop_crits, CheckPostDescentStep(), mop, mod, scaler, lin_cons, scaled_cons, 
         vals, mod_vals, step_vals, filter, algo_opts; it_index, delta=Δ
-    )
+    ) 
     @ignoraise check_stopping_criterion(
         user_callback, CheckPostDescentStep(), mop, mod, scaler, lin_cons, scaled_cons, 
         vals, mod_vals, step_vals, filter, algo_opts; it_index, delta=Δ
@@ -459,12 +460,14 @@ function do_iteration!(
     @ignoraise Δ = criticality_routine(
         Δ, mod, step_vals, mod_vals, step_cache, crit_cache,
         mop, scaler, lin_cons, scaled_cons, vals, vals_tmp, stop_crits, algo_opts, 
-        user_callback; it_index
-    ) log_level
+        user_callback; it_index, indent=0
+    )
     
     ## test if trial point is acceptable for filter and set missing meta data in `update_results`:
     @ignoraise test_trial_point!(
-        update_results, vals_tmp, Δ, mop, scaler, filter, vals, mod_vals, step_vals, algo_opts) log_level
+        update_results, vals_tmp, Δ, mop, scaler, filter, vals, mod_vals, step_vals, algo_opts;
+        it_index, indent=0
+    )
     ## update filter
     if update_results.it_stat == FILTER_ADD || update_results.it_stat == FILTER_ADD_SHRINK
         add_to_filter!(filter, vals_tmp.theta_ref[], vals_tmp.phi_ref[])
@@ -472,7 +475,8 @@ function do_iteration!(
 
     @ignoraise finish_iteration(
         stop_crits, user_callback, update_results, mop, mod, scaler, lin_cons,
-        scaled_cons, mod_vals, vals, vals_tmp, step_vals, filter, algo_opts; it_index
+        scaled_cons, mod_vals, vals, vals_tmp, step_vals, filter, algo_opts; 
+        it_index, indent=0
     )
    
     if update_results.point_has_changed
@@ -486,7 +490,8 @@ end
 function finish_iteration(
     stop_crits, user_callback,
     update_results, mop, mod, scaler, lin_cons,
-    scaled_cons, mod_vals, vals, vals_tmp, step_vals, filter, algo_opts; it_index
+    scaled_cons, mod_vals, vals, vals_tmp, step_vals, filter, algo_opts; 
+    it_index, indent
 )
     # Now, check stopping criteria.
     # It has to happen here, so that the criteria have access to both `vals` and `vals_tmp`.
@@ -494,13 +499,13 @@ function finish_iteration(
         stop_crits, CheckPostIteration(), 
         update_results, mop, mod, scaler, lin_cons, scaled_cons,
         vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
-        it_index
+        it_index, indent
     )
     @ignoraise check_stopping_criterion(
         user_callback, CheckPostIteration(), 
         update_results, mop, mod, scaler, lin_cons, scaled_cons,
         vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
-        it_index
+        it_index, indent
     )
 end
 

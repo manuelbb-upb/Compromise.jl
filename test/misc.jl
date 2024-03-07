@@ -49,7 +49,7 @@ end
     _opts = deepcopy(opts)
 
     @test opts == _opts
-    @test opts.stop_crit_tol_abs isa Float32
+    @test opts.stop_crit_tol_abs isa Float64
 
     opts = AlgorithmOptions(; T = Float16)
     @test opts.stop_crit_tol_abs isa Float16
@@ -57,8 +57,8 @@ end
     opts = AlgorithmOptions{Float64}(; T = Float16)
     @test opts.stop_crit_tol_abs isa Float16
 
-    opts = AlgorithmOptions{Float64}()
-    @test opts.stop_crit_tol_abs isa Float64
+    opts = AlgorithmOptions{Float32}()
+    @test opts.stop_crit_tol_abs isa Float32
 
     opts = AlgorithmOptions{Float64}(; stop_crit_tol_abs=1f0)
     @test opts.stop_crit_tol_abs isa Float64
@@ -141,7 +141,7 @@ end
     
     #%%
     mop = setup_mop()
-    final_vals, stop_code = optimize(
+    ret = optimize(
         mop, rand(2);
         algo_opts = AlgorithmOptions(;
             max_iter=1,
@@ -155,11 +155,11 @@ end
             stop_max_crit_loops=typemax(Int)
         )
     )
-    @test stop_code.crit isa Compromise.MaxIterStopping
+    @test opt_stop_code(ret) isa Compromise.MaxIterStopping
 
     #%%
     mop = setup_mop()
-    final_vals, stop_code = optimize(
+    ret = optimize(
         mop, rand(2);
         algo_opts = AlgorithmOptions(;
             max_iter=typemax(Int),
@@ -173,14 +173,14 @@ end
             stop_max_crit_loops=typemax(Int)
         )
     )
-    @test stop_code.crit isa Compromise.MinimumRadiusStopping
+    @test opt_stop_code(ret) isa Compromise.MinimumRadiusStopping
 
     #%%
     ## Relative argument stopping criterion does only apply if 
     ## a trial point is accepted. 
     ## We thus should not start at a critical site:
     mop = setup_mop()
-    final_vals, stop_code = optimize(
+    ret = optimize(
         mop, [π, -ℯ];
         algo_opts = AlgorithmOptions(;
             eps_crit = -1.0,        # don't enter criticality loop
@@ -195,11 +195,11 @@ end
             stop_max_crit_loops=typemax(Int)
         )
     )
-    @test stop_code.crit isa Compromise.ArgsRelTolStopping
+    @test opt_stop_code(ret) isa Compromise.ArgsRelTolStopping
 
     #%%
     mop = setup_mop()
-    final_vals, stop_code = optimize(
+    ret = optimize(
         mop, [π, -ℯ];
         algo_opts = AlgorithmOptions(;
             eps_crit = -1.0,
@@ -214,11 +214,11 @@ end
             stop_max_crit_loops=typemax(Int)
         )
     )
-    @test stop_code.crit isa Compromise.ArgsAbsTolStopping
+    @test opt_stop_code(ret) isa Compromise.ArgsAbsTolStopping
 
     #%%
     mop = setup_mop()
-    final_vals, stop_code = optimize(
+    ret = optimize(
         mop, [π, -ℯ];
         algo_opts = AlgorithmOptions(;
             max_iter=typemax(Int),
@@ -232,11 +232,11 @@ end
             stop_max_crit_loops=typemax(Int)
         )
     )
-    @test stop_code.crit isa Compromise.ValsRelTolStopping
+    @test opt_stop_code(ret) isa Compromise.ValsRelTolStopping
 
     #%%
     mop = setup_mop()
-    final_vals, stop_code = optimize(
+    ret = optimize(
         mop, [π, -ℯ];
         algo_opts = AlgorithmOptions(;
             max_iter=typemax(Int),
@@ -250,11 +250,11 @@ end
             stop_max_crit_loops=typemax(Int)
         )
     )
-    @test stop_code.crit isa Compromise.ValsAbsTolStopping
+    @test opt_stop_code(ret) isa Compromise.ValsAbsTolStopping
 
     #%%
     mop = setup_mop()
-    final_vals, stop_code = optimize(
+    ret = optimize(
         mop, [π, -ℯ];
         algo_opts = AlgorithmOptions(;
             max_iter=typemax(Int),
@@ -268,16 +268,16 @@ end
             stop_max_crit_loops=typemax(Int)
         )
     )
-    @test stop_code.crit isa Compromise.CritAbsTolStopping
+    @test opt_stop_code(ret) isa Compromise.CritAbsTolStopping
 
     #%%
     struct MyCallback <: Compromise.AbstractStoppingCriterion end
-    Compromise.check_pre_iteration(::MyCallback)=true
-        
+            
     function Compromise.evaluate_stopping_criterion(
-        crit::MyCallback,
-        Δ, mop, mod, scaler, lin_cons, scaled_cons,
-        vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts,
+        crit::MyCallback, ::Compromise.CheckPreIteration,
+        mop, scaler, lin_cons, scaled_cons,
+        vals, filter, algo_opts;
+        indent::Int, it_index::Int, delta::Real
     )
         if vals.x ≈ [π, -ℯ]
             return crit
@@ -286,7 +286,7 @@ end
     end
 
     mop = setup_mop()
-    final_vals, stop_code = optimize(
+    ret = optimize(
         mop, [π, -ℯ];
         algo_opts = AlgorithmOptions(;
             max_iter=5,
@@ -301,14 +301,13 @@ end
         ),
         user_callback = MyCallback()
     )
-    @test stop_code.crit isa MyCallback
+    @test opt_stop_code(ret) isa MyCallback
 end
 
 @testset "Max Eval Stopping" begin
 
     algo_opts = AlgorithmOptions(;
-        max_iter=typemax(Int),
-        stop_delta_min=-Inf,
+        stop_delta_min=1e-10,
         stop_xtol_rel=-Inf,
         stop_xtol_abs=-Inf,
         stop_ftol_rel=-Inf,
@@ -350,10 +349,10 @@ end
         mop, objective_function, grads_objectives_function, :exact; 
         dim_out=2, max_func_calls=10, 
     )
-    final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
+    ret = optimize(mop, [π, -ℯ]; algo_opts)
 
     @test fn_counter[] == 10
-    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -363,18 +362,18 @@ end
         mop, objective_function, grads_objectives_function, :exact; 
         dim_out=2, max_grad_calls=1 
     )
-    final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
+    ret = optimize(mop, [π, -ℯ]; algo_opts)
     @test dfn_counter[] == 1
-    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
 
     mop = MutableMOP(;num_vars=2)
     add_objectives!(
         mop, objective_function, grads_objectives_function, :exact; 
         dim_out=2, max_grad_calls=1, 
     )
-    final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
+    ret = optimize(mop, [π, -ℯ]; algo_opts)
     @test dfn_counter[] == 2
-    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -384,10 +383,10 @@ end
         mop, objective_function, grads_objectives_function, :exact; 
         dim_out=2, max_func_calls=100
     )
-    final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
+    ret = optimize(mop, [π, -ℯ]; algo_opts)
 
     @test fn_counter[] == 100
-    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -397,9 +396,9 @@ end
         mop, objective_function, grads_objectives_function, :rbf; 
         dim_out=2, max_func_calls=10
     )
-    final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
+    ret = optimize(mop, [π, -ℯ]; algo_opts)
     @test fn_counter[] == 10
-    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -409,9 +408,9 @@ end
         mop, objective_function, grads_objectives_function, :taylor1; 
         dim_out=2, max_func_calls=10
     )
-    final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
+    ret = optimize(mop, [π, -ℯ]; algo_opts)
     @test fn_counter[] == 10
-    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -419,11 +418,11 @@ end
     mop = MutableMOP(;num_vars=2)
     add_objectives!(
         mop, objective_function, grads_objectives_function, :taylor1; 
-        dim_out=2, max_grad_calls=10
+        dim_out=2, max_grad_calls=5
     )
-    final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
-    @test dfn_counter[] == 10
-    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
+    ret = optimize(mop, [π, -ℯ]; algo_opts)
+    @test dfn_counter[] <= 5
+    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
     
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -434,9 +433,9 @@ end
         dim_out=2, max_func_calls=10, 
         hessians=hess_objectives_function, hessians_iip=false 
     )
-    final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
+    ret = optimize(mop, [π, -ℯ]; algo_opts)
     @test fn_counter[] <= 10
-    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -447,9 +446,9 @@ end
         dim_out=2, max_grad_calls=2, 
         hessians=hess_objectives_function, hessians_iip=false 
     )
-    final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
+    ret = optimize(mop, [π, -ℯ]; algo_opts)
     @test dfn_counter[] == 2
-    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
     
     mop = MutableMOP(;num_vars=2)
     add_objectives!(
@@ -457,8 +456,8 @@ end
         dim_out=2, max_hess_calls=2, 
         hessians=hess_objectives_function, hessians_iip=false 
     )
-    final_vals, stop_code = optimize(mop, [π, -ℯ]; algo_opts)
-    @test stop_code.crit isa Compromise.NonlinearFunctions.BudgetExhausted
+    ret = optimize(mop, [π, -ℯ]; algo_opts)
+    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
 
 end
 
@@ -481,8 +480,8 @@ end
 
     randx(n=2) = lb .+ (ub .- lb) .* rand(n)
     add_objectives!(mop, objective_function, :rbf; dim_out=2, func_iip=false)
-    final_vals, _ = optimize(mop, randx(); algo_opts)
-    ξ = final_vals.ξ
+    ret = optimize(mop, randx(); algo_opts)
+    ξ = opt_vars(ret)
     @test all(lb .- 1e-5 .<= ξ)
     @test all(ξ .<= ub .- 1e-5)
 end

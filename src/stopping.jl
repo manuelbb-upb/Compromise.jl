@@ -21,7 +21,7 @@ function evaluate_stopping_criterion(
     crit::AbstractStoppingCriterion, ::CheckPreIteration,
     mop, scaler, lin_cons, scaled_cons,
     vals, filter, algo_opts;
-    it_index::Int, delta::Real
+    indent::Int, it_index::Int, delta::Real
 )
     return nothing
 end
@@ -30,7 +30,7 @@ function evaluate_stopping_criterion(
     crit::AbstractStoppingCriterion, ::CheckPostDescentStep,
     mop, mod, scaler, lin_cons, scaled_cons,
     vals, mod_vals, step_vals, filter, algo_opts;
-    it_index::Int, delta::Real
+    indent::Int, it_index::Int, delta::Real
 )
     return nothing
 end
@@ -39,7 +39,7 @@ function evaluate_stopping_criterion(
     crit::AbstractStoppingCriterion, ::Union{CheckPreCritLoop, CheckPostCritLoop},
     mop, mod, scaler, lin_cons, scaled_cons,
     vals, mod_vals, step_vals, filter, algo_opts;
-    it_index::Int, delta::Real, num_crit_loops::Int
+    indent::Int, it_index::Int, delta::Real, num_crit_loops::Int
 )
     return nothing
 end
@@ -49,7 +49,7 @@ function evaluate_stopping_criterion(
     update_results,
     mop, mod, scaler, lin_cons, scaled_cons,
     vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
-    it_index
+    indent::Int, it_index
 )
     return nothing
 end
@@ -58,31 +58,40 @@ function check_stopping_criterion(
     crit::AbstractStoppingCriterion,
     stop_point::AbstractStopPoint,
     args...;
+    indent::Int=0,
     kwargs...
 )
-    return evaluate_stopping_criterion(crit, stop_point, args...; kwargs...)
+    return evaluate_stopping_criterion(crit, stop_point, args...; indent, kwargs...)
 end
 
-function check_stopping_criteria(crits, stop_point::AbstractStopPoint, args...; kwargs...)
+function check_stopping_criteria(
+    crits, stop_point::AbstractStopPoint, args...; indent::Int=0, kwargs...
+)
     for crit in crits
-        @ignoraise check_stopping_criterion(crit, stop_point, args...;kwargs...)
+        @ignoraise check_stopping_criterion(crit, stop_point, args...; indent, kwargs...)
     end
     return nothing
 end
 
 @with_kw struct MaxIterStopping <: AbstractStoppingCriterion
     num_max_iter :: Int = 500
+    
+    indent :: Base.RefValue{Int} = Ref(0)
 end
 
-stop_message(crit::MaxIterStopping)="EXIT, reached maximum number of iterations."
+function stop_message(crit::MaxIterStopping)
+    pad_str = lpad("", crit.indent[])
+    "$(pad_str)EXIT, reached maximum number of iterations."
+end
 
 function evaluate_stopping_criterion(
     crit::MaxIterStopping, ::CheckPreIteration,
     mop, scaler, lin_cons, scaled_cons,
     vals, filter, algo_opts;
-    it_index::Int, delta::Real
+    it_index::Int, delta::Real, indent::Int
 )
     if it_index > crit.num_max_iter
+        crit.indent[] = indent
         return crit
     end
     return nothing
@@ -90,18 +99,23 @@ end
 
 @with_kw struct MinimumRadiusStopping{F} <: AbstractStoppingCriterion
     delta_min :: F = eps(Float64)
+    
+    indent :: Base.RefValue{Int} = Ref(0)
 end
+
 function stop_message(crit::MinimumRadiusStopping)
-    "EXIT, trust region radius reduced to below `delta_min` ($(crit.delta_min))."
+    pad_str = lpad("", crit.indent[])
+    "$(pad_str)EXIT, trust region radius reduced to below `delta_min` ($(crit.delta_min))."
 end
 
 function evaluate_stopping_criterion(
     crit::MinimumRadiusStopping, ::CheckPreIteration,
     mop, scaler, lin_cons, scaled_cons,
     vals, filter, algo_opts;
-    it_index::Int, delta::Real
+    it_index::Int, delta::Real, indent::Int
 )
     if delta < crit.delta_min
+        crit.indent[] = indent
         return crit
     end
     return nothing
@@ -111,9 +125,10 @@ function evaluate_stopping_criterion(
     crit::MinimumRadiusStopping, ::CheckPreCritLoop,
     mop, mod, scaler, lin_cons, scaled_cons,
     vals, mod_vals, step_vals, filter, algo_opts;
-    it_index::Int, delta::Real, num_crit_loops::Int
+    it_index::Int, delta::Real, num_crit_loops::Int, indent::Int
 )
     if delta < crit.delta_min
+        crit.indent[] = indent
         return crit
     end
     return nothing
@@ -122,6 +137,12 @@ end
 @with_kw struct ArgsRelTolStopping{F} <: AbstractStoppingCriterion
     tol :: F = -Inf
     only_if_point_changed :: Bool = true
+
+    indent :: Base.RefValue{Int} = Ref(0)
+end
+function stop_message(crit::ArgsRelTolStopping) 
+    pad_str = lpad("", crit.indent[])
+    "$(pad_str)EXIT, relative parameter tolerance criterion."
 end
 
 function evaluate_stopping_criterion(
@@ -129,13 +150,13 @@ function evaluate_stopping_criterion(
     update_results,
     mop, mod, scaler, lin_cons, scaled_cons,
     vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
-    it_index
+    it_index, indent::Int
 )
     @unpack x = vals
     @unpack norm2_x, point_has_changed = update_results
     if !crit.only_if_point_changed || point_has_changed
         if norm2_x <= crit.tol * LA.norm(x)
-            @logmsg algo_opts.log_level "ITERATION $(it_index): EXIT, relative parameter tolerance criterion."
+            crit.indent[] = indent
             return crit
         end
     end
@@ -145,6 +166,12 @@ end
 @with_kw struct ArgsAbsTolStopping{F} <: AbstractStoppingCriterion
     tol :: F = -Inf
     only_if_point_changed :: Bool = true
+    indent :: Base.RefValue{Int} = Ref(0)
+end
+
+function stop_message(crit::ArgsAbsTolStopping) 
+    pad_str = lpad("", crit.indent[])
+    "$(pad_str)EXIT, absolute parameter tolerance criterion."
 end
 
 function evaluate_stopping_criterion(
@@ -152,12 +179,12 @@ function evaluate_stopping_criterion(
     update_results,
     mop, mod, scaler, lin_cons, scaled_cons,
     vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
-    it_index
+    it_index, indent::Int
 )
     @unpack point_has_changed, norm2_x = update_results
     if !crit.only_if_point_changed || point_has_changed
         if norm2_x <= crit.tol
-            @logmsg algo_opts.log_level "ITERATION $(it_index): EXIT, absolute parameter tolerance criterion."
+            crit.indent[] = indent
             return crit
         end
     end
@@ -167,6 +194,13 @@ end
 @with_kw struct ValsRelTolStopping{F} <: AbstractStoppingCriterion
     tol :: F = -Inf
     only_if_point_changed :: Bool = true
+
+    indent :: Base.RefValue{Int} =Ref(0)
+end
+
+function stop_message(crit::ValsRelTolStopping) 
+    pad_str = lpad("", crit.indent[])
+    "$(pad_str)EXIT, relative value tolerance criterion."
 end
 
 function evaluate_stopping_criterion(
@@ -174,13 +208,13 @@ function evaluate_stopping_criterion(
     update_results,
     mop, mod, scaler, lin_cons, scaled_cons,
     vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
-    it_index
+    it_index, indent::Int
 )
     @unpack fx = vals
     @unpack norm2_fx, point_has_changed = update_results
     if !crit.only_if_point_changed || point_has_changed
         if norm2_fx <= crit.tol * LA.norm(fx)
-            @logmsg algo_opts.log_level "ITERATION $(it_index): EXIT, relative value tolerance criterion."
+            crit.indent[] = indent
             return crit
         end
     end
@@ -190,6 +224,12 @@ end
 @with_kw struct ValsAbsTolStopping{F} <: AbstractStoppingCriterion
     tol :: F = -Inf
     only_if_point_changed :: Bool = true
+    indent :: Base.RefValue{Int} =Ref(0)
+end
+
+function stop_message(crit::ValsAbsTolStopping) 
+    pad_str = lpad("", crit.indent[])
+    "$(pad_str)EXIT, absolute value tolerance criterion."
 end
 
 function evaluate_stopping_criterion(
@@ -197,12 +237,12 @@ function evaluate_stopping_criterion(
     update_results,
     mop, mod, scaler, lin_cons, scaled_cons,
     vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
-    it_index
+    it_index, indent::Int
 )
     @unpack norm2_fx, point_has_changed = update_results
     if !crit.only_if_point_changed || point_has_changed
         if norm2_fx <= crit.tol
-            @logmsg algo_opts.log_level "ITERATION $(it_index): EXIT, absolute value tolerance criterion."
+            crit.indent[] = indent
             return crit
         end
     end
@@ -212,63 +252,79 @@ end
 @with_kw struct CritAbsTolStopping{F} <: AbstractStoppingCriterion
     crit_tol :: F
     theta_tol :: F
+    indent :: Base.RefValue{Int} =Ref(0)
+end
+
+function stop_message(crit::CritAbsTolStopping) 
+    pad_str = lpad("", crit.indent[])
+    "$(pad_str)EXIT, absolute inexact criticality criterion."
 end
 
 function evaluate_stopping_criterion(
     crit::CritAbsTolStopping,::CheckPostDescentStep,
     mop, mod, scaler, lin_cons, scaled_cons,
     vals, mod_vals, step_vals, filter, algo_opts;
-    it_index::Int, delta::Real
+    it_index::Int, delta::Real, indent::Int
 )
-    return crit_abs_tol_stopping(crit, step_vals, vals, it_index, algo_opts)
+    return crit_abs_tol_stopping(crit, step_vals, vals, it_index, algo_opts; indent)
 end
 
 function evaluate_stopping_criterion(
     crit::CritAbsTolStopping,::CheckPostCritLoop,
     mop, mod, scaler, lin_cons, scaled_cons,
     vals, mod_vals, step_vals, filter, algo_opts;
-    it_index::Int, delta::Real, num_crit_loops::Int
+    it_index::Int, delta::Real, num_crit_loops::Int, indent::Int
 )
 
-    return crit_abs_tol_stopping(crit, step_vals, vals, it_index, algo_opts)
+    return crit_abs_tol_stopping(crit, step_vals, vals, it_index, algo_opts; indent)
 end
-function crit_abs_tol_stopping(crit, step_vals, vals, it_index, algo_opts)
+function crit_abs_tol_stopping(crit, step_vals, vals, it_index, algo_opts; indent)
     χ = abs(step_vals.crit_ref[])
     θ = abs(vals.theta_ref[])
     @unpack log_level = algo_opts
     @unpack crit_tol, theta_tol = crit
     if crit_abs_tol_stopping(χ, θ, crit_tol, theta_tol, log_level, it_index)
+        crit.indent[] = indent
         return crit
     end
     return nothing
 end
+
 function crit_abs_tol_stopping(χ, θ, crit_tol, theta_tol, log_level, it_index)
     if χ <= crit_tol && θ <= theta_tol
-        @logmsg log_level "ITERATION $(it_index): EXIT, absolute criticality tolerance criterion."
         return true
     end
     return false
 end
 
-struct MaxCritLoopsStopping <: AbstractStoppingCriterion
+@with_kw struct MaxCritLoopsStopping <: AbstractStoppingCriterion
     num :: Int
+    indent :: Base.RefValue{Int} = Ref(0)
 end
-
-check_pre_crit_loop(crit::MaxCritLoopsStopping)=true
-
+function stop_message(crit::MaxCritLoopsStopping) 
+    pad_str = lpad("", crit.indent[])
+    "$(pad_str)EXIT, maximum number of criticality loops."
+end
+ 
 function evaluate_stopping_criterion(
     crit::MaxCritLoopsStopping,::CheckPreCritLoop,
     mop, mod, scaler, lin_cons, scaled_cons,
     vals, mod_vals, step_vals, filter, algo_opts;
-    it_index::Int, delta::Real, num_crit_loops::Int
+    it_index::Int, delta::Real, num_crit_loops::Int, indent::Int
 )
 
     @unpack log_level = algo_opts
     if num_crit_loops >= crit.num
-        @logmsg log_level "ITERATION $(it_index): EXIT, maximum number of criticality loops."
+        crit.indent[] = indent
         return crit
     end
     return nothing
 end
 
-struct InfeasibleStopping <: AbstractStoppingCriterion end
+@with_kw struct InfeasibleStopping <: AbstractStoppingCriterion
+    indent :: Int = 0 
+end
+function stop_message(crit::InfeasibleStopping)
+    pad_str = lpad("", crit.indent)
+    return "$(pad_str)INFEASIBLE: Cannot find a feasible point."
+end

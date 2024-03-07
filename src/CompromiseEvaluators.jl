@@ -32,18 +32,12 @@ abstract type AbstractNonlinearOperatorNoParams <: AbstractNonlinearOperator end
 # We now have a “trait”:
 abstract type AbstractNonlinearOperatorTrait end
 
-abstract type AbstractNonlinearOperatorManyColumnsTrait <: AbstractNonlinearOperatorTrait end
-struct OperatorSequential <: AbstractNonlinearOperatorManyColumnsTrait end
-struct OperatorParallel <: AbstractNonlinearOperatorManyColumnsTrait end
-optrait_multi(op::AbstractNonlinearOperator) = OperatorSequential()
+operator_has_name(::AbstractNonlinearOperator)::Bool=false
+operator_name(::AbstractNonlinearOperator)=error("No name.")
 
-abstract type AbstractNonlinearOperatorHasParamsTrait <: AbstractNonlinearOperatorTrait end
-struct IsParametricOperator <: AbstractNonlinearOperatorHasParamsTrait end
-struct IsNonparametricOperator <: AbstractNonlinearOperatorHasParamsTrait end
-
-function optrait_params(op::AbstractNonlinearOperator)::NonlinearOperatorHasParamsTrait
-    return IsNonparametricOperator()
-end
+operator_can_eval_multi(::AbstractNonlinearOperator)::Bool=false
+operator_has_params(::AbstractNonlinearOperator)::Bool=false
+operator_can_partial(::AbstractNonlinearOperator)::Bool=false
 
 import ..Compromise: RVec, RVecOrMat, RMat, @ignoraise, universal_copy!
 
@@ -63,10 +57,6 @@ end
 # If it returns `true`, the feature is assumed to be available for derivatives as well.
 # In this situation, the type should implment methods starting with `partial_`, see below
 # for details.
-abstract type NonlinearOperatorPartialEvaluationTrait <: AbstractNonlinearOperatorTrait end
-struct OperatorSupportsPartialEvaluation <: NonlinearOperatorPartialEvaluationTrait end
-struct OperatorOnlyFullEvaluation <: NonlinearOperatorPartialEvaluationTrait end
-optrait_partial(op::AbstractNonlinearOperator)=OperatorOnlyFullEvaluation()
 
 # The methods below should be implemented to evaluate parameter dependent operators: 
 """
@@ -190,91 +180,108 @@ function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperator
 end
 
 # # Safe-Guarded Functions
-function func_vals!(
-    y::RVecOrMat, op::AbstractNonlinearOperator, x::RVecOrMat, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
+function redirect_call(
+    @nospecialize(target_func!),
+    op::AbstractNonlinearOperator,
+    x, params, outputs, mutable_args...
 )
-    return _func_vals_multi!(y, op::AbstractNonlinearOperator, optrait_multi(op), x, params, outputs)
+    has_params = Val(operator_has_params(op)) :: Union{Val{true}, Val{false}}
+    is_partial=Val(operator_can_partial(op)) :: Union{Val{true}, Val{false}}
+    return redirect_call(target_func!, op, has_params, is_partial, x, params, outputs, mutable_args...)
+end
+function redirect_call(
+    @nospecialize(target_func!),
+    op::AbstractNonlinearOperator,
+    has_params::Val{false},
+    is_partial::Val{false},
+    x,
+    params,
+    outputs,
+    mutable_args...
+)
+    target_func!(mutable_args..., op, x)
+end
+function redirect_call(
+    @nospecialize(target_func!),
+    op::AbstractNonlinearOperator,
+    has_params::Val{true},
+    is_partial::Val{false},
+    x,
+    params,
+    outputs,
+    mutable_args...
+)
+    target_func!(mutable_args..., op, x, params)
+end
+function redirect_call(
+    @nospecialize(target_func!),
+    op::AbstractNonlinearOperator,
+    has_params::Val{true},
+    is_partial::Val{true},
+    x,
+    params,
+    outputs,
+    mutable_args...
+)
+    target_func!(mutable_args..., op, x, params, outputs)
+end
+function redirect_call(
+    @nospecialize(target_func!),
+    op::AbstractNonlinearOperator,
+    has_params::Val{false},
+    is_partial::Val{true},
+    x,
+    params,
+    outputs,
+    mutable_args...
+)
+    target_func!(mutable_args..., op, x, outputs)
 end
 
-# If vectors are used, we can forward to `eval_op!` in both cases (OperatorParallel(), OperatorSequential):
-function _func_vals_multi!(
-    y::RVec, op::AbstractNonlinearOperator, ::Union{OperatorParallel, OperatorSequential}, x::RVec, params, outputs
+function func_vals!(
+    y::RVec, op::AbstractNonlinearOperator, x::RVec, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
-    @ignoraise _func_vals!(y, op, optrait_params(op), optrait_partial(op), x, params, outputs)
-    return nothing
+    @ignoraise redirect_call(eval_op!, op, x, params, outputs, y)
 end
-# For matrices, we can forward only if `OperatorParallel()` trait is present:
-function _func_vals_multi!(
-    y::RMat, op::AbstractNonlinearOperator, ::OperatorParallel, x::RMat, params, outputs
+function func_vals!(
+    Y::RMat, op::AbstractNonlinearOperator, X::RMat, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
-    @ignoraise _func_vals!(y, op, optrait_params(op), optrait_partial(op), x, params, outputs)
-    return nothing
-end
-# Otherwise, we have a simple fallback:
-function _func_vals_multi!(
-    Y::RMat, op::AbstractNonlinearOperator, ::OperatorSequential, X::RMat, params, outputs
-)
-    for (y, x) = zip(eachcol(Y), eachcol(X))
-        @ignoraise _func_vals!(y, op, optrait_params(op), optrait_partial(op), x, params, outputs)
+    if operator_can_eval_multi(op)
+        @ignoraise redirect_call(eval_op!, op, X, params, outputs, Y)
+    else
+        for (y, x) = zip(eachcol(Y), eachcol(X))
+            @ignoraise func_vals!(y, op, x, params, outputs)
+        end
     end
+    return nothing
 end
 
 function func_grads!(
     Dy, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
-    @ignoraise _func_grads!(Dy, op, optrait_params(op), optrait_partial(op), x, params, outputs)
+    @ignoraise redirect_call(eval_grads!, op, x, params, outputs, Dy)
     return nothing
 end
 
 function func_vals_and_grads!(
     y, Dy, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
-    @ignoraise _func_vals_and_grads!(y, Dy, op, optrait_params(op), optrait_partial(op), x, params, outputs)
+    @ignoraise redirect_call(eval_op_and_grads!, op, x, params, outputs, y, Dy)
     return nothing
 end
 
 function func_hessians!(
     H, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
-    @ignoraise _func_hessians!(H, op, optrait_params(op), optrait_partial(op), x, params, outputs)
+    @ignoraise redirect_call(eval_hessians!, op, x, params, outputs, H)
     return nothing
 end
 
 function func_vals_and_grads_and_hessians!(
     y, Dy, H, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
-    @ignoraise _func_vals_and_grads_and_hessians!(y, Dy, H, op, optrait_params(op), optrait_partial(op), x, params, outputs)
+    @ignoraise redirect_call(eval_op_and_grads_and_hessians!, op, x, params, outputs, y, Dy, H)
     return nothing
-end
-
-for (new_name, inner_name, mod_args, in_arg) in 
-    (
-        (:_func_vals!, :eval_op!, (:y,), :x),
-        (:_func_grads!, :eval_grads!, (:Dy,), :x),
-        (:_func_hessians!, :eval_hessians!, (:Dy,), :x),
-        (:_func_vals_and_grads!, :eval_op_and_grads!, (:y, :Dy,), :x),
-        (:_func_vals_and_grads_and_hessians!, :eval_op_and_grads_and_hessians!, (:y, :Dy, :H), :x),
-    )
-
-    inner_args = Any[in_arg,]
-    for (i, params_trait) in enumerate((:(::IsNonparametricOperator), :(::IsParametricOperator)))
-        if i == 2
-            push!(inner_args, :params)
-        end
-        for (j, partial_trait) in enumerate((:(::OperatorOnlyFullEvaluation), :(::OperatorSupportsPartialEvaluation)))
-            _inner_args = copy(inner_args)
-            if j == 2
-                push!(_inner_args, :outputs)
-            end
-
-            @eval function $(new_name)(
-                $(mod_args...), op::AbstractNonlinearOperator, $(params_trait), $(partial_trait), 
-                x::RVecOrMat, params, outputs
-            )
-                $(inner_name)($(mod_args...), op, $(_inner_args...))
-            end
-        end
-    end
 end
 
 # ## Types and Methods for Surrogate Models
@@ -283,9 +290,9 @@ end
 # Such a surrogate model is always non-parametric, as parameters of operators are assumed 
 # to be fix in-between optimization runs.
 abstract type AbstractSurrogateModel <: AbstractNonlinearOperator end
-optrait_params(::AbstractSurrogateModel)=IsNonparametricOperator()
-optrait_partial(::AbstractSurrogateModel)=OperatorOnlyFullEvaluation()
-optrait_multi(::AbstractSurrogateModel)=OperatorSequential()
+operator_has_params(::AbstractSurrogateModel)=false
+operator_can_partial(::AbstractSurrogateModel)=false
+operator_can_eval_multi(::AbstractSurrogateModel)=false
 
 provides_grads(::AbstractSurrogateModel)=true
 
@@ -366,7 +373,7 @@ and upper right corner `ub` (in the scaled variable domain)
 in the scaled domain. `fx` are the outputs of `nonlinear_operator` at `x`.
 """
 function update!(
-    surr::AbstractSurrogateModel, op, Δ, x, fx, lb, ub; log_level, kwargs...
+    surr::AbstractSurrogateModel, op, Δ, x, fx, lb, ub; log_level, indent, kwargs...
 )
     return nothing    
 end

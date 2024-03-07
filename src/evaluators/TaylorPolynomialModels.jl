@@ -1,5 +1,6 @@
 module TaylorPolynomialModels
 
+import Logging: @logmsg, Info
 import LinearAlgebra as LA
 using Parameters: @with_kw
 using ..Compromise.CompromiseEvaluators
@@ -128,8 +129,11 @@ function CE.eval_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
     return nothing
 end
 
-function CE.update!(tp::TaylorPolynomial1, op, Δ, x, fx, lb, ub; kwargs...)
+function CE.update!(tp::TaylorPolynomial1, op, Δ, x, fx, lb, ub; 
+    log_level=Info, indent::Int=0, kwargs...
+)
     if tp.x0 != x || any(isnan.(tp.x0))
+        @logmsg log_level "$(lpad("", indent+1)) Updating Taylor Polynomial."
         copyto!(tp.x0, x)
         #src eval_op_and_grads!(tp.fx, tp.Dfx, op, x)
         @ignoraise func_vals_and_grads!(tp.fx, tp.Dfx, op, x)

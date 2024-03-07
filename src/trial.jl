@@ -1,8 +1,14 @@
 function test_trial_point!(
-    update_results, vals_tmp, Δ, mop, scaler, filter, vals, mod_vals, step_vals, algo_opts
+    update_results, vals_tmp, Δ, mop, scaler, filter, vals, mod_vals, step_vals, algo_opts;
+    it_index, indent::Int=0
 )
-    @unpack diff_x, diff_fx, diff_fx_mod, it_index = update_results
-    @unpack strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success, log_level = algo_opts
+    @unpack log_level = algo_opts
+    pad_str = lpad("", indent)
+    @logmsg log_level "$(pad_str)* Checking trial point."
+    indent += 1
+
+    @unpack diff_x, diff_fx, diff_fx_mod = update_results
+    @unpack strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success = algo_opts
 
     # Use `vals_tmp` to hold the true values at `xs`:
     copyto!(vals_tmp.x, step_vals.xs)
@@ -21,7 +27,7 @@ function test_trial_point!(
         diff_x, diff_fx, diff_fx_mod,
         filter, x, xs, fx, fxs, fx_mod, fxs_mod, θx, θxs, Φx, Φxs;
         strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success, log_level,
-        it_index
+        it_index, indent
     )
 
     @unpack gamma_grow, gamma_shrink, gamma_shrink_much, delta_max = algo_opts
@@ -69,9 +75,10 @@ function test_trial_point!(
     # not modified
     filter, x, xs, fx, fxs, fx_mod, fxs_mod, θx, θxs, Φx, Φxs;
     strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success, log_level,
-    it_index
+    it_index, indent::Int=0
 )
-    
+    indent += 1
+    pad_str = lpad("", indent)
     fits_filter = is_acceptable(filter, θxs, Φxs, θx, Φx)
     
     @. diff_x = x - xs
@@ -79,7 +86,7 @@ function test_trial_point!(
     @. diff_fx_mod = fx_mod .- fxs_mod
 
     new_it_stat = if !fits_filter
-        @logmsg log_level "ITERATION $(it_index): Trial point does not fit filter."
+        @logmsg log_level "$(pad_str)Trial point with (θ, Φ) = $((θxs, Φxs)) does not fit filter."
         FILTER_FAIL
     else
         objf_decrease, model_decrease = if strict_acceptance_test
@@ -98,26 +105,26 @@ function test_trial_point!(
         model_decrease_condition = all(model_decrease .>= kappa_theta * θx^psi_theta)
         sufficient_decrease_condition = rho >= nu_accept
 
-        @logmsg log_level "ITERATION $(it_index): Trial point is filter-acceptable."
+        @logmsg log_level "$(pad_str)Trial point with (θ, Φ) = $((θxs, Φxs)) is filter-acceptable."
         if model_decrease_condition
             if !sufficient_decrease_condition
-                @logmsg log_level "ITERATION $(it_index): Step INACCEPTABLE."
+                @logmsg log_level "$(pad_str)Step INACCEPTABLE, ρ=$(rho)."
                 INACCEPTABLE
             else
                 if rho < nu_success
-                    @logmsg log_level "ITERATION $(it_index): Step ACCEPTABLE."
+                    @logmsg log_level "$(pad_str)Step ACCEPTABLE, ρ=$(rho)."
                     ACCEPTABLE
                 else
-                    @logmsg log_level "ITERATION $(it_index): Step SUCCESSFUL."
+                    @logmsg log_level "$(pad_str)Step SUCCESSFUL, ρ=$(rho)."
                     SUCCESSFUL
                 end
             end
         else
             if !sufficient_decrease_condition
-                @logmsg log_level "ITERATION $(it_index): Model decrease insufficient and bad step, FILTER_ADD_SHRINK."
+                @logmsg log_level "$(pad_str)Model decrease insufficient and bad step, FILTER_ADD_SHRINK."
                 FILTER_ADD_SHRINK
             else
-                @logmsg log_level "ITERATION $(it_index): Model decrease insufficient, okay step, FILTER_ADD."
+                @logmsg log_level "$(pad_str)Model decrease insufficient, okay step, FILTER_ADD."
                 FILTER_ADD
             end
         end

@@ -34,7 +34,8 @@ init_models(
 #     The constructor of `GenericStopping` logs the `ret_val`, so you could return a string
 #     explaining the reason for stopping.
 function update_models!(
-    mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts
+    mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts;
+    indent::Int
 )
     return nothing
 end

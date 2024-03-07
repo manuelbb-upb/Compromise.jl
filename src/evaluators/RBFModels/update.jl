@@ -1,7 +1,10 @@
 function update_rbf_model!(
     rbf::RBFModel, op, Δ, x0, fx0, global_lb=nothing, global_ub=nothing; 
-    norm_p=Inf, log_level=Info, force_rebuild::Bool=false
+    norm_p=Inf, log_level=Info, force_rebuild::Bool=false, indent::Int=0
 )
+    indent += 1
+    pad_str = lpad("", indent)
+
     @unpack delta_max, dim_x, dim_y = rbf
     @assert dim_x == length(x0)
     @assert dim_y == length(fx0)
@@ -16,24 +19,29 @@ function update_rbf_model!(
         was_fully_linear && 
         last_db_state == val(database.state)
     )
-        @logmsg log_level " RBFModel: No need to update."
+        @logmsg log_level "$(pad_str)RBFModel: No need to update."
         return nothing
     else
-        @logmsg log_level " RBFModel: Starting surrogate update."
+        @logmsg log_level "$(pad_str)RBFModel: Starting surrogate update."
     end
 
-    @ignoraise n_X = affine_sampling!(rbf, Δ, x0, fx0, global_lb, global_ub; delta_max, norm_p, log_level)
+    @ignoraise n_X = affine_sampling!(
+        rbf, Δ, x0, fx0, global_lb, global_ub; 
+        delta_max, norm_p, log_level, indent
+    )
     @ignoraise n_X = evaluate_and_update_db!(rbf, op, x0, n_X)
 
     if n_X < rbf.min_points
-        @warn "Cannot make a fully linear RBF model."
+        @warn "$(pad_str)Cannot make a fully linear RBF model."
     end
 
     @unpack shape_parameter_ref, delta_ref, database_state_ref = params;
     val!(shape_parameter_ref, model_shape_parameter(rbf, Δ))
    
     @unpack max_search_factor = rbf
-    @ignoraise n_X = find_additional_points!(rbf, x0, n_X; log_level, delta=delta_max * max_search_factor)
+    @ignoraise n_X = find_additional_points!(
+        rbf, x0, n_X; indent, log_level, delta=delta_max * max_search_factor
+    )
     val!(delta_ref, Δ)
     val!(database_state_ref, val(rbf.database.state))
     params.x0 .= x0
@@ -135,7 +143,7 @@ end
 
 function affine_sampling!(
     rbf::RBFModel, Δ, x0, fx0, global_lb=nothing, global_ub=nothing; 
-    delta_max, norm_p, log_level,
+    delta_max, norm_p, log_level, indent::Int=0
 )
     @unpack dim_x, params, buffers, database = rbf
     @unpack X = params
@@ -163,7 +171,8 @@ function affine_sampling!(
         min_points, max_points, search_factor, max_search_factor, 
         sampling_factor, max_sampling_factor, th_qr,
         Δ, x0, fx0, global_lb, global_ub;
-        norm_p, delta_max, enforce_fully_linear, log_level, x0_db_index
+        norm_p, delta_max, enforce_fully_linear, log_level, x0_db_index,
+        indent
     )
 end
 
@@ -174,8 +183,12 @@ end
     min_points, max_points, search_factor, max_search_factor,
     sampling_factor, max_sampling_factor, th_qr, 
     Δ, x0, fx0, global_lb, global_ub;
-    norm_p, enforce_fully_linear, delta_max, log_level, x0_db_index=-1
+    norm_p, enforce_fully_linear, delta_max, log_level, x0_db_index=-1,
+    indent::Int=0
 )
+    indent += 1
+    pad_str = lpad("", indent)
+    
     ## first column will contain `x0`, but shifted into origin, so set to zero:
     db_index .= -1
 
@@ -218,7 +231,7 @@ end
             xZ, ix1=2, ix2=n_X, norm_p, chosen_index=db_index, th=th_qr,    
         )
         n_X += n_new
-        @logmsg log_level "  RBFModel: Found $(n_new) points in radius $(Δ1)."
+        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) points in radius $(Δ1)."
 
         ## account for offset indices in chosen_index:
         unfilter_index!(db_index, database.filter_flags; ix1=2, ix2=n_X)    # `ix1=2` because we don't need to care about `x0_db_index`
@@ -232,7 +245,7 @@ end
             ix1=2, ix2=n_X, norm_p, qr, n_new = min_points - n_X
         )
         n_X += n_new
-        @logmsg log_level "  RBFModel: Sampled $(n_new) points in radius $(ΔZ1)."
+        @logmsg log_level "$(pad_str)RBFModel: Sampled $(n_new) points in radius $(ΔZ1)."
     end
     
     if n_X < min_points || min_points < max_points
@@ -249,7 +262,7 @@ end
 
     if n_X < min_points
         if enforce_fully_linear
-            @warn "Cannot make model fully linear."
+            @warn "$(pad_str)Cannot make model fully linear."
         end
 
         z_new .= 0
@@ -264,7 +277,7 @@ end
             xZ, ix1=2, ix2=n_X, norm_p, chosen_index = db_index, th = th_qr,    
         )
         _n_X = n_X + n_new
-        @logmsg log_level "  RBFModel: Found $(n_new) points in radius $(Δ2)."
+        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) points in radius $(Δ2)."
         ## account for offset indices in chosen_index:
         unfilter_index!(db_index, database.filter_flags; ix1=n_X+1, ix2=_n_X)
         for ix in n_X+1:_n_X
@@ -286,7 +299,7 @@ end
             ix1=2, ix2=n_X, norm_p, qr, n_new = min_points - n_X
         )
         n_X += n_new
-        @logmsg log_level "  RBFModel: Sampled $(n_new) points in radius $(ΔZ2)."
+        @logmsg log_level "$(pad_str)RBFModel: Sampled $(n_new) points in radius $(ΔZ2)."
     end
 
     return n_X
@@ -294,17 +307,17 @@ end
 
 function find_additional_points!(
     rbf, x0, n_X;
-    log_level, delta
+    log_level, delta, indent::Int=0
 )
     if n_X != rbf.min_points
-        least_squares_model!(rbf, n_X; log_level)
+        least_squares_model!(rbf, n_X; log_level, indent)
         return n_X
     else
-        return cholesky_point_search!(rbf, x0, n_X; log_level, delta)
+        return cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent)
     end
 end
 
-function least_squares_model!(rbf, n_X; log_level)
+function least_squares_model!(rbf, n_X; log_level, indent::Int=0)
     @unpack params, buffers, min_points, dim_y, dim_π, kernel, poly_deg = rbf
     @unpack X = params
     @unpack FX, Φ, Qj = buffers
@@ -324,7 +337,8 @@ function least_squares_model!(rbf, n_X; log_level)
     return nothing
 end
 
-function cholesky_point_search!(rbf, x0, n_X; log_level, delta)
+function cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent::Int=0)
+    
     @assert n_X == rbf.min_points
     @unpack params, buffers, database = rbf
     @unpack min_points, max_points, dim_x, dim_y, dim_π, kernel, poly_deg, th_cholesky = rbf
@@ -376,7 +390,9 @@ function cholesky_point_search!(rbf, x0, n_X; log_level, delta)
     )
     n_new = n_X - rbf.min_points
     if n_new > 0
-        @logmsg log_level "   RBFModel: Found $(n_new) additional points in radius $delta."
+        indent += 1
+        pad_str = lpad("", indent)
+        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) additional points in radius $delta."
     end
     return n_X
 end

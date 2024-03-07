@@ -47,6 +47,7 @@ compute the derivatives if the relevant field `isnothing`.
     func_and_grads :: FG = nothing
     func_and_grads_and_hessians :: FGH = nothing
     backend :: B = NoBackend()
+    func_is_multi :: Bool = false
 
     func_iip :: Bool = false # true -> func!(y, x, p), false -> y = func(x, p)
     grads_iip :: Bool = false # true -> grads!(Dy, x, p), false -> Dy = grads(x, p)
@@ -61,6 +62,8 @@ compute the derivatives if the relevant field `isnothing`.
     max_func_calls :: Int = typemax(Int)
     max_grad_calls :: Int = typemax(Int)
     max_hess_calls :: Int = typemax(Int)
+
+    name :: Union{Nothing, String} = nothing
     
     # Hessians should imply gradients
     @assert (
@@ -70,11 +73,11 @@ compute the derivatives if the relevant field `isnothing`.
     ) "If Hessians can be computed, then gradients should be computed too."
 end
 
-function CE.optrait_params(op::NonlinearParametricFunction)
-    CE.IsParametricOperator()
-end
-CE.optrait_partial(::NonlinearParametricFunction) = CE.OperatorOnlyFullEvaluation()
-CE.optrait_multi(::NonlinearParametricFunction) = CE.OperatorSequential()
+CE.operator_has_params(op::NonlinearParametricFunction)=true
+CE.operator_can_partial(op::NonlinearParametricFunction)=false
+CE.operator_can_eval_multi(op::NonlinearParametricFunction)=op.func_is_multi
+CE.operator_has_name(op::NonlinearParametricFunction)=!isnothing(op.name)
+CE.operator_name(op::NonlinearParametricFunction)=op.name
 
 function CE.provides_grads(op::NonlinearParametricFunction)
     !isnothing(op.backend) && return true
@@ -196,8 +199,8 @@ function CE.eval_op_and_grads!(y, Dy, op::NonlinearParametricFunction, x, p)
         end
         inc_counter = true
     elseif !isnothing(op.grads)
-        CE.eval_op!(y, op, x, p)
-        CE.eval_grads!(Dy, op, x, p)
+        @ignoraise CE.eval_op!(y, op, x, p)
+        @ignoraise CE.eval_grads!(Dy, op, x, p)
     else
         ad_op_and_grads!(y, Dy, op.backend, op.func, x, p, Val(op.func_iip))
         inc_counter = true
@@ -228,8 +231,8 @@ function CE.eval_op_and_grads_and_hessians!(y, Dy, H, op::NonlinearParametricFun
         end
         inc_couter = true
     elseif !isnothing(op.hessians)
-        CE.eval_op_and_grads!(y, Dy, op, x, p)
-        CE.eval_hessians!(H, op, x, p)
+        @ignoraise CE.eval_op_and_grads!(y, Dy, op, x, p)
+        @ignoraise CE.eval_hessians!(H, op, x, p)
     else
         ad_op_and_grads_and_hessians!(y, Dy, H, op.backend, op.func, x, p, Val(op.func_iip))
         inc_couter = true
@@ -295,9 +298,12 @@ function NonlinearFunction(; kwargs...)
     return NonlinearFunction(NonlinearParametricFunction(;new_kwargs...))
 end
 
-CE.optrait_params(op::NonlinearFunction)=CE.IsNonparametricOperator()
-CE.optrait_partial(op::NonlinearFunction)=CE.optrait_partial(op.wrapped_function)
-CE.optrait_multi(op::NonlinearFunction)=CE.optrait_multi(op.wrapped_function)
+CE.operator_has_params(op::NonlinearFunction)=false
+CE.operator_can_partial(op::NonlinearFunction)=CE.operator_can_partial(op.wrapped_function)
+CE.operator_can_eval_multi(op::NonlinearFunction)=CE.operator_can_eval_multi(op.wrapped_function)
+CE.operator_has_name(op::NonlinearFunction)=CE.operator_has_name(op.wrapped_function)
+CE.operator_name(op::NonlinearFunction)=CE.operator_name(op.wrapped_function)
+
 CE.provides_grads(op::NonlinearFunction)=CE.provides_grads(op.wrapped_function)
 CE.provides_hessians(op::NonlinearFunction)=CE.provides_hessians(op.wrapped_function)
 

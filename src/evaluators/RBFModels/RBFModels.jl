@@ -68,7 +68,6 @@ end
 
 function CE.eval_op!(y::RVec, rbf::RBFModel, x::RVec)
     Φ, Π, x_in, centers, cφ, cπ, ε, n_X = prepare_eval_buffers(rbf, x)
-
     _rbf_eval!(
         vec2col(y), Φ, Π, x_in, centers, cφ, cπ, ε;
         DIM_x = rbf.dim_x,
@@ -116,9 +115,9 @@ end
 
 function CE.update!(
     rbf::RBFModel, op, Δ, x, fx, lb, ub; 
-    log_level=Info, kwargs...
+    log_level=Info, indent::Int=0, kwargs...
 )
-    update_rbf_model!(rbf, op, Δ, x, fx, lb, ub; log_level, norm_p=Inf)
+    update_rbf_model!(rbf, op, Δ, x, fx, lb, ub; log_level, norm_p=Inf, indent)
 end
 
 function CE.universal_copy(rbf::RBFModel)

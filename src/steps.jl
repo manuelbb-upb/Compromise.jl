@@ -16,19 +16,20 @@ end
 function do_normal_step!(
     step_cache::AbstractStepCache, step_vals,
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
-    it_index, log_level
+    it_index, log_level, indent::Int=0
 )
     if vals.theta_ref[] > 0
-        @logmsg log_level "ITERATION $(it_index): Computing a normal step."
-    
+        pad_str = lpad("", indent)
+        @logmsg log_level "$(pad_str)* Computing a normal step."   
 
         @ignoraise compute_normal_step!(
             step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, 
             scaled_cons, vals, mod_vals; log_level
         )
+        @. step_vals.xn = vals.x + step_vals.n
         @logmsg log_level """
-            ITERATION $(it_index): Found normal step $(vec2str(step_vals.n)). 
-            Hence xn=$(vec2str(step_vals.xn))."""
+            $(pad_str) Found normal step $(pretty_row_vec(step_vals.n; cutoff=60)). 
+            $(pad_str) \t Hence xn=$(pretty_row_vec(step_vals.xn; cutoff=60)).""" 
 
     else
         step_vals.n .= 0
@@ -42,26 +43,38 @@ function compute_descent_step!(
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
     log_level
 )
-    ## set `step_vals.d` to hold scaled descent step
+    ## set `step_vals.d` to hold descent step
     ## set `step_vals.crit_ref` to hold criticality measure
-    ## return `false` to indicate that `step_vals.s`, `step_vals.xs` and 
-    ## `step_vals.fxs` are set already
-    return true
+    return nothing
+end
+
+function finalize_step_vals!(
+    step_cache::AbstractStepCache, step_vals,
+    Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
+    log_level
+)
+    ## find stepsize and scale `step_vals.d`
+    ## set `step_vals.s`, `step_vals.xs`, `step_vals.fxs`
+    @. step_vals.s = step_vals.n + step_vals.d
+    @. step_vals.xs = vals.x + step_vals.s
+    func_vals!(step_vals.fxs, mod, step_vals.xs)
+    return nothing
 end
 
 function do_descent_step!(
     step_cache::AbstractStepCache, step_vals,
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
-    log_level
+    log_level, finalize::Bool=true
 )
-    @ignoraise set_other_fields = compute_descent_step!(
+    @ignoraise compute_descent_step!(
         step_cache, step_vals, Δ, mop, mod, scaler, lin_cons,
         scaled_cons, vals, mod_vals; log_level)
     
-    if set_other_fields
-        step_vals.s .= step_vals.n .+ step_vals.d
-        step_vals.xs .= vals.x .+ step_vals.xs
-        @ignoraise objectives!(step_vals.fxs, mod, step_vals.xs)
+    if finalize
+        @ignoraise finalize_step_vals!(
+            step_cache, step_vals, Δ, mop, mod, scaler, lin_cons,
+            scaled_cons, vals, mod_vals; log_level
+        )
     end
     return nothing
 end
@@ -173,43 +186,61 @@ function compute_descent_step!(
 )
     @unpack x, Ax = vals
     @unpack A = scaled_cons
-    @unpack gx, Dgx = mod_vals
+    @unpack gx, Dgx, Dfx = mod_vals
     @unpack Axn, Dgx_n = step_cache
     @unpack n = step_vals
+    if !iszero(n)
+        diff_objectives!(Dfx, mod, x)
+    end
 
     postprocess_normal_step_results!(Axn, Dgx_n, n, Ax, A, Dgx, gx)
 
     @unpack xn = step_vals
     @unpack lb, ub, E, b = scaled_cons
-    @unpack Dfx, Dhx = mod_vals
+    @unpack Dhx = mod_vals
     @unpack normalize_gradients, qp_opt = step_cache
     χ, _d = solve_steepest_descent_problem(
         xn, Dfx, lb, ub, E, Axn, A, b, Dhx, Dgx_n, Dgx; 
         normalize_gradients, qp_opt, ball_norm = step_cache.descent_step_norm
     )
     
-    @unpack d = step_vals
+    step_vals.d .= _d
     step_vals.crit_ref[] = χ
-    d .= _d
+    return nothing
+end
 
-    @unpack lb_tr, ub_tr, fxn = step_cache
-    @unpack fxs = step_vals
+function finalize_step_vals!(
+    step_cache::SteepestDescentCache, step_vals,
+    Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
+    log_level
+)
+    @unpack x = vals 
+    @unpack xn, fxs, d = step_vals
+    @unpack A, b, lb, ub = scaled_cons
+    @unpack gx, Dgx = mod_vals
+    @unpack lb_tr, ub_tr, Axn, Dgx_n = step_cache
     trust_region_bounds!(lb_tr, ub_tr, x, Δ, lb, ub)
     _, σ = initial_steplength(xn, d, lb_tr, ub_tr, Axn, A, b, gx, Dgx_n, Dgx)
     
     if isnan(σ)
         step_vals.crit_ref[] = 0
         d .*= 0
-        return true
+        step_vals.s .= step_vals.n
+        step_vals.xs .= step_vals.xn
+        objectives!(step_vals.fxs, mod, step_vals.xn)
+        return nothing
     end
     
-    @unpack rhs_factor, strict_backtracking, backtracking_factor = step_cache
+    @unpack fxn, rhs_factor, strict_backtracking, backtracking_factor = step_cache
     @unpack xs = step_vals
-    @ignoraise _χ = backtrack!(d, xs, fxn, fxs,
-        mod, xn, lb_tr, ub_tr, χ, backtracking_factor, rhs_factor, strict_backtracking)
+    χ = step_vals.crit_ref[]
+    @ignoraise _χ = backtrack!(
+        d, xs, fxn, fxs,
+        mod, xn, lb_tr, ub_tr, χ, backtracking_factor, rhs_factor, strict_backtracking; σ_init=σ)
     step_vals.crit_ref[] = _χ
     
-    return false 
+    return nothing
+    
 end
 
 function solve_normal_step_problem(
@@ -353,16 +384,16 @@ function backtrack!(
     d, xs, fxn, fxs, 
     mod, xn, lb_tr, ub_tr, 
     χ, backtracking_factor, rhs_factor,
-    strict :: Bool
+    strict :: Bool;
+    σ_init = one(eltype(xs))
 )
     if χ <= 0
         d .*= 0
         return 0
     end
     ## initialize stepsize `σ=1`
-    T = eltype(d)
-    σ = one(T)
-    σ_min = nextfloat(zero(T), 2)   # TODO make configurable
+    σ = σ_init
+    σ_min = eps(σ)   # TODO make configurable
 
     ## pre-compute RHS for Armijo test
     rhs = χ * rhs_factor * σ
