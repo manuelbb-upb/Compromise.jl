@@ -117,12 +117,13 @@ Base.@kwdef struct SteepestDescentCache{
     
     ## caches for intermediate values
     fxn :: Vector{F}
+    fx_tmp :: Vector{F}
 
     lb_tr :: Vector{F}
     ub_tr :: Vector{F}
 
     ## caches for product of constraint jacobians and normal step
-    Axn :: Vector{F}    # A*(x + n)
+    Axn :: Vector{F}    # Aξ + _A*n
     Dgx_n :: Vector{F}  # g(x) + ∇g(x) * n
 
     qp_opt :: QPOPT
@@ -132,6 +133,7 @@ function init_step_cache(
     cfg::SteepestDescentConfig, vals, mod_vals
 )
     fxn = copy(vals.fx)
+    fx_tmp = copy(fxn)
     F = eltype(fxn)
     
     backtracking_factor = F(cfg.backtracking_factor)
@@ -149,7 +151,7 @@ function init_step_cache(
     return SteepestDescentCache(;
         backtracking_factor, rhs_factor, normalize_gradients, 
         strict_backtracking, descent_step_norm, normal_step_norm, 
-        fxn, lb_tr, ub_tr, Axn, Dgx_n, qp_opt 
+        fxn, fx_tmp, lb_tr, ub_tr, Axn, Dgx_n, qp_opt 
     )
 end
 
@@ -167,12 +169,17 @@ function compute_normal_step!(
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
     log_level
 )
-    @unpack x, Ex, Ax = vals
-    @unpack lb, ub, A, b, E, c = scaled_cons
+    @unpack x = vals
+    Eξ = vals.Ex
+    Aξ = vals.Ax
+    @unpack lb, ub = scaled_cons
+    @unpack b, c = lin_cons
+    _A = scaled_cons.A
+    _E = scaled_cons.E
     @unpack gx, hx, Dgx, Dhx = mod_vals
     @unpack qp_opt = step_cache
     n = solve_normal_step_problem(
-        x, lb, ub, Ex, E, c, Ax, A, b, hx, Dhx, gx, Dgx;
+        x, lb, ub, Eξ, _E, c, Aξ, _A, b, hx, Dhx, gx, Dgx;
         qp_opt, step_norm = step_cache.normal_step_norm
     )
     Base.copyto!(step_vals.n, n)
@@ -184,23 +191,28 @@ function compute_descent_step!(
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
     log_level
 )
-    @unpack x, Ax = vals
-    @unpack A = scaled_cons
-    @unpack gx, Dgx, Dfx = mod_vals
-    @unpack Axn, Dgx_n = step_cache
+    @unpack x = vals
+    @unpack Dfx = mod_vals
     @unpack n = step_vals
     if !iszero(n)
         diff_objectives!(Dfx, mod, x)
-    end
+    end    
+    
+    @unpack gx, Dgx = mod_vals
+    @unpack Axn, Dgx_n = step_cache
+    Aξ = vals.Ax
+    _A = scaled_cons.A
 
-    postprocess_normal_step_results!(Axn, Dgx_n, n, Ax, A, Dgx, gx)
+    postprocess_normal_step_results!(Axn, Dgx_n, n, Aξ, _A, Dgx, gx)
 
     @unpack xn = step_vals
-    @unpack lb, ub, E, b = scaled_cons
+    @unpack lb, ub = scaled_cons
+    _E = scaled_cons.E
+    @unpack b, c = lin_cons
     @unpack Dhx = mod_vals
     @unpack normalize_gradients, qp_opt = step_cache
     χ, _d = solve_steepest_descent_problem(
-        xn, Dfx, lb, ub, E, Axn, A, b, Dhx, Dgx_n, Dgx; 
+        xn, Dfx, lb, ub, _E, Axn, _A, b, Dhx, Dgx_n, Dgx; 
         normalize_gradients, qp_opt, ball_norm = step_cache.descent_step_norm
     )
     
@@ -216,38 +228,41 @@ function finalize_step_vals!(
 )
     @unpack x = vals 
     @unpack xn, fxs, d = step_vals
-    @unpack A, b, lb, ub = scaled_cons
+    @unpack lb, ub = scaled_cons
+    _A = scaled_cons.A
+    @unpack b = lin_cons
     @unpack gx, Dgx = mod_vals
     @unpack lb_tr, ub_tr, Axn, Dgx_n = step_cache
     trust_region_bounds!(lb_tr, ub_tr, x, Δ, lb, ub)
-    _, σ = initial_steplength(xn, d, lb_tr, ub_tr, Axn, A, b, gx, Dgx_n, Dgx)
+    _, σ = initial_steplength(xn, d, lb_tr, ub_tr, Axn, _A, b, gx, Dgx_n, Dgx)
     
     if isnan(σ)
         step_vals.crit_ref[] = 0
-        d .*= 0
+        d .= 0
         step_vals.s .= step_vals.n
         step_vals.xs .= step_vals.xn
         objectives!(step_vals.fxs, mod, step_vals.xn)
         return nothing
     end
     
-    @unpack fxn, rhs_factor, strict_backtracking, backtracking_factor = step_cache
+    @unpack fxn, fx_tmp, rhs_factor, strict_backtracking, backtracking_factor = step_cache
     @unpack xs = step_vals
     χ = step_vals.crit_ref[]
     @ignoraise _χ = backtrack!(
         d, xs, fxn, fxs,
-        mod, xn, lb_tr, ub_tr, χ, backtracking_factor, rhs_factor, strict_backtracking; σ_init=σ)
+        mod, xn, lb_tr, ub_tr, χ, backtracking_factor, rhs_factor, strict_backtracking;
+        fx_tmp, σ_init=σ
+    )
     step_vals.crit_ref[] = _χ
-    
+    @. step_vals.s = step_vals.n + d
     return nothing
-    
 end
 
 function solve_normal_step_problem(
     x::RVec, 
     lb::Union{RVec, Nothing}, ub::Union{RVec, Nothing},
-    Ex::RVec, E::Union{RMat, Nothing}, c::Union{RVec, Nothing},
-    Ax::RVec, A::Union{RMat, Nothing}, b::Union{RVec, Nothing},
+    Eξ::RVec, _E::Union{RMat, Nothing}, c::Union{RVec, Nothing},
+    Aξ::RVec, _A::Union{RMat, Nothing}, b::Union{RVec, Nothing},
     hx::RVec, Dhx::RMat, gx::RVec, Dgx::RMat,
     ;
     qp_opt::Type{<:MOI.AbstractOptimizer},
@@ -266,11 +281,18 @@ function solve_normal_step_problem(
     set_lower_bounds!(opt, xn, lb)
     set_upper_bounds!(opt, xn, ub)
 
-    if !(isnothing(E) || isnothing(c))
-        JuMP.@constraint(opt, Ex .+ E * n .== c)
+    if !(isnothing(b) || isnothing(_A))
+        ## Suppose `_A` and `_b` are applicable in the scaled domain, `_A * x ≤ _b`.
+        ## In the unscaled domain, `A * ξ ≤ b`.
+        ## `Aξ` actually holds `A*ξ = A*(S*x + s) = _A * x + A * s` ⇒ `_A * x = Aξ - A*s`.
+        ## Additionally, `_b = b - A * s`.
+        ## Thus,  `_A * x + _A * n .<= _b` is equivalent to 
+        ## `Aξ - A*s + _A*n .<= b - A*s` ⇔ `Aξ + _A*n .<= b`
+        JuMP.@constraint(opt, Aξ .+ _A * n .<= b)
     end
-    if !(isnothing(b) || isnothing(A))
-        JuMP.@constraint(opt, Ax .+ A * n .<= b)
+
+    if !(isnothing(_E) || isnothing(c))
+        JuMP.@constraint(opt, Eξ .+ _E * n .== c)
     end
 
     JuMP.@constraint(opt, hx .+ Dhx'n .== 0)
@@ -308,13 +330,13 @@ function postprocess_normal_step_results!(
     Axn, Dgx_n,
     # not modified:
     n::RVec,
-    Ax::RVec, 
-    A::Union{RMat, Nothing},
+    Aξ::RVec, 
+    _A::Union{RMat, Nothing},
     Dgx::RMat, gx::RVec
 )
-    Axn .= Ax
-    if !isnothing(A)
-        Axn .+= A * n
+    Axn .= Aξ
+    if !isnothing(_A)
+        Axn .+= _A * n
     end
     Dgx_n .= gx
     Dgx_n .+= Dgx'n
@@ -324,8 +346,8 @@ end
 function solve_steepest_descent_problem(
     xn::RVec, Dfx::RMat,
     lb::Union{RVec, Nothing}, ub::Union{RVec, Nothing},
-    E::Union{RMat, Nothing},
-    Axn::RVec, A::Union{RMat, Nothing}, b::Union{RVec, Nothing},
+    _E::Union{RMat, Nothing},
+    Axn::RVec, _A::Union{RMat, Nothing}, b::Union{RVec, Nothing},
     Dhx::RMat, Dgx_n::RVec, Dgx::RMat,
     ;
     qp_opt::Type{<:MOI.AbstractOptimizer},
@@ -361,11 +383,11 @@ function solve_steepest_descent_problem(
     ## x + s .<= ub
     set_upper_bounds!(opt, xs, ub)
 
-    if !isnothing(E)
-        JuMP.@constraint(opt, E * d .== 0)
+    if !isnothing(_E)
+        JuMP.@constraint(opt, _E * d .== 0)
     end
-    if !(isnothing(b) || isnothing(A))
-        JuMP.@constraint(opt, Axn .+ A * d .<= b)
+    if !(isnothing(b) || isnothing(_A))
+        JuMP.@constraint(opt, Axn .+ _A * d .<= b)
     end
 
     JuMP.@constraint(opt, Dhx'd .== 0)
@@ -385,51 +407,95 @@ function backtrack!(
     mod, xn, lb_tr, ub_tr, 
     χ, backtracking_factor, rhs_factor,
     strict :: Bool;
+    fx_tmp = copy(fxn),
     σ_init = one(eltype(xs))
 )
     if χ <= 0
-        d .*= 0
+        d .= 0
         return 0
     end
     ## initialize stepsize `σ=1`
     σ = σ_init
-    σ_min = eps(σ)   # TODO make configurable
+    x_delta_min = mapreduce(eps, min, xn)   # TODO make configurable ?
 
-    ## pre-compute RHS for Armijo test
-    rhs = χ * rhs_factor * σ
+    x_delta_too_small = xdel -> all( _d -> abs(_d) <= x_delta_min, xdel )
 
-    ## evaluate objectives at `xn` and trial point `xs`
-    xs .= xn .+ d
-    project_into_box!(xs, lb_tr, ub_tr)
-    d .= xs .- xn
-    @ignoraise objectives!(fxn, mod, xn)
-    @ignoraise objectives!(fxs, mod, xs)
+    d .*= σ_init
+    set_to_zero = x_delta_too_small(d)
 
-    ## avoid re-computation of maximum for non-strict test:
-    phi_xn = strict ? fxn : maximum(fxn)
-
-    ## shrink stepsize until armijo condition is fullfilled
-    while σ > σ_min
-        if strict 
-            if all(phi_xn - fxs .>= rhs)
-                break
-            end
-        else
-            if phi_xn - maximum(fxs) >= rhs
-                break
-            end
-        end
-        
-        ## shrink `σ`, `rhs` and `d` by multiplication with `backtracking_factor`
-        σ *= backtracking_factor
-        rhs *= backtracking_factor
-        d .*= backtracking_factor
-
-        ## reset trial point and compute objectives
-        xs .= xn .+ d
+    if set_to_zero
+        d .= 0
+        xs .= xn
         @ignoraise objectives!(fxs, mod, xs)
     end
-    _χ = σ < σ_min ? 0 : χ
+
+    if !set_to_zero
+        ## pre-compute RHS for Armijo test
+        rhs = χ * rhs_factor * σ
+
+        ## evaluate objectives at `xn` and trial point `xs`
+        #src project_into_box!(xs, lb_tr, ub_tr)
+        #src d .= xs .- xn
+        @ignoraise objectives!(fxn, mod, xn)
+        xs .= xn .+ d
+        @ignoraise objectives!(fxs, mod, xs)
+    
+        fx_delta_min = mapreduce(eps, min, fxn)
+        fx_delta_too_small = if strict
+            fd -> all( _fd -> abs(_fd) <= fx_delta_min, fd )
+        else
+            fd -> abs(fd[1] <= fx_delta_min)
+        end
+
+        ## avoid re-computation of maximum for non-strict test:
+        phi_xn = strict ? fxn : maximum(fxn)
+
+        ## shrink stepsize until armijo condition is fullfilled
+        while true 
+            if σ <= 0
+                set_to_zero = true
+                break
+            end
+            if strict
+                @. fx_tmp = phi_xn - fxs
+                if fx_delta_too_small(fx_tmp)
+                    set_to_zero = true
+                    break
+                end
+                if all( fx_tmp .>= rhs )
+                    break
+                end
+            else
+                maximum!(fx_tmp, fxs)
+                fx_tmp[1] -= phi_xn
+                if fx_delta_too_small(fx_tmp)
+                    set_to_zero = true
+                    break
+                end
+                fx_tmp[1] *= -1
+                if fx_tmp[1] >= rhs
+                    break
+                end
+            end
+            
+            ## shrink `σ`, `rhs` and `d` by multiplication with `backtracking_factor`
+            σ *= backtracking_factor
+            rhs *= backtracking_factor
+            d .*= backtracking_factor
+            
+            set_to_zero = x_delta_too_small(d)
+            if set_to_zero
+                d .= 0
+            end
+
+            ## reset trial point and compute objectives
+            xs .= xn .+ d
+            @ignoraise objectives!(fxs, mod, xs)
+            
+            set_to_zero && break
+        end
+    end
+    _χ = set_to_zero ? 0 : χ
     return _χ
 end
 
@@ -478,12 +544,12 @@ end
 function initial_steplength(
     xn::RVec, d::RVec,
     lb_tr::RVec, ub_tr::RVec,
-    Axn::RVec, A::Union{RMat, Nothing}, b::Union{RVec, Nothing},
+    Axn::RVec, _A::Union{RMat, Nothing}, b::Union{RVec, Nothing},
     gx::RVec, Dgx_n::RVec, Dgx::RMat
 )
 
     ## By construction, `d` is in the kernel of the linear equality constraint matrix
-    ## `E`, so any steplength `σ ∈ ℝ` will be compatible with these constraints.
+    ## `_E`, so any steplength `σ ∈ ℝ` will be compatible with these constraints.
     
     ## Same holds for the linearized nonlinear equality constraints:
     ## `Dhx'd .== 0`.
@@ -491,8 +557,8 @@ function initial_steplength(
     T = eltype(xn)
     σ_min, σ_max = intersect_box(xn, d, lb_tr, ub_tr)
         
-    if !(isnothing(A) || isnothing(b))
-        for (i, ai) = enumerate(eachrow(A))
+    if !(isnothing(_A) || isnothing(b))
+        for (i, ai) = enumerate(eachrow(_A))
             # Axn + σ * A*d .<= b
             σl, σr = intersect_bound(Axn[i], LA.dot(ai, d), b[i], T)
             σ_min, σ_max = intersect_intervals(σ_min, σ_max, σl, σr, T)

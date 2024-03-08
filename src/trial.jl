@@ -100,7 +100,6 @@ function test_trial_point!(
                 maximum(fx_mod) - maximum(fxs_mod) 
             )
         end
-
         rho = minimum( objf_decrease ./ model_decrease )            
         model_decrease_condition = all(model_decrease .>= kappa_theta * θx^psi_theta)
         sufficient_decrease_condition = rho >= nu_accept

@@ -10,7 +10,9 @@ function criticality_routine(
     indent += 1
     pad_str = lpad("", indent)
 
-    @unpack log_level, eps_theta, eps_crit, crit_M, crit_B, crit_alpha = algo_opts
+    @unpack log_level, eps_theta, eps_crit, crit_M, crit_B, crit_alpha, 
+        backtrack_in_crit_routine = algo_opts
+        
     χ = step_vals.crit_ref[]
     θ = vals.theta_ref[]
     Δ_init = Δ
@@ -62,7 +64,7 @@ function criticality_routine(
             end
             @ignorebreak stop_code = do_descent_step!(
                 step_cachej, step_valsj, Δj, mop, modj, scaler, lin_cons, scaled_cons, vals,
-                mod_valsj; log_level
+                mod_valsj; log_level, finalize=backtrack_in_crit_routine
             )
             
             χ = step_valsj.crit_ref[]
@@ -86,14 +88,16 @@ function criticality_routine(
             )
 
             j+=1
-        end
-       
+        end       
         _Δ = Δ
         Δ = min(max(Δ, algo_opts.crit_B*χ), Δ_init)
+        if !backtrack_in_crit_routine
+            @ignoraise finalize_step_vals!(
+                step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals; log_level)
+        end
         @logmsg log_level """
             $(pad_str) Finished after $j criticality loop(s), 
             $(pad_str) Δ=$_Δ > Mχ=$(crit_M * χ), now Δ=$Δ."""
-
     end
     if isa(stop_code, AbstractStoppingCriterion)
         return stop_code 

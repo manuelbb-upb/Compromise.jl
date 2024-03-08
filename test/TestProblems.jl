@@ -212,17 +212,14 @@ end
 
 function _test_problem(::Val{2}, n_vars::Int=2, F=Float64)
     mop = SimplexParaboloids{F}(; n_vars)
-    mop.lb = zeros(F, n_vars)
-    mop.ub = ones(F, n_vars)
+    mop.lb = fill(F(-0.5), n_vars)
+    mop.ub = fill(F(1.5), n_vars)
     mop.x0 = zeros(F, n_vars)
     return mop
 end
 
 function _test_problem(::Val{3}, n_vars::Int=2, F=Float64)
-    mop = SimplexParaboloids{F}(; n_vars)
-    mop.lb = zeros(F, n_vars)
-    mop.ub = ones(F, n_vars)
-    mop.x0 = zeros(F, n_vars)
+    mop = _test_problem(Val(2), n_vars, F)
     A, b = simplex_arrays(n_vars)
     mop.A = A
     mop.b = b
@@ -275,4 +272,5 @@ function to_mutable_mop(mop::SimplexParaboloids, mcfg=:rbf)
     end
     return p
 end
+
 end#module

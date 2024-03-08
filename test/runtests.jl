@@ -17,3 +17,11 @@ end
 @safetestset "Matrix Factorizations" begin
     include("matrix_factorizations.jl")
 end
+
+@safetestset "Subproblems" begin
+    include("suproblems.jl")
+end
+
+@safetestset "Test Problems" begin
+    include("testprobs.jl")
+end

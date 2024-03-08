@@ -21,7 +21,8 @@ end
 "Unscale `x` and set `ξ` according to `ξ = S*x + s`."
 function unscale!(ξ, scaler::AbstractAffineScaler, x)
     ## Suppose `T = scaling_matrix(scaler)` and `t = unscaling_offset(scaler)`.
-    ## If `x = T*ξ + t`, then `ξ = T⁻¹(x - t)`, so usually `S = inv(T)` and `s = -inv(T) * t`.
+    ## If `x = T*ξ + t`, then `ξ = T⁻¹(x - t)`, 
+    ## so usually `S = inv(T)` and `s = -inv(T) * t`.
     S = unscaling_matrix(scaler)
     s = unscaling_offset(scaler)
     return affine_map!(ξ, S, s, x)
@@ -41,7 +42,7 @@ unscale!(ξ::Nothing, scaler::AbstractAffineScaler, x::Nothing) = nothing
     _A::AbstractMatrix, _b::AbstractVector, 
     scaler::AbstractAffineScaler, A::AbstractMatrix, b::AbstractVector
 )
-    # ξ = S * x + s => A*ξ = A*S*x + A*s.
+    # ξ = S * x + s ⇒ A*ξ = A*S*x + A*s ? b ⇒ (A * S) * x ? (b - (A * s))
     # Hence, `_A = A*S`, `_b = b - A*s`
     S = unscaling_matrix(scaler)
     s = unscaling_offset(scaler)
@@ -113,13 +114,14 @@ function init_box_scaler(lb::RVec, ub::RVec, dim)
     end
 
     ## set up a min-max scaler
-    ## xᵢ is scaled to be contained in [0,1] via xᵢ = (ξᵢ - lᵢ)/(uᵢ - lᵢ)
-    ## We setup `T` to contain the divisors `w` and `b` to have the offset `-lb ./ w`.
+    ## xᵢ is scaled to be contained in [0,1] via xᵢ = (ξᵢ - lᵢ)/(uᵢ - lᵢ).
+    ## ⇒ x = ξ ./ w - lb ./ w
+    ## We setup `T` to contain the divisors `w` and `t` to have the offset `-lb ./ w`.
     w = ub .- lb
     T = LA.Diagonal(1 ./ w)
-    t = - lb ./ w
+    t = -lb ./ w
 
-    ## the unscaling is `ξ = (x + lb ./ w) .* w` = x .* w + lb
+    ## the unscaling is `ξ = x .* w + lb
     S = LA.Diagonal(w)
     s = lb
 
