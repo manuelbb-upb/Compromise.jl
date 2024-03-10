@@ -73,13 +73,13 @@ function run_problems(lb, ub, objf!; num_runs::Int, reuse_model::Bool)
         X[:,i] .= fv.ξ
         Y[:,i] .= fv.fx
         db = user_callback.mod.mod_objectives.database
-        db_x = db.database_x[:, db.database_flags_x]
+        db_x = db.x[:, db.database_flags_x]
         ## input sites are scaled, we have to undo that:
         database_x[i] = copy(db_x)
         for (ci,c) in enumerate(eachcol(database_x[i]))
             Compromise.unscale!(c, user_callback.scaler, db_x[:, ci])
         end
-        database_y[i] = copy(db.database_y[:, db.database_flags_y])
+        database_y[i] = copy(db.y[:, db.database_flags_y])
     end
 
     return X, X0, database_x, Y, Y0, database_y

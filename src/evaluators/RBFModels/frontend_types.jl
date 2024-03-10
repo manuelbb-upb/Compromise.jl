@@ -153,7 +153,9 @@ Base.@kwdef struct RBFTrainingBuffers{T<:Real}
 
     "`dim_x + 1` vector to mark database points."
     db_index :: Vector{Int}
-    not_db_flags :: Vector{Bool}
+    not_db_flags :: Vector{Bool}  # flag vector for batch evaluation
+
+    filter_flags :: Vector{Bool}
 
     "`max_points` × `max_points` buffer for RBF basis matrix."
     Φ :: Matrix{T}
@@ -194,6 +196,11 @@ function Base.copyto!(dst::RBFTrainingBuffers, src::RBFTrainingBuffers)
   )
     copyto!(getfield(dst, fn), getfield(src, fn))
   end
+  if length(dst.filter_flags) < length(src.filter_flags)
+    resize!(dst.filter_flags, length(src.filter_flags))
+  end
+  copyto!(dst.filter_flags, src.filter_flags)
+  
   val!(dst.x0_db_index_ref, val(src.x0_db_index_ref))
   if !isnothing(dst.qr_ws_dim_x) && !isnothing(src.qr_ws_dim_x)
     copyto!(dst.qr_ws_dim_x, src.qr_ws_dim_x)
@@ -356,10 +363,12 @@ function rbf_params_and_buffers(
 
   x0_db_index_ref = MutableNumber(-1)
 
+  filter_flags = zeros(Bool, 0)
+
   buffers = RBFTrainingBuffers(;
     dim_x, dim_y, dim_π, max_points, min_points,
     qr_ws_dim_x, lb, ub, FX, xZ, db_index, not_db_flags, Φ, qr_ws_min_points,
-    Q, R, Qj, Rj, NΦ, NΦN, L, Linv, v1, v2, x0_db_index_ref
+    Q, R, Qj, Rj, NΦ, NΦN, L, Linv, v1, v2, x0_db_index_ref, filter_flags
   )
 
   return params, buffers

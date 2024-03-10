@@ -4,6 +4,7 @@ authors = ["Manuel Berkemeier <manuelbb@mail.uni-paderborn.de> and contributors"
 version = "0.0.1"
 
 [deps]
+ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477"
 Dictionaries = "85a47980-9c8c-11e8-2b9f-f7ca1fa99fb4"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 ElasticArrays = "fdbdab4c-e67f-52f5-8c3f-e7b388dad3d4"

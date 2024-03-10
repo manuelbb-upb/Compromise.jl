@@ -188,8 +188,8 @@ end
 
 @testset "RBFDatabase" begin
     @test fieldnames(R.RBFDatabase) == (
-        :dim_x, :dim_y, :max_size, :chunk_size, :database_x, :database_y, 
-        :flags_x, :flags_y, :filter_flags, :state
+        :dim_x, :dim_y, :max_size, :chunk_size, :x, :y, 
+        :flags_x, :flags_y, :current_size, :state, :rwlock
     )
 
     cfg = R.RBFConfig()
@@ -198,15 +198,13 @@ end
     @test dat.dim_y == 3
     @test dat.max_size == 125000000
     @test dat.chunk_size == 6
-    @test size(dat.database_x) == (2, 6)
-    @test size(dat.database_y) == (3, 6)
-    @test eltype(dat.database_x) == Float32
+    @test size(dat.x) == (2, 6)
+    @test size(dat.y) == (3, 6)
+    @test eltype(dat.x) == Float32
     @test all(dat.flags_x .== 0)
     @test all(dat.flags_y .== 0)
-    @test all(dat.filter_flags .== false)
     @test length(dat.flags_x) == 6
     @test length(dat.flags_y) == 6
-    @test length(dat.filter_flags) == 6
 
     cfg = R.RBFConfig(; database_size=10)
     dat = R.init_rbf_database(cfg, 2, 3, Float32)
@@ -229,18 +227,17 @@ end
     
     cfg = R.RBFConfig(; database_size = 9, database_chunk_size=3)
     dat = R.init_rbf_database(cfg, 2, 3, Float32)
-    @test size(dat.database_x, 2) == 3
-    @test R.grow_database!(dat) == true
-    @test size(dat.database_x, 2) == 6
-    @test size(dat.database_y, 2) == 6
+    @test size(dat.x, 2) == 3
+    @test R.db_grow!(dat) == true
+    @test size(dat.x, 2) == 6
+    @test size(dat.y, 2) == 6
     @test length(dat.flags_x) == 6
     @test length(dat.flags_y) == 6
-    @test length(dat.filter_flags) == 6
-    @test R.grow_database!(dat) == true
-    @test size(dat.database_x, 2) == 9
-    @test R.grow_database!(dat) == false
-    @test R.grow_database!(dat, 2) == true
-    @test size(dat.database_x, 2) == 11
+    @test R.db_grow!(dat) == true
+    @test size(dat.x, 2) == 9
+    @test R.db_grow!(dat) == false
+    @test R.db_grow!(dat; force_chunk = 2) == true
+    @test size(dat.x, 2) == 11
 
     for i=1:11
         x = fill(i, 2)
@@ -253,21 +250,24 @@ end
     ix = R.add_to_database!(dat, rand(2), rand(3))
     @test ix == 2
     ix = R.add_to_database!(dat, rand(2), rand(3))
+    #=
     skip_index_fn = i -> (i == 4)
     ix = R.add_to_database!(dat, rand(2), rand(3), skip_index_fn)
     @test ix == 5
+    =#
 
     op = C.NonlinearFunction(; func = x -> [x; sum(x)], func_iip=false)
     R.evaluate!(dat, op)
     for j=6:11
-        y = dat.database_y[:, j]
+        y = dat.y[:, j]
         @test y[1] == y[2] == j
         @test y[3] == 2*j 
     end
-    R.box_search!(dat, [7, 7], [9, 9])
-    @assert all( dat.filter_flags[1:6] .== false )
-    @assert all( dat.filter_flags[7:9] .== true )
-    @assert all( dat.filter_flags[10:11] .== false )
+    ff = zeros(Bool, 0)
+    R.box_search!(ff, dat, [7, 7], [9, 9])
+    @assert all( ff[1:6] .== false )
+    @assert all( ff[7:9] .== true )
+    @assert all( ff[10:11] .== false )
 end
 #%%
 
@@ -384,6 +384,7 @@ end
                 func_grads!(Dy, rbf, xi)
                 @test isapprox(jac, Dy'; rtol=1e-6)
             end
+            
         end
         end
         end

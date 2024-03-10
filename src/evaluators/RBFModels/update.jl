@@ -5,50 +5,79 @@ function update_rbf_model!(
     indent += 1
     pad_str = lpad("", indent)
 
-    @unpack delta_max, dim_x, dim_y = rbf
+    @unpack delta_max, dim_x, dim_y, max_points, min_points = rbf
     @assert dim_x == length(x0)
     @assert dim_y == length(fx0)
 
     @unpack buffers, params, database = rbf
     was_fully_linear = val(params.is_fully_linear_ref)
     last_db_state = val(params.database_state_ref)
+    
+    @unpack rwlock = database
+    
+    lock_read(rwlock)
+        if (
+            !force_rebuild && 
+            x0 == params.x0 && Δ == val(params.delta_ref) &&
+            was_fully_linear && 
+            last_db_state == db_state(database)
+        )
+            @logmsg log_level "$(pad_str)RBFModel: No need to update."
+            unlock_read(rwlock)
+            return nothing
+        else
+            @logmsg log_level "$(pad_str)RBFModel: Starting surrogate update."
+        end
+    unlock_read(rwlock)
 
-    if (
-        !force_rebuild && 
-        x0 == params.x0 && Δ == val(params.delta_ref) &&
-        was_fully_linear && 
-        last_db_state == val(database.state)
-    )
-        @logmsg log_level "$(pad_str)RBFModel: No need to update."
-        return nothing
+    @ignoraise n_X_affine_sampling, n_X = lock_read(rwlock) do
+        @ignoraise n_X = affine_sampling!(
+            rbf, Δ, x0, fx0, global_lb, global_ub; 
+            delta_max, norm_p, log_level, indent
+        )
+        #@ignoraise n_X = evaluate_and_update_db!(rbf, op, x0, n_X)
+        @ignoraise n_X = eval_missing_values!(rbf, op, x0, n_X)
+        
+        if n_X < rbf.min_points
+            @warn "$(pad_str)Cannot make a fully linear RBF model."
+        end
+
+        @unpack shape_parameter_ref, delta_ref = params;
+        val!(shape_parameter_ref, model_shape_parameter(rbf, Δ))
+    
+        n_X_affine_sampling = n_X
+        @unpack max_search_factor = rbf
+
+        #if n_X < max_points
+            delta = delta_max * max_search_factor
+            n_X = cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent)
+        #end
+        
+        val!(delta_ref, Δ)
+        params.x0 .= x0
+
+        val!(params.n_X_ref, n_X)
+        val!(buffers.x0_db_index_ref, buffers.db_index[1])
+
+        n_X_affine_sampling, n_X
+    end
+    
+    lock(rwlock) do
+        put_new_evals_into_db!(rbf, x0, n_X_affine_sampling, buffers.xZ)
+        val!(params.database_state_ref, db_state(database))
+    end
+
+    if n_X_affine_sampling != min_points
+        @ignoraise least_squares_model!(rbf, n_X; log_level, indent)
     else
-        @logmsg log_level "$(pad_str)RBFModel: Starting surrogate update."
+        @unpack coeff_φ, coeff_π, = params 
+        @unpack FX, Linv, Φ, Q, R, L = buffers
+        @unpack dim_y, dim_π = rbf
+        @ignoraise set_coefficients!(
+            coeff_φ, coeff_π, FX, Linv, Φ, Q, R, L;
+            n_X, dim_y, dim_π
+        )
     end
-
-    @ignoraise n_X = affine_sampling!(
-        rbf, Δ, x0, fx0, global_lb, global_ub; 
-        delta_max, norm_p, log_level, indent
-    )
-    @ignoraise n_X = evaluate_and_update_db!(rbf, op, x0, n_X)
-
-    if n_X < rbf.min_points
-        @warn "$(pad_str)Cannot make a fully linear RBF model."
-    end
-
-    @unpack shape_parameter_ref, delta_ref, database_state_ref = params;
-    val!(shape_parameter_ref, model_shape_parameter(rbf, Δ))
-   
-    @unpack max_search_factor = rbf
-    @ignoraise n_X = find_additional_points!(
-        rbf, x0, n_X; indent, log_level, delta=delta_max * max_search_factor
-    )
-    val!(delta_ref, Δ)
-    val!(database_state_ref, val(rbf.database.state))
-    params.x0 .= x0
-
-    val!(params.n_X_ref, n_X)
-    val!(buffers.x0_db_index_ref, buffers.db_index[1])
- 
     return nothing
 end
 
@@ -73,18 +102,91 @@ function model_shape_parameter(rbf::RBFModel, Δ)
     return _shape_parameter(rbf.kernel)
 end
 
-function unfilter_index!(chosen_index, filter_flags; ix1=2, ix2=length(chosen_index))
+# Suppose, `filter_flags` has been used to create a view into `_X` via
+# `X = @view(X[:, filter_flags])`.
+# From `X`, certain columns are chosen, these have integer indices `chosen_index`.
+# The function `unfilter_index!` modifies `chosen_index` to contain indices
+# with respect to `_X` instead of `X`.
+# It is equivalent to `chosen_index = findall(filter_flags)[chosen_index]`
+function unfilter_index!(
+    chosen_index, filter_flags; ix1=2, ix2=length(chosen_index)
+)
     j = 0
     for (i, is) = enumerate(filter_flags)
         if is
-            j += 1
-            for _ci = ix1:ix2
-                ci = chosen_index[_ci]
+            j += 1  # flag `i` is the `j`-th true flag
+            for l = ix1:ix2
+                ci = chosen_index[l]
                 if ci == j
-                    chosen_index[_ci] = i
+                    chosen_index[l] = i
                     break
                 end
             end
+        end
+    end
+end
+
+function eval_missing_values!(rbf, op, x0, n_X)
+    @unpack buffers, params = rbf
+    @unpack X = params
+    @unpack not_db_flags, db_index, FX, = buffers
+
+    return eval_missing_values!(FX, not_db_flags, db_index, n_X, op, X, x0)
+end
+
+@views function eval_missing_values!(FX, not_db_flags, db_index, n_X, op, X, x0)
+    flags = not_db_flags[1:n_X]
+    flags .= false
+    for i = 1:n_X
+        flags[i] = (db_index[i] <= 0)
+    end
+    
+    _X = X[:, 1:n_X][:, flags]
+    _Y = FX[:, 1:n_X][:, flags]
+    _Y[1, :] .= NaN
+    _X .+= x0
+    
+    @ignoraise op_code = func_vals!(_Y, op, _X)
+    
+    _X .-= x0
+
+    ## sort the columns in X, FX, and flags to have valid entries first
+    ## (there probably is a cool recursive way to do this)
+    nan_check_has_completed = false
+    i_start = 1
+    i_end = n_X
+    while !nan_check_has_completed
+        nan_check_has_completed = true
+        for i=i_start:i_end
+            #if flags[i]
+            if isnan(FX[1, i])
+                i_start = i
+                i_end -= 1
+                for j=i:i_end
+                    X[:, j] .= X[:, j+1]
+                    FX[:, j] .= FX[:, j+1]
+                    flags[j] .= flags[j+1]
+                end
+                nan_check_has_completed = false
+                break
+            end
+            #end
+        end
+    end
+    n_X = i_end
+    return n_X
+end
+
+@views function put_new_evals_into_db!(rbf, x0, n_X, xZ)
+    @unpack buffers, database, params = rbf
+    @unpack not_db_flags, FX = buffers
+    @unpack X = params
+    for i=1:n_X
+        if not_db_flags[i]
+            xZ .= X[:, i]
+            xZ .+= x0
+            y = FX[:, i]
+            add_to_database!(database, xZ, y)
         end
     end
 end
@@ -151,23 +253,28 @@ function affine_sampling!(
     @unpack has_z_new_ref, is_fully_linear_ref, z_new = params
     @unpack min_points, max_points, search_factor, max_search_factor = rbf 
     @unpack sampling_factor, max_sampling_factor, th_qr, enforce_fully_linear = rbf
+ 
     x0_db_index = val(buffers.x0_db_index_ref)
 
     if x0_db_index > 0
-        _x0 = view(entries_x(database), 1:dim_x, x0_db_index)
+        _x0 = view(db_view_x(database), 1:dim_x, x0_db_index)
         if !isequal(x0, _x0)
             x0_db_index = 0
         end
     end
+    
+    #=
     if x0_db_index < 1
         x0_db_index = add_to_database!(database, x0, fx0)
     end
+    =# #should happen later on anyways
 
     QRbuff = buffers.Q
+    @unpack filter_flags = buffers
     return affine_sampling!(
         X, FX, db_index, lb, ub, xZ, qr_ws_dim_x, QRbuff,
         has_z_new_ref, is_fully_linear_ref, z_new,
-        database,
+        filter_flags, database,
         min_points, max_points, search_factor, max_search_factor, 
         sampling_factor, max_sampling_factor, th_qr,
         Δ, x0, fx0, global_lb, global_ub;
@@ -179,7 +286,7 @@ end
 @views function affine_sampling!(
     X, FX, db_index::AbstractVector{Int}, lb, ub, xZ, qr_ws_dim_x, QRbuff,
     has_z_new_ref, is_fully_linear_ref, z_new, 
-    database, 
+    filter_flags, database, 
     min_points, max_points, search_factor, max_search_factor,
     sampling_factor, max_sampling_factor, th_qr, 
     Δ, x0, fx0, global_lb, global_ub;
@@ -213,35 +320,38 @@ end
         end
     end
     
+    _n_X = n_X
     if n_X < min_points
         Δ1 = search_factor .* Δ
         trust_region_bounds!(lb, ub, x0, Δ1, global_lb, global_ub)
 
-        box_search!(database, lb, ub)
+        box_search!(filter_flags, database, lb, ub)
         for ix in 1:n_X
             ci = db_index[ix]
             ci < 1 && continue
-            database.filter_flags[ci] = false
+            filter_flags[ci] = false
         end
 
-        Xs = filtered_view_x(database)
-        Ys = filtered_view_y(database)
+        Xs = filtered_view_x(database, filter_flags)
+        Ys = filtered_view_y(database, filter_flags)
         n_new, qr = find_poised_points!(    
             X, FX, qr_ws_dim_x, QRbuff, x0, Xs, Ys;
             xZ, ix1=2, ix2=n_X, norm_p, chosen_index=db_index, th=th_qr,    
-        )
+         )
+        
         n_X += n_new
         @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) points in radius $(Δ1)."
 
         ## account for offset indices in chosen_index:
-        unfilter_index!(db_index, database.filter_flags; ix1=2, ix2=n_X)    # `ix1=2` because we don't need to care about `x0_db_index`
+        unfilter_index!(db_index, filter_flags; ix1=_n_X+1, ix2=n_X) 
     end
 
     if n_X < min_points && enforce_fully_linear
         ΔZ1 = sampling_factor .* Δ
         trust_region_bounds!(lb, ub, x0, ΔZ1, global_lb, global_ub)
 
-        @ignoraise n_new, qr = sample_along_Z!(X, qr_ws_dim_x, QRbuff, x0, lb, ub, th_qr;
+        @ignoraise n_new, qr = sample_along_Z!(
+            X, qr_ws_dim_x, QRbuff, x0, lb, ub, th_qr;
             ix1=2, ix2=n_X, norm_p, qr, n_new = min_points - n_X
         )
         n_X += n_new
@@ -252,11 +362,11 @@ end
         Δ2 = max_search_factor .* delta_max
         trust_region_bounds!(lb, ub, x0, Δ2, global_lb, global_ub)
 
-        box_search!(database, lb, ub)
-        for ix in 1:n_X
+        box_search!(filter_flags, database, lb, ub; xor=true)
+        for ix in 1:n_X # if `xor=true` works as it should, this loop should not be necessary
             ci = db_index[ix]
             ci < 1 && continue
-            database.filter_flags[ci] = false
+            filter_flags[ci] = false
         end
     end
 
@@ -265,25 +375,30 @@ end
             @warn "$(pad_str)Cannot make model fully linear."
         end
 
+        ## store model-improvement direction (next column of qr factor)
         z_new .= 0
         z_new[n_X + 1] = 1
         LA.lmul!(qr.Q, z_new)
         val!(has_z_new_ref, true)
 
-        Xs = filtered_view_x(database)
-        Ys = filtered_view_y(database)
+        Xs = filtered_view_x(database, filter_flags)
+        Ys = filtered_view_y(database, filter_flags)
         n_new, qr = find_poised_points!(    
             X, FX, qr_ws_dim_x, QRbuff, x0, Xs, Ys;
             xZ, ix1=2, ix2=n_X, norm_p, chosen_index = db_index, th = th_qr,    
         )
         _n_X = n_X + n_new
         @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) points in radius $(Δ2)."
-        ## account for offset indices in chosen_index:
-        unfilter_index!(db_index, database.filter_flags; ix1=n_X+1, ix2=_n_X)
+        
+        ## `filter_flags` will be used in cholesky sampling.
+        ## to avoid unnecessary checks, unmark chosen indices here already:
+        ## 1) account for offset indices in chosen_index:
+        unfilter_index!(db_index, filter_flags; ix1=n_X+1, ix2=_n_X)
+        ## 2) unmark
         for ix in n_X+1:_n_X
             ci = db_index[ix]
             ci < 1 && continue
-            database.filter_flags[ci] = false
+            filter_flags[ci] = false
         end
         n_X = _n_X
     else
@@ -295,7 +410,8 @@ end
         ΔZ2 = max_sampling_factor .* delta_max
         trust_region_bounds!(lb, ub, x0, ΔZ2, global_lb, global_ub)
 
-        @ignoraise n_new, qr = sample_along_Z!(X, qr_ws_dim_x, QRbuff, x0, lb, ub, th_qr;
+        @ignoraise n_new, qr = sample_along_Z!(
+            X, qr_ws_dim_x, QRbuff, x0, lb, ub, th_qr;
             ix1=2, ix2=n_X, norm_p, qr, n_new = min_points - n_X
         )
         n_X += n_new
@@ -323,9 +439,8 @@ function least_squares_model!(rbf, n_X; log_level, indent::Int=0)
     @unpack FX, Φ, Qj = buffers
     ε = val(params.shape_parameter_ref)
 
-    use_col_flags = buffers.not_db_flags
-    _X = @view(X[:, 1:min_points][:, use_col_flags])
-    _Y = transpose(@view(FX[:, 1:min_points][:, use_col_flags]))
+    _X = @view(X[:, 1:n_X])
+    _Y = transpose(@view(FX[:, 1:n_X]))
     @unpack coeff_φ, coeff_π = params
     cφ = @view(coeff_φ[1:n_X, 1:dim_y])
     cπ = @view(coeff_π[1:dim_π, 1:dim_y])
@@ -333,7 +448,7 @@ function least_squares_model!(rbf, n_X; log_level, indent::Int=0)
     _Φ = @view(Φ[1:n_X, 1:n_X])
     _rbf_poly_mat!(_Π, poly_deg, _X)
     _rbf_kernel_mat!(_Φ, kernel, _X, _X, ε; centers_eq_features=true)
-    _rbf_solve_normal_eqs!(cφ, cπ, hcat(_Φ, _Π), _Y)
+    @ignoraise _rbf_solve_normal_eqs!(cφ, cπ, hcat(_Φ, _Π), _Y)
     return nothing
 end
 
@@ -343,7 +458,7 @@ function cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent::Int=0)
     @unpack params, buffers, database = rbf
     @unpack min_points, max_points, dim_x, dim_y, dim_π, kernel, poly_deg, th_cholesky = rbf
     @unpack X = params
-    @unpack FX, Φ, L, Linv, Q, R, qr_ws_min_points, Qj = buffers
+    @unpack FX, Φ, L, Linv, Q, R, qr_ws_min_points, Qj, filter_flags = buffers
     
     ε = val(params.shape_parameter_ref)
     
@@ -352,10 +467,10 @@ function cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent::Int=0)
         kernel, poly_deg, ε, n_X, dim_x, dim_π
     )
     
-    Xs = filtered_view_x(database)
+    Xs = filtered_view_x(database, filter_flags)
     if size(Xs, 2) > 0
 
-        Ys = filtered_view_y(database)
+        Ys = filtered_view_y(database, filter_flags)
 
         @unpack Rj, L, Linv, v1, v2 = buffers
         j = n_X + 1
@@ -384,10 +499,7 @@ function cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent::Int=0)
     end
     
     @unpack coeff_φ, coeff_π = params
-    @ignoraise set_coefficients!(
-        coeff_φ, coeff_π, FX, Linv, Φ, Q, R, L;
-        n_X, dim_y, dim_π
-    )
+  
     n_new = n_X - rbf.min_points
     if n_new > 0
         indent += 1

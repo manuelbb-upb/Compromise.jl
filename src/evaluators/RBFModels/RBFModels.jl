@@ -12,7 +12,7 @@ using ElasticArrays: resize! # explicit import to avoid false linter hints
 import LinearAlgebra as LA
 using Parameters: @with_kw, @unpack
 using StructHelpers: @batteries
-
+import ConcurrentUtils: ReadWriteLock, lock_read, unlock_read
 import Logging: @logmsg, Info
 
 struct RBFConstructionImpossible <: AbstractStoppingCriterion end
