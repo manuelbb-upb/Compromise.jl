@@ -1,4 +1,5 @@
 # AbstractMOP Interface
+
 An object subtyping `AbstractMOP` is a glorified wrapper around vector-vector functions.
 The methods below were originally meant to be used to implement our algorithm similar to
 how it has been stated in the article, rather “mathematically“.
@@ -28,18 +29,18 @@ In the code, we often follow this notation:
 * `E` is the matrix of linear equality constraints, `c` the right hand side vector.
 * `lb` and `ub` define box constraints.
 
-At the beginning of an optimization routine, initialization based on the initial site
+At the beginning of an optimization routine, initialization
 can be performed:
 
 ````julia
-initialize(mop::AbstractMOP, ξ0::RVec)=mop
+initialize(mop::AbstractMOP)=mop
 ````
 
 ## Meta-Data
-The optional function `precision` returns the type of result and derivative vectors:
+The optional function `float_type` returns the type of result and derivative vectors:
 
 ````julia
-precision(::AbstractMOP)::Type{<:AbstractFloat}=DEFAULT_PRECISION
+float_type(::AbstractMOP)::Type{<:AbstractFloat}=DEFAULT_FLOAT_TYPE
 ````
 
 We would also like to deterministically query the expected surrogate model types:
@@ -51,9 +52,12 @@ model_type(::AbstractMOP)::Type{<:AbstractMOPSurrogate}=AbstractMOPSurrogate
 Below functions are used to query dimension information.
 
 ````julia
+dim_vars(::AbstractMOP)::Int=0
 dim_objectives(::AbstractMOP)::Int=0            # mandatory
 dim_nl_eq_constraints(::AbstractMOP)::Int=0     # optional
 dim_nl_ineq_constraints(::AbstractMOP)::Int=0   # optional
+
+initial_vars(::AbstractMOP)::Union{RVec, RMat, Nothing}=nothing
 ````
 
 ## Linear Constraints
@@ -75,23 +79,32 @@ Moreover, problems can have linear equality constraints and linear inequality co
 ```
 
 ````julia
-lin_eq_constraints(::AbstractMOP)::Union{Nothing, Tuple{RMat,RVecOrMat}}=nothing
-lin_ineq_constraints(::AbstractMOP)::Union{Nothing, Tuple{RMat,RVecOrMat}}=nothing
+lin_eq_constraints_matrix(::AbstractMOP)::Union{Nothing, RMat}=nothing
+lin_ineq_constraints_matrix(::AbstractMOP)::Union{Nothing, RMat}=nothing
+lin_eq_constraints_vector(::AbstractMOP)::Union{Nothing, RVec}=nothing
+lin_ineq_constraints_vector(::AbstractMOP)::Union{Nothing, RVec}=nothing
 ````
 
 From that we can derive dimension getters as well:
 
 ````julia
-# helper
-dim_lin_constraints(dat::Nothing)=0
-function dim_lin_constraints((A,b)::Tuple{RMat, RVecOrMat})
-    dim = length(b)
-    @assert size(A, 2) == dim "Dimension mismatch in linear constraints."
-    return dim
+dim_lin_cons(A::Nothing, b)=0
+function dim_lin_cons(A, b)
+    dimA = size(A, 1)
+    @assert length(b) == dimA "Dimension mismatch in linear constraints."
+    return dimA
 end
-# actual functions
-dim_lin_eq_constraints(mop::AbstractMOP)=dim_lin_constraints(lin_eq_constraints(mop))
-dim_lin_ineq_constraints(mop::AbstractMOP)=dim_lin_constraints(lin_ineq_constraints(mop))
+
+function dim_lin_eq_constraints(mop::AbstractMOP)
+    A = lin_eq_constraints_matrix(mop)
+    b = lin_eq_constraints_vector(mop)
+    return dim_lin_cons(A, b)
+end
+function dim_lin_ineq_constraints(mop::AbstractMOP)
+    A = lin_ineq_constraints_matrix(mop)
+    b = lin_ineq_constraints_vector(mop)
+    return dim_lin_cons(A, b)
+end
 ````
 
 ## Evaluation
@@ -120,76 +133,83 @@ function eval_nl_ineq_constraints!(y::RVec, mop::M, x::RVec) where {M<:AbstractM
 end
 ````
 
-To ensure, they only get called if needed, we wrap them and assign shorter names:
+To ensure they only get called if needed, we wrap them and assign shorter names:
 
 ````julia
-objectives!(y::RVec, mop::AbstractMOP, x::RVec)=eval_objectives!(y, mop, x)
-nl_eq_constraints!(y::Nothing, mop::AbstractMOP, x::RVec)=nothing
-nl_ineq_constraints!(y::Nothing, mop::AbstractMOP, x::RVec)=nothing
-nl_eq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)=eval_nl_eq_constraints!(y, mop, x)
-nl_ineq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)=eval_nl_ineq_constraints!(y, mop, x)
-````
+function objectives!(y::RVec, mop::AbstractMOP, x::RVec)
+    eval_objectives!(y, mop, x)
+end
+function nl_eq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)
+    dim_nl_eq_constraints(mop) <= 0 && return nothing
+    eval_nl_eq_constraints!(y, mop, x)
+end
+function nl_ineq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)
+    dim_nl_ineq_constraints(mop) <= 0 && return nothing
+    eval_nl_ineq_constraints!(y, mop, x)
+end
 
-Similar methods can be defined for linear constraints.
-
-````julia
-"""
-    lin_cons!(residual_vector, prod_cache, constraint_data, x)
-
-Given a linear constraint `A*x .<= b` or `A*x .== b`, compute the product `A*x` and store
-the result in `prod_cache`, and also compute `A*x .- b` and store the result in
-`residual_vector`.
-`constraint_data` should either be the tuple `(A,b)::Tuple{RMat,RVec}` or `nothing`.
-"""
-lin_cons!(residual_vector, prod_cache, constraint_data, x)=nothing
-lin_cons!(res::Nothing, mat_vec::Nothing, cons::Nothing, x::RVec) = nothing
-function lin_cons!(res::RVec, mat_vec::RVec, (A, b)::Tuple, x::RVec)
-    LA.mul!(mat_vec, A, x)
-    @. res = mat_vec - b
+function lin_cons!(LHSx_min_rhs, LHSx, LHS, rhs, x)
+    isnothing(LHS) && return nothing
+    isnothing(rhs) && return nothing
+    LA.mul!(LHSx, LHS, x)
+    @. LHSx_min_rhs = LHSx - rhs
     return nothing
 end
-````
 
-More specific methods with descriptive names applicable to an `AbstractMOP`:
+function lin_eq_constraints!(Ex_min_e, Ex, mop::AbstractMOP, x::RVec)
+    E = lin_eq_constraints_matrix(mop)
+    c = lin_eq_constraints_vector(mop)
+    return lin_cons!(Ex_min_e, Ex, E, c, x)
+end
 
-````julia
-lin_eq_constraints!(res::Nothing, mat_vec::Nothing, mop::AbstractMOP, x::RVec)=nothing
-lin_ineq_constraints!(res::Nothing, mat_vec::Nothing, mop::AbstractMOP, x::RVec)=nothing
-lin_eq_constraints!(res::RVec, mat_vec::Nothing, mop::AbstractMOP, x::RVec)=lin_cons!(res, mat_vec, lin_eq_constraints(mop), x)
-lin_ineq_constraints!(res::RVec, mat_vec::Nothing, mop::AbstractMOP, x::RVec)=lin_cons!(res, mat_vec, lin_ineq_constraints(mop), x)
+function lin_ineq_constraints!(Ax_min_b, Ax, mop::AbstractMOP, x::RVec)
+    A = lin_ineq_constraints_matrix(mop)
+    b = lin_ineq_constraints_vector(mop)
+    return lin_cons!(Ax_min_b, Ax, A, b, x)
+end
 ````
 
 ## Pre-Allocation
-Why do we also allow `nothing` as the target for constraints?
-Because that is the default cache returned if there are none:
+
+The vectors to hold objective values, constraint values, etc.,
+are allocated using these functions:
 
 ````julia
-function prealloc_objectives_vector(mop::AbstractMOP)
-    T = precision(mop)
-    return Vector{T}(undef, dim_objectives(mop))
-end
 # hx = nonlinear equality constraints at x
 # gx = nonlinear inequality constraints at x
-# Ex = linear equality constraints at x
-# Ax = linear inequality constraints at x
-# These are defined below (and I put un-specific definitions here for the Linter)
-function prealloc_nl_eq_constraints_vector(mop) end
-function prealloc_nl_ineq_constraints_vector(mop) end
+function prealloc_objectives_vector(mop) end
 function prealloc_lin_eq_constraints_vector(mop) end
 function prealloc_lin_ineq_constraints_vector(mop) end
-for (dim_func, prealloc_func) in (
-    (:dim_nl_eq_constraints, :prealloc_nl_eq_constraints_vector),
-    (:dim_nl_ineq_constraints, :prealloc_nl_ineq_constraints_vector),
-    (:dim_lin_eq_constraints, :prealloc_lin_eq_constraints_vector),
-    (:dim_lin_ineq_constraints, :prealloc_lin_ineq_constraints_vector),
+function prealloc_nl_eq_constraints_vector(mop) end
+function prealloc_nl_ineq_constraints_vector(mop) end
+````
+
+I have implemented some defaults to just allocate a `Vector` of correct
+length.
+The `yoink_` functions are called internally, do not overwrite them,
+unless you know what you are doing.
+
+````julia
+for (dim_func, func_suffix) in (
+    (:dim_objectives, :objectives_vector),
+    (:dim_nl_eq_constraints, :nl_eq_constraints_vector),
+    (:dim_nl_ineq_constraints, :nl_ineq_constraints_vector),
+    (:dim_lin_eq_constraints, :lin_eq_constraints_vector),  # don't modify this…
+    (:dim_lin_ineq_constraints, :lin_ineq_constraints_vector),  # and this, else type mismatch in value structs
 )
-    @eval function $(prealloc_func)(mop::AbstractMOP)
-        dim = $(dim_func)(mop)
-        if dim > 0
-            T = precision(mop)
+    func_name = Symbol("prealloc_", func_suffix)
+    yoink_name = Symbol("yoink_", func_suffix)
+    @eval begin
+        function $(func_name)(mop::AbstractMOP)
+            dim = $(dim_func)(mop)
+            T = float_type(mop)
             return Vector{T}(undef, dim)
-        else
-            return nothing
+        end
+
+        function $(yoink_name)(mop::AbstractMOP)
+            y = $(func_name)(mop) :: RVec
+            @assert eltype(y) == float_type(mop) "Vector eltype does not match problem float type."
+            return y
         end
     end
 end

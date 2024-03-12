@@ -9,8 +9,9 @@ For convenience, we'd like to have the same meta information available
 as for the original MOP:
 
 ````julia
-precision(::AbstractMOPSurrogate)::Type{<:AbstractFloat}=DEFAULT_PRECISION
-dim_objectives(::AbstractMOPSurrogate)::Int=0            # mandatory
+float_type(::AbstractMOPSurrogate)::Type{<:AbstractFloat}=DEFAULT_FLOAT_TYPE
+dim_vars(::AbstractMOPSurrogate)::Int=-1
+dim_objectives(::AbstractMOPSurrogate)::Int=-1            # mandatory
 dim_nl_eq_constraints(::AbstractMOPSurrogate)::Int=0     # optional
 dim_nl_ineq_constraints(::AbstractMOPSurrogate)::Int=0   # optional
 ````
@@ -20,7 +21,6 @@ and if we can build models for the scaled domain:
 
 ````julia
 depends_on_radius(::AbstractMOPSurrogate)::Bool=true
-supports_scaling(T::Type{<:AbstractMOPSurrogate})=NoScaling()
 ````
 
 ## Construction
@@ -28,7 +28,11 @@ Define a function to return a model for some MOP.
 The model does not yet have to be trained.
 
 ````julia
-init_models(mop::AbstractMOP, n_vars, scaler)::AbstractMOPSurrogate=nothing
+init_models(
+    mop::AbstractMOP, n_vars, scaler;
+    delta_max::Union{Number,AbstractVector{<:Number}},
+    require_fully_linear::Bool=true,
+)::AbstractMOPSurrogate=nothing
 ````
 
 It is trained with the update method `update_models!`.
@@ -42,9 +46,14 @@ It is trained with the update method `update_models!`.
 
 ````julia
 function update_models!(
-    mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts
+    mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts;
+    indent::Int
 )
     return nothing
+end
+
+function process_trial_point!(mod::AbstractMOPSurrogate, vals_trial, update_results)
+    nothing
 end
 ````
 
@@ -52,23 +61,25 @@ If a model is radius-dependent,
 we also need a function to copy the parameters from a source model to a target model:
 
 ````julia
-copy_model(mod::AbstractMOPSurrogate)=deepcopy(mod)
-copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=mod_trgt
+universal_copy(mod::AbstractMOPSurrogate)=mod
+universal_copy!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=mod_trgt
 ````
 
 These internal helpers are derived:
 
 ````julia
-_copy_model(mod::AbstractMOPSurrogate)=depends_on_radius(mod) ? copy_model(mod) : mod
-_copyto_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=depends_on_radius(mod_trgt) ? copyto_model!(mod_trgt, mod_src) : mod_trgt
+function universal_copy_model(mod::AbstractMOPSurrogate)
+    depends_on_radius(mod) ? universal_copy(mod) : mod
+end
+function universal_copy_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)
+    depends_on_radius(mod_trgt) ? universal_copy!(mod_trgt, mod_src) : mod_trgt
+end
 ````
 
 ## Evaluation
 
 !!! note
-    All evaluation and differentiation methods that you see below should always
-    return `nothing`, **unless** you want to stop early.
-    Then return something else, for example a string.
+    Methods are in-place, return values are ignored, except for `AbstractStoppingCriterion`.
 
 Evaluation of nonlinear objective models requires the following method.
 `x` will be from the scaled domain, but if a model does not support scaling,
@@ -94,29 +105,41 @@ end
 As before, we use shorter function names in the algorithm.
 
 ````julia
-objectives!(y::RVec, mod::AbstractMOPSurrogate, x::RVec)=eval_objectives!(y, mod, x)
-nl_eq_constraints!(y::Nothing, mod::AbstractMOPSurrogate, x::RVec)=nothing
-nl_ineq_constraints!(y::Nothing, mod::AbstractMOPSurrogate, x::RVec)=nothing
-nl_eq_constraints!(y::RVec, mod::AbstractMOPSurrogate, x::RVec)=eval_nl_eq_constraints!(y, mod, x)
-nl_ineq_constraints!(y::RVec, mod::AbstractMOPSurrogate, x::RVec)=eval_nl_ineq_constraints!(y, mod, x)
+function objectives!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+    eval_objectives!(y, mop, x)
+end
+function nl_eq_constraints!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+    dim_nl_eq_constraints(mop) <= 0 && return nothing
+    eval_nl_eq_constraints!(y, mop, x)
+end
+function nl_ineq_constraints!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+    dim_nl_ineq_constraints(mop) <= 0 && return nothing
+    eval_nl_ineq_constraints!(y, mop, x)
+end
 ````
 
 ## Pre-Allocation
 The preallocation functions look the same as for `AbstractMOP`:
 
 ````julia
-for (dim_func, prealloc_func) in (
-    (:dim_objectives, :prealloc_objectives_vector),
-    (:dim_nl_eq_constraints, :prealloc_nl_eq_constraints_vector),
-    (:dim_nl_ineq_constraints, :prealloc_nl_ineq_constraints_vector),
+for (dim_func, func_suffix) in (
+    (:dim_objectives, :objectives_vector),
+    (:dim_nl_eq_constraints, :nl_eq_constraints_vector),
+    (:dim_nl_ineq_constraints, :nl_ineq_constraints_vector),
 )
-    @eval function $(prealloc_func)(mod::AbstractMOPSurrogate)
-        dim = $(dim_func)(mod)
-        if dim > 0
-            T = precision(mod)
+    func_name = Symbol("prealloc_", func_suffix)
+    yoink_name = Symbol("yoink_", func_suffix)
+    @eval begin
+        function $(func_name)(mop::AbstractMOPSurrogate)
+            dim = $(dim_func)(mop)
+            T = float_type(mop)
             return Vector{T}(undef, dim)
-        else
-            return nothing
+        end
+
+        function $(yoink_name)(mop::AbstractMOPSurrogate)
+            y = $(func_name)(mop) :: RVec
+            @assert eltype(y) == float_type(mop) "Vector eltype does not match problem float type."
+            return y
         end
     end
 end
@@ -147,28 +170,32 @@ Here, the names of the wrapper functions start with “diff“.
 
 ````julia
 diff_objectives!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=grads_objectives!(Dy, mod, x)
-diff_nl_eq_constraints!(Dy::Nothing, mod::AbstractMOPSurrogate, x::RVec)=nothing
-diff_nl_ineq_constraints!(Dy::Nothing, mod::AbstractMOPSurrogate, x::RVec)=nothing
-diff_nl_eq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=grads_nl_eq_constraints!(Dy, mod, x)
-diff_nl_ineq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=grads_nl_ineq_constraints!(Dy, mod, x)
+function diff_nl_eq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+    dim_nl_eq_constraints(mod) <= 0 && return nothing
+    return grads_nl_eq_constraints!(Dy, mod, x)
+end
+function diff_nl_ineq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+    dim_nl_ineq_constraints(mod) <= 0 && return nothing
+    return grads_nl_ineq_constraints!(Dy, mod, x)
+end
 ````
 
 Optionally, we can have evaluation and differentiation in one go:
 
 ````julia
 function eval_and_grads_objectives!(y::RVec, Dy::RMat, mod::M, x::RVec) where {M<:AbstractMOPSurrogate}
-    eval_objectives!(y, mop, x)
-    grads_objectives!(Dy, mod, x)
+    @ignoraise eval_objectives!(y, mod, x)
+    @ignoraise grads_objectives!(Dy, mod, x)
     return nothing
 end
 function eval_grads_nl_eq_constraints!(y::RVec, Dy::RMat, mod::M, x::RVec) where {M<:AbstractMOPSurrogate}
-    eval_nl_eq_constraints!(y, mop, x)
-    grads_nl_eq_constraints!(Dy, mod, x)
+    @ignoraise eval_nl_eq_constraints!(y, mod, x)
+    @ignoraise grads_nl_eq_constraints!(Dy, mod, x)
     return nothing
 end
 function eval_grads_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::M, x::RVec) where {M<:AbstractMOPSurrogate}
-    eval_nl_ineq_constraints!(y, mop, x)
-    grads_nl_ineq_constraints!(Dy, mod, x)
+    @ignoraise eval_nl_ineq_constraints!(y, mod, x)
+    @ignoraise grads_nl_ineq_constraints!(Dy, mod, x)
     return nothing
 end
 ````
@@ -176,11 +203,17 @@ end
 Wrappers for use in the algorithm:
 
 ````julia
-vals_diff_objectives!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=eval_and_grads_objectives!(y, Dy, mod, x)
-vals_diff_nl_eq_constraints!(y::Nothing, Dy::Nothing, mod::AbstractMOPSurrogate, x::RVec)=nothing
-vals_diff_nl_ineq_constraints!(y::Nothing, Dy::Nothing, mod::AbstractMOPSurrogate, x::RVec)=nothing
-vals_diff_nl_eq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=eval_and_grads_nl_eq_constraints!(y, Dy, mod, x)
-vals_diff_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=eval_and_grads_nl_ineq_constraints!(y, Dy, mod, x)
+function vals_diff_objectives!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+    eval_and_grads_objectives!(y, Dy, mod, x)
+end
+function vals_diff_nl_eq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+    dim_nl_eq_constraints(mod) <= 0 && return nothing
+    eval_and_grads_nl_eq_constraints!(y, Dy, mod, x)
+end
+function vals_diff_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+    dim_nl_ineq_constraints(mod) <= 0 && return nothing
+    eval_and_grads_nl_ineq_constraints!(y, Dy, mod, x)
+end
 ````
 
 Here is what is called later on:
@@ -189,27 +222,27 @@ Here is what is called later on:
 "Evaluate the models `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
 function eval_mod!(mod_vals, mod, x)
     @unpack fx, hx, gx = mod_vals
-    @serve objectives!(fx, mod, x)
-    @serve nl_eq_constraints!(hx, mod, x)
-    @serve nl_ineq_constraints!(hx, mod, x)
+    @ignoraise objectives!(fx, mod, x)
+    @ignoraise nl_eq_constraints!(hx, mod, x)
+    @ignoraise nl_ineq_constraints!(hx, mod, x)
     return nothing
 end
 
 "Evaluate the model gradients of `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
 function diff_mod!(mod_vals, mod, x)
     @unpack Dfx, Dhx, Dgx = mod_vals
-    @serve diff_objectives!(Dfx, mod, x)
-    @serve diff_nl_eq_constraints!(Dhx, mod, x)
-    @serve diff_nl_ineq_constraints!(hx, mod, x)
+    @ignoraise diff_objectives!(Dfx, mod, x)
+    @ignoraise diff_nl_eq_constraints!(Dhx, mod, x)
+    @ignoraise diff_nl_ineq_constraints!(hx, mod, x)
     return nothing
 end
 
 "Evaluate and differentiate `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
 function eval_and_diff_mod!(mod_vals, mod, x)
     @unpack fx, hx, gx, Dfx, Dhx, Dgx = mod_vals
-    @serve vals_diff_objectives!(fx, Dfx, mod, x)
-    @serve vals_diff_nl_eq_constraints!(hx, Dhx, mod, x)
-    @serve vals_diff_nl_ineq_constraints!(gx, Dgx, mod, x)
+    @ignoraise vals_diff_objectives!(fx, Dfx, mod, x)
+    @ignoraise vals_diff_nl_eq_constraints!(hx, Dhx, mod, x)
+    @ignoraise vals_diff_nl_ineq_constraints!(gx, Dgx, mod, x)
     return nothing
 end
 ````
@@ -218,24 +251,29 @@ end
 We also would like to have pre-allocated gradient arrays ready:
 
 ````julia
-function prealloc_objectives_grads(mod::AbstractMOPSurrogate, n_vars)
-    T = precision(mod)
-    return Matrix{T}(undef, n_vars, dim_objectives(mod))
-end
 # These are defined below (and I put un-specific definitions here for the Linter)
-function prealloc_nl_eq_constraints_grads(mod, n_vars) end
-function prealloc_nl_ineq_constraints_grads(mod, n_vars) end
-for (dim_func, prealloc_func) in (
-    (:dim_nl_eq_constraints, :prealloc_nl_eq_constraints_grads),
-    (:dim_nl_ineq_constraints, :prealloc_nl_ineq_constraints_grads),
+function prealloc_objectives_grads(mod) end
+function prealloc_nl_eq_constraints_grads(mod) end
+function prealloc_nl_ineq_constraints_grads(mod) end
+for (dim_func, func_suffix) in (
+    (:dim_objectives, :objectives_grads),
+    (:dim_nl_eq_constraints, :nl_eq_constraints_grads),
+    (:dim_nl_ineq_constraints, :nl_ineq_constraints_grads),
 )
-    @eval function $(prealloc_func)(mod::AbstractMOPSurrogate, n_vars)
-        n_out = $(dim_func)(mod)
-        if n_out > 0
-            T = precision(mod)
-            return Matrix{T}(undef, n_vars, n_out)
-        else
-            return nothing
+    func_name = Symbol("prealloc_", func_suffix)
+    yoink_name = Symbol("yoink_", func_suffix)
+    @eval begin
+        function $(func_name)(mod::AbstractMOPSurrogate)
+            n_out = $(dim_func)(mod)
+            n_in = dim_vars(mod)
+            T = float_type(mod)
+            return Matrix{T}(undef, n_in, n_out)
+        end
+
+        function $(yoink_name)(mod::AbstractMOPSurrogate)
+            y = $(func_name)(mod) :: RMat
+            @assert eltype(y) == float_type(mod) "Vector eltype does not match problem float type."
+            return y
         end
     end
 end

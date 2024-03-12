@@ -1,7 +1,7 @@
 name = "Compromise"
 uuid = "254bc946-86ae-484f-a9da-8147cb79ba93"
 authors = ["Manuel Berkemeier <manuelbb@mail.uni-paderborn.de> and contributors"]
-version = "0.0.1"
+version = "0.0.2"
 
 [deps]
 ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477"

@@ -81,13 +81,13 @@ Base.@kwdef struct AlgorithmOptions{_T <: Number, SC}
 	"Lower bound for criticality before entering Criticality Routine."
 	eps_crit :: _T = 0.1
 	"Lower bound for feasibility before entering Criticality Routine."
-	eps_theta :: _T = 1e-4
+	eps_theta :: _T = 0.05
 	"At the end of the Criticality Routine the radius is possibly set to `crit_B * χ`."
 	crit_B :: _T = 100
 	"Criticality Routine runs until `Δ ≤ crit_M * χ`."
 	crit_M :: _T = 3*crit_B
 	"Trust region shrinking factor in criticality loops."
-	crit_alpha :: _T = 0.5
+	crit_alpha :: _T = 0.1
 
 	backtrack_in_crit_routine :: Bool = true
 	

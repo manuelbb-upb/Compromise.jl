@@ -20,10 +20,10 @@ Literate.markdown(joinpath(lit_src_path, "README.jl"), out_path)
 Literate.markdown(joinpath(lit_src_path, "README.jl"), joinpath(@__DIR__, "..");
     execute=false, flavor=Literate.CommonMarkFlavor()
 )
-
+#=
 Literate.markdown(joinpath(lit_src_path, "rbf_database_callback.jl"), out_path; 
     flavor=Literate.DocumenterFlavor())
-
+=#
 # Process original source files containing documentation
 src_path = joinpath(@__DIR__, "..", "src")
 out_path = joinpath(@__DIR__, "src")
@@ -48,15 +48,16 @@ makedocs(;
         edit_link="main",
         assets=String[],
     ),
+    pagesonly=true,
     pages=[
         "Home" => "index.md",
         "Tutorials" => [
             "README" => "README.md", 
-            "stopping.md",
-            "RBF Data Sharing" => "rbf_database_callback.md"
+            #"stopping.md",
+            #"RBF Data Sharing" => "rbf_database_callback.md"
         ],
-        "(Dev) Notes" => "dev_notes.md",
-        "Interfaces" => ["CompromiseEvaluators.md", "mop.md", "models.md"],
+        #"(Dev) Notes" => "dev_notes.md",
+        #"Interfaces" => ["CompromiseEvaluators.md", "mop.md", "models.md"],
     ],
     warnonly = true, # TODO be more strict about this
 )
