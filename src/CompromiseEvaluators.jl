@@ -29,8 +29,6 @@ abstract type AbstractNonlinearOperatorNoParams <: AbstractNonlinearOperator end
 ```
 =#
 # **This is no longer the case!**
-# We now have a “trait”:
-abstract type AbstractNonlinearOperatorTrait end
 
 operator_has_name(::AbstractNonlinearOperator)::Bool=false
 operator_name(::AbstractNonlinearOperator)=error("No name.")
@@ -48,6 +46,63 @@ function provides_grads(op::AbstractNonlinearOperator)
 end
 function provides_hessians(op::AbstractNonlinearOperator)
     return false
+end
+# ## Call Counting
+
+import ..Compromise: AbstractStoppingCriterion, stop_message, @ignoraise
+
+Base.@kwdef mutable struct FuncCallCounter
+    val :: Int = 0
+    lock :: ReentrantLock = ReentrantLock()
+end
+
+function read_counter(fcc::FuncCallCounter) 
+    lock(fcc.lock) do 
+        fcc.val
+    end
+end
+
+function set_counter!(fcc::FuncCallCounter, v::Int)
+    lock(fcc.lock) do
+        fcc.val = v
+    end
+    return v
+end
+
+function inc_counter!(fcc::FuncCallCounter)
+    return set_counter!(fcc, read_counter(fcc) + 1)
+end
+
+func_call_counter(op::AbstractNonlinearOperator, ::Val)=nothing
+max_num_calls(op::AbstractNonlinearOperator, ::Val)::Real=Inf
+
+struct BudgetExhausted <: AbstractStoppingCriterion
+    ni :: Int
+    mi :: Int
+    order :: Int
+end
+
+function stop_message(crit::BudgetExhausted)
+    return "Maximum evaluation count reached, order=$(crit.order), is=$(crit.ni), max=$(crit.mi)."
+end
+
+function request_func_calls(op::AbstractNonlinearOperator, v::Val, N::Integer)
+    request_func_calls(func_call_counter(op, v), op, v, N)
+end
+
+request_func_calls(::Nothing, op::AbstractNonlinearOperator, v::Val, N::Integer)=Inf
+function request_func_calls(fcc::FuncCallCounter, op::AbstractNonlinearOperator, v::Val{i}, N::Integer) where i
+    mfc = max_num_calls(op, v)
+    lock(fcc.lock) do
+        cfc = fcc.val
+        rem = min(mfc - cfc, N)
+        #show cfc, mfc, N, rem
+        if rem <= 0
+            return BudgetExhausted(cfc, mfc, i)
+        end
+        fcc.val += rem
+        return rem
+    end
 end
 
 # In certain situations (nonlinear subproblems relying on minimization of scalar-valued 
@@ -241,16 +296,34 @@ end
 function func_vals!(
     y::RVec, op::AbstractNonlinearOperator, x::RVec, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
+    v0 = Val(0)
+    @ignoraise request_func_calls(op, v0, 1) 
     @ignoraise redirect_call(eval_op!, op, x, params, outputs, y)
 end
+
 function func_vals!(
     Y::RMat, op::AbstractNonlinearOperator, X::RMat, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
-    if operator_can_eval_multi(op)
-        @ignoraise redirect_call(eval_op!, op, X, params, outputs, Y)
+    n_X = size(X, 2)
+    if n_X <= 0
+        return nothing
+    end
+    v0 = Val(0)
+    @ignoraise N = request_func_calls(op, v0, n_X) 
+    if N < size(Y, 2)
+        _X = @view(X[:, 1:N])
+        _Y = @view(Y[:, 1:N])
     else
-        for (y, x) = zip(eachcol(Y), eachcol(X))
-            @ignoraise func_vals!(y, op, x, params, outputs)
+        _X = X
+        _Y = Y
+    end
+    
+    if operator_can_eval_multi(op)
+        @ignoraise redirect_call(eval_op!, op, _X, params, outputs, _Y)
+    else
+        for (y, x) = zip(eachcol(_Y), eachcol(_X))
+            @ignoraise redirect_call(eval_op!, op, x, params, outputs, y)
+            #@ignoraise func_vals!(y, op, x, params, outputs)
         end
     end
     return nothing
@@ -259,6 +332,8 @@ end
 function func_grads!(
     Dy, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
+    v1 = Val(1)
+    @ignoraise request_func_calls(op, v1, 1) 
     @ignoraise redirect_call(eval_grads!, op, x, params, outputs, Dy)
     return nothing
 end
@@ -266,6 +341,10 @@ end
 function func_vals_and_grads!(
     y, Dy, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
+    v0 = Val(0)
+    v1 = Val(1)
+    @ignoraise request_func_calls(op, v0, 1) 
+    @ignoraise request_func_calls(op, v1, 1) 
     @ignoraise redirect_call(eval_op_and_grads!, op, x, params, outputs, y, Dy)
     return nothing
 end
@@ -273,6 +352,8 @@ end
 function func_hessians!(
     H, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
+    v2 = Val(2)
+    @ignoraise request_func_calls(op, v2, 1) 
     @ignoraise redirect_call(eval_hessians!, op, x, params, outputs, H)
     return nothing
 end
@@ -280,6 +361,12 @@ end
 function func_vals_and_grads_and_hessians!(
     y, Dy, H, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
+    v0 = Val(0)
+    v1 = Val(1)
+    v2 = Val(2)
+    @ignoraise request_func_calls(op, v0, 1) 
+    @ignoraise request_func_calls(op, v1, 1) 
+    @ignoraise request_func_calls(op, v2, 1) 
     @ignoraise redirect_call(eval_op_and_grads_and_hessians!, op, x, params, outputs, y, Dy, H)
     return nothing
 end
@@ -378,6 +465,12 @@ function update!(
     return nothing    
 end
 
+function process_trial_point!(
+    surr::AbstractSurrogateModel, xtrial, fxtrial, is_next::Bool
+)
+    return nothing    
+end
+
 # ### Evaluation
 # Mandatory:
 #=
@@ -387,6 +480,276 @@ eval_grads!(Dy, surr::AbstractSurrogateModel, x)=nothing
 eval_op_and_grads!(y, Dy, surr::AbstractSurrogateModel, x)
 ```
 =#
+# ## Wrapper
+abstract type AbstractNonlinearOperatorWrapper <: AbstractNonlinearOperator end
+wrapped_operator(op::AbstractNonlinearOperatorWrapper)=error("`wrapped_operator` not implemented.")
+
+operator_has_params(op::AbstractNonlinearOperatorWrapper)=operator_has_params(wrapped_operator(op))
+operator_can_partial(op::AbstractNonlinearOperatorWrapper)=operator_can_partial(wrapped_operator(op))
+operator_can_eval_multi(op::AbstractNonlinearOperatorWrapper)=operator_can_eval_multi(wrapped_operator(op))
+operator_has_name(op::AbstractNonlinearOperatorWrapper)=operator_has_name(wrapped_operator(op))
+operator_name(op::AbstractNonlinearOperatorWrapper)=operator_name(wrapped_operator(op))
+func_call_counter(op::AbstractNonlinearOperatorWrapper, v::Val)=func_call_counter(wrapped_operator(op), v)
+max_num_calls(op::AbstractNonlinearOperatorWrapper, v::Val)=max_num_calls(wrapped_operator(op), v)
+
+preprocess_inputs(op::AbstractNonlinearOperator, x::RVec) = x
+preprocess_inputs(op::AbstractNonlinearOperator, x::RMat) = x
+preprocess_inputs(op::AbstractNonlinearOperator, x::RVec, p) = (preprocess_inputs(op, x), p)
+preprocess_inputs(op::AbstractNonlinearOperator, x::RMat, p) = (preprocess_inputs(op, x), p)
+preprocess_inputs(op::AbstractNonlinearOperator, x::RVec, outputs::Vector{Bool}) = preprocess_inputs(op, x)
+preprocess_inputs(op::AbstractNonlinearOperator, x::RMat, outputs::Vector{Bool}) = preprocess_inputs(op, x)
+preprocess_inputs(op::AbstractNonlinearOperator, x::RVec, p, outputs::Vector{Bool}) = preprocess_inputs(op, x, p)
+preprocess_inputs(op::AbstractNonlinearOperator, x::RMat, p, outputs::Vector{Bool}) = preprocess_inputs(op, x, p)
+
+postprocess_vals!(y::RVec, op::AbstractNonlinearOperatorWrapper, x_pre, x_post)=nothing
+postprocess_vals!(y::RMat, op::AbstractNonlinearOperatorWrapper, x_pre, x_post)=nothing
+postprocess_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x_pre, x_post)=nothing
+postprocess_hessians!(H, op::AbstractNonlinearOperatorWrapper, x_pre, x_post)=nothing
+
+function postprocess_vals!(y::RVec, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, outputs::Vector{Bool})
+    postprocess_vals!(y, op, x_pre, x_post)
+end
+function postprocess_vals!(y::RMat, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, outputs::Vector{Bool})
+    postprocess_vals!(y, op, x_pre, x_post)
+end
+function postprocess_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, outputs::Vector{Bool})
+    postprocess_grads!(Dy, op, x_pre, x_post)
+end
+function postprocess_hessians!(H, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, outputs::Vector{Bool})
+    postprocess_hessians!(H, op, x_pre, x_post)
+end
+
+function postprocess_vals!(y::RVec, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post)
+    postprocess_vals!(y, op, x_pre, x_post)
+end
+function postprocess_vals!(y::RMat, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post)
+    postprocess_vals!(y, op, x_pre, x_post)
+end
+function postprocess_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post)
+    postprocess_grads!(Dy, op, x_pre, x_post)
+end
+function postprocess_hessians!(H, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post)
+    postprocess_hessians!(H, op, x_pre, x_post)
+end
+
+function postprocess_vals!(y::RVec, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post, outputs::Vector{Bool})
+    postprocess_vals!(y, op, x_pre, x_post)
+end
+function postprocess_vals!(y::RMat, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post, outputs::Vector{Bool})
+    postprocess_vals!(y, op, x_pre, x_post)
+end
+function postprocess_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post, outputs::Vector{Bool})
+    postprocess_grads!(Dy, op, x_pre, x_post)
+end
+function postprocess_hessians!(H, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post, outputs::Vector{Bool})
+    postprocess_hessians!(H, op, x_pre, x_post)
+end
+
+function eval_op!(y::RVec, op::AbstractNonlinearOperatorWrapper, x::RVec)
+    x_post = preprocess_inputs(op, x)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post)
+    postprocess_vals!(y, op, x, x_post)
+    return nothing
+end
+
+function eval_op!(y::RVec, op::AbstractNonlinearOperatorWrapper, x::RVec, p)
+    (x_post, p_post) = preprocess_inputs(op, x, p)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post, p_post)
+    postprocess_vals!(y, op, x, x_post, p, p_post)
+    return nothing
+end
+
+function eval_op!(y::RVec, op::AbstractNonlinearOperatorWrapper, x::RVec, outputs::Vector{Bool})
+    x_post = preprocess_inputs(op, x, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post, outputs)
+    postprocess_vals!(y, op, x, x_post, outputs)
+    return nothing
+end
+
+function eval_op!(y::RVec, op::AbstractNonlinearOperatorWrapper, x::RVec, p, outputs::Vector{Bool})
+    (x_post, p_post) = preprocess_inputs(op, x, p, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post, p_post, outputs)
+    postprocess_vals!(y, op, x, x_post, p, p_post, outputs)
+    return nothing
+end
+
+function eval_op!(y::RMat, op::AbstractNonlinearOperatorWrapper, x::RMat)
+    x_post = preprocess_inputs(op, x)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post)
+    postprocess_vals!(y, op, x, x_post)
+    return nothing
+end
+
+function eval_op!(y::RMat, op::AbstractNonlinearOperatorWrapper, x::RMat, p)
+    (x_post, p_post) = preprocess_inputs(op, x, p)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post, p_post)
+    postprocess_vals!(y, op, x, x_post, p, p_post)
+    return nothing
+end
+
+function eval_op!(y::RMat, op::AbstractNonlinearOperatorWrapper, x::RMat, outputs::Vector{Bool})
+    x_post = preprocess_inputs(op, x, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post, outputs)
+    postprocess_vals!(y, op, x, x_post, outputs)
+    return nothing
+end
+
+function eval_op!(y::RMat, op::AbstractNonlinearOperatorWrapper, x::RMat, p, outputs::Vector{Bool})
+    (x_post, p_post) = preprocess_inputs(op, x, p, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post, p_post, outputs)
+    postprocess_vals!(y, op, x, x_post, p, p_post, outputs)
+    return nothing
+end
+
+function eval_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x)
+    x_post = preprocess_inputs(op, x)
+    _op = wrapped_operator(op)
+    @ignoraise eval_grads!(Dy, _op, x_post)
+    postprocess_grads!(Dy, op, x, x_post)
+    return nothing
+end
+
+function eval_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x, p)
+    (x_post, p_post) = preprocess_inputs(op, x, p)
+    _op = wrapped_operator(op)
+    @ignoraise eval_grads!(Dy, _op, x_post, p_post)
+    postprocess_grads!(Dy, op, x, x_post, p, p_post)
+    return nothing
+end
+
+function eval_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x, outputs::Vector{Bool})
+    x_post = preprocess_inputs(op, x, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_grads!(Dy, _op, x_post, outputs)
+    postprocess_grads!(Dy, op, x, x_post, outputs)
+    return nothing
+end
+
+function eval_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x, p, outputs::Vector{Bool})
+    (x_post, p_post) = preprocess_inputs(op, x, p, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_grads!(Dy, _op, x_post, p_post, outputs)
+    postprocess_grads!(Dy, op, x, x_post, p, p_post, outputs)
+    return nothing
+end
+
+function eval_hessians!(H, op::AbstractNonlinearOperatorWrapper, x)
+    x_post = preprocess_inputs(op, x)
+    _op = wrapped_operator(op)
+    @ignoraise eval_hessians!(H, _op, x_post)
+    postprocess_hessians!(H, op, x, x_post)
+    return nothing
+end
+
+function eval_hessians!(H, op::AbstractNonlinearOperatorWrapper, x, p)
+    (x_post, p_post) = preprocess_inputs(op, x, p)
+    _op = wrapped_operator(op)
+    @ignoraise eval_hessians!(H, _op, x_post, p_post)
+    postprocess_hessians!(H, op, x, x_post, p, p_post)
+    return nothing
+end
+
+function eval_hessians!(H, op::AbstractNonlinearOperatorWrapper, x, outputs::Vector{Bool})
+    x_post = preprocess_inputs(op, x, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_hessians!(H, _op, x_post, outputs)
+    postprocess_hessians!(H, op, x, x_post, outputs)
+    return nothing
+end
+
+function eval_hessians!(H, op::AbstractNonlinearOperatorWrapper, x, p, outputs::Vector{Bool})
+    (x_post, p_post) = preprocess_inputs(op, x, p, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_hessians!(H, _op, x_post, p_post, outputs)
+    postprocess_hessians!(H, op, x, x_post, p, p_post, outputs)
+    return nothing
+end
+
+function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWrapper, x)
+    x_post = preprocess_inputs(op, x)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads!(y, Dy, _op, x_post)
+    postprocess_vals!(y, op, x, x_post)
+    postprocess_grads!(Dy, op, x, x_post)
+    return nothing
+end
+
+function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWrapper, x, p)
+    (x_post, p_post) = preprocess_inputs(op, x, p)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads!(y, Dy, _op, x_post, p_post)
+    postprocess_vals!(y, op, x, x_post, p, p_post)
+    postprocess_grads!(Dy, op, x, x_post, p, p_post)
+    return nothing
+end
+
+function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWrapper, x, outputs::Vector{Bool})
+    x_post = preprocess_inputs(op, x, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads!(y, Dy, _op, x_post, outputs)
+    postprocess_vals!(y, op, x, x_post, outputs)
+    postprocess_grads!(Dy, op, x, x_post, outputs)
+    return nothing
+end
+
+function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWrapper, x, p, outputs::Vector{Bool})
+    (x_post, p_post) = preprocess_inputs(op, x, p, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads!(y, Dy, _op, x_post, p_post, outputs)
+    postprocess_vals!(y, op, x, x_post, p, p_post, outputs)
+    postprocess_grads!(Dy, op, x, x_post, p, p_post, outputs)
+    return nothing
+end
+
+function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWrapper, x)
+    x_post = preprocess_inputs(op, x)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads_and_hessians!(y, Dy, H, _op, x_post)
+    postprocess_vals!(y, op, x, x_post)
+    postprocess_grads!(Dy, op, x, x_post)
+    postprocess_hessians!(H, op, x, x_post)
+    return nothing
+end
+
+function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWrapper, x, p)
+    (x_post, p_post) = preprocess_inputs(op, x, p)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads_and_hessians!(y, Dy, H, _op, x_post, p_post)
+    postprocess_vals!(y, op, x, x_post, p, p_post)
+    postprocess_grads!(Dy, op, x, x_post, p, p_post)
+    postprocess_hessians!(H, op, x, x_post, p, p_post)
+    return nothing
+end
+
+function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWrapper, x, outputs::Vector{Bool})
+    x_post = preprocess_inputs(op, x, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads_and_hessians!(y, Dy, H, _op, x_post, outputs)
+    postprocess_vals!(y, op, x, x_post, outputs)
+    postprocess_grads!(Dy, op, x, x_post, outputs)
+    postprocess_hessians!(H, op, x, x_post, outputs)
+    return nothing
+end
+
+function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWrapper, x, p, outputs::Vector{Bool})
+    (x_post, p_post) = preprocess_inputs(op, x, p, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads_and_hessians!(y, Dy, H, _op, x_post, p_post, outputs)
+    postprocess_vals!(y, op, x, x_post, p, p_post, outputs)
+    postprocess_grads!(Dy, op, x, x_post, p, p_post, outputs)
+    postprocess_hessians!(H, op, x, x_post, p, p_post, outputs)
+    return nothing
+end
+
+
 # ## Module Exports
 export AbstractNonlinearOperator 
 export AbstractSurrogateModel, AbstractSurrogateModelConfig

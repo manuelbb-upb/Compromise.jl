@@ -179,3 +179,4 @@ function pretty_row_vec(
 	repr_str *= "]"
 	return repr_str
 end
+pretty_row_vec(x)=string(x)

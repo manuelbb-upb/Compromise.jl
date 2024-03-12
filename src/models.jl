@@ -9,7 +9,8 @@
 # For convenience, we'd like to have the same meta information available 
 # as for the original MOP:
 float_type(::AbstractMOPSurrogate)::Type{<:AbstractFloat}=DEFAULT_FLOAT_TYPE
-dim_objectives(::AbstractMOPSurrogate)::Int=0            # mandatory
+dim_vars(::AbstractMOPSurrogate)::Int=-1
+dim_objectives(::AbstractMOPSurrogate)::Int=-1            # mandatory
 dim_nl_eq_constraints(::AbstractMOPSurrogate)::Int=0     # optional
 dim_nl_ineq_constraints(::AbstractMOPSurrogate)::Int=0   # optional
 
@@ -38,6 +39,10 @@ function update_models!(
     indent::Int
 )
     return nothing
+end
+
+function process_trial_point!(mod::AbstractMOPSurrogate, vals_trial, update_results)
+    nothing
 end
 
 # If a model is radius-dependent, 
@@ -193,9 +198,9 @@ end
 # ### Gradient Pre-Allocation
 # We also would like to have pre-allocated gradient arrays ready:
 ## These are defined below (and I put un-specific definitions here for the Linter)
-function prealloc_objectives_grads(mod, n_vars) end
-function prealloc_nl_eq_constraints_grads(mod, n_vars) end
-function prealloc_nl_ineq_constraints_grads(mod, n_vars) end
+function prealloc_objectives_grads(mod) end
+function prealloc_nl_eq_constraints_grads(mod) end
+function prealloc_nl_ineq_constraints_grads(mod) end
 for (dim_func, func_suffix) in (
     (:dim_objectives, :objectives_grads),
     (:dim_nl_eq_constraints, :nl_eq_constraints_grads),
@@ -204,14 +209,15 @@ for (dim_func, func_suffix) in (
     func_name = Symbol("prealloc_", func_suffix)
     yoink_name = Symbol("yoink_", func_suffix)
     @eval begin
-        function $(func_name)(mod::AbstractMOPSurrogate, n_vars)
+        function $(func_name)(mod::AbstractMOPSurrogate)
             n_out = $(dim_func)(mod)
+            n_in = dim_vars(mod)
             T = float_type(mod)
-            return Matrix{T}(undef, n_vars, n_out)
+            return Matrix{T}(undef, n_in, n_out)
         end
 
-        function $(yoink_name)(mod::AbstractMOPSurrogate, n_vars)
-            y = $(func_name)(mod, n_vars) :: RMat
+        function $(yoink_name)(mod::AbstractMOPSurrogate)
+            y = $(func_name)(mod) :: RMat
             @assert eltype(y) == float_type(mod) "Vector eltype does not match problem float type."
             return y
         end

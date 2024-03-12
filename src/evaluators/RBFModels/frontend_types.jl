@@ -26,6 +26,8 @@
     poly_deg :: Union{Int, Nothing}=1
     shape_parameter_function :: Any = nothing
     max_points :: Union{Int, Nothing} = nothing
+
+    database :: Union{Nothing, RBFDatabase} = nothing
     database_size :: Union{Int, Nothing} = nothing
     database_chunk_size :: Union{Int, Nothing} = nothing
 
@@ -76,6 +78,8 @@ Base.@kwdef struct RBFParameters{T<:Real}
 
     "`dim_x` vector of current trust region center."
     x0 :: Vector{T}
+    xtrial :: Vector{T}
+
     "Trust region radius."
     delta_ref :: Union{MutableNumber{T}, Vector{T}}
     "Reference to the current shape parameter, which might depend on Δ."
@@ -200,7 +204,7 @@ function Base.copyto!(dst::RBFTrainingBuffers, src::RBFTrainingBuffers)
     resize!(dst.filter_flags, length(src.filter_flags))
   end
   copyto!(dst.filter_flags, src.filter_flags)
-  
+
   val!(dst.x0_db_index_ref, val(src.x0_db_index_ref))
   if !isnothing(dst.qr_ws_dim_x) && !isnothing(src.qr_ws_dim_x)
     copyto!(dst.qr_ws_dim_x, src.qr_ws_dim_x)
@@ -306,6 +310,7 @@ function rbf_params_and_buffers(
   coeff_π = array(T, dim_π, dim_y)
   z_new = array(T, dim_x)
   x0 = array(T, dim_x)
+  xtrial = similar(x0)
   delta_ref = MutableNumber{T}(1)
   shape_parameter_ref = MutableNumber{T}(1)
   is_fully_linear_ref = MutableNumber(false)
@@ -316,7 +321,7 @@ function rbf_params_and_buffers(
   params = RBFParameters(;
     X,
     dim_x, dim_y, dim_π, max_points, min_points,
-    n_X_ref, coeff_φ, coeff_π, z_new, x0, delta_ref, shape_parameter_ref,
+    n_X_ref, coeff_φ, coeff_π, z_new, x0, xtrial, delta_ref, shape_parameter_ref,
     is_fully_linear_ref, has_z_new_ref, database_state_ref
   )
 
@@ -380,6 +385,7 @@ function rbf_init_model(
     delta_max :: Number,
     kernel :: AbstractRBFKernel,
     shape_parameter_function :: Union{Nothing, Number, Function},
+    database :: Union{Nothing, RBFDatabase},
     database_size :: Union{Nothing, Integer}, 
     database_chunk_size :: Union{Nothing, Integer},
     max_points :: Union{Nothing, Integer}, 
@@ -403,7 +409,10 @@ function rbf_init_model(
         max_points = min_points
     end
     surrogate = RBFSurrogate(; dim_x, dim_y, kernel, poly_deg, dim_φ=-1)
-    database = init_rbf_database(dim_x, dim_y, database_size, database_chunk_size, T)
+
+    if isnothing(database) || database.dim_x != dim_x || database.dim_y != dim_y
+      database = init_rbf_database(dim_x, dim_y, database_size, database_chunk_size, T)
+    end
 
     @unpack poly_deg, dim_π = surrogate
     params, buffers = rbf_params_and_buffers(dim_x, dim_y, dim_π, max_points, T)

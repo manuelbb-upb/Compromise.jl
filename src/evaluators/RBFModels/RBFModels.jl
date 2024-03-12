@@ -99,7 +99,7 @@ function CE.init_surrogate(
 )
     @unpack (
         kernel, search_factor, max_search_factor, th_qr, th_cholesky, max_points, 
-        database_size, database_chunk_size, enforce_fully_linear, poly_deg, 
+        database, database_size, database_chunk_size, enforce_fully_linear, poly_deg, 
         shape_parameter_function, sampling_factor, max_sampling_factor,
     ) = cfg
     if require_fully_linear
@@ -107,7 +107,7 @@ function CE.init_surrogate(
     end
     return rbf_init_model(
         dim_in, dim_out, poly_deg, delta_max, kernel, shape_parameter_function, 
-        database_size, database_chunk_size, max_points, enforce_fully_linear, 
+        database, database_size, database_chunk_size, max_points, enforce_fully_linear, 
         search_factor, max_search_factor, sampling_factor, max_sampling_factor, 
         th_qr, th_cholesky, T
     )

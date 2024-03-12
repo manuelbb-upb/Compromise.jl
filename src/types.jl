@@ -217,6 +217,10 @@ function AlgorithmOptions{T}(; kwargs...) where T<:Real
 	AlgorithmOptions(; T, kwargs...)
 end
 
+Base.@kwdef struct ThreadedOuterAlgorithmOptions{A}
+	inner_opts :: A = AlgorithmOptions()
+end
+
 # ## General Array Containers
 "A struct holding values computed for or derived from an `AbstractMOP`."
 Base.@kwdef struct ValueArrays{
@@ -429,18 +433,44 @@ Because of all these nuances, we rather use specific flags for acceptance and ra
 in the main loop.
 =#
 
-struct ReturnObject{V, S}
+struct ReturnObject{X, V, S, M}
+	ξ0 :: X
 	vals :: V
 	stop_code :: S
+	mod :: M
 end
- 
-opt_vars(r::ReturnObject)=r.vals.ξ
-opt_objectives(r::ReturnObject)=r.vals.fx
-opt_nl_eq_constraints(r::ReturnObject)=r.vals.hx
-opt_nl_ineq_constraints(r::ReturnObject)=r.vals.gx
-opt_lin_eq_constraints(r::ReturnObject)=r.vals.Ex_min_c
-opt_lin_ineq_constraints(r::ReturnObject)=r.vals.Ax_min_b
-opt_constraint_violation(r::ReturnObject)=r.theta_ref[]
+
+opt_surrogate(r::ReturnObject) = r.mod
+opt_initial_vars(r::ReturnObject) = r.ξ0
+
+opt_vars(r::ReturnObject)=opt_vars(r.vals)
+opt_vars(::Nothing) = missing
+opt_vars(v::ValueArrays)=v.ξ
+
+opt_objectives(r::ReturnObject)=opt_objectives(r.vals)
+opt_objectives(::Nothing)=missing
+opt_objectives(v::ValueArrays)=v.fx
+
+opt_nl_eq_constraints(r::ReturnObject)=opt_nl_eq_constraints(r.vals)
+opt_nl_eq_constraints(::Nothing)=missing
+opt_nl_eq_constraints(v::ValueArrays)=v.hx
+
+opt_nl_ineq_constraints(r::ReturnObject)=opt_nl_ineq_constraints(r.vals)
+opt_nl_ineq_constraints(::Nothing)=missing
+opt_nl_ineq_constraints(v::ValueArrays)=v.gx
+
+opt_lin_eq_constraints(r::ReturnObject)=opt_lin_eq_constraints(r.vals)
+opt_lin_eq_constraints(::Nothing)=missing
+opt_lin_eq_constraints(v::ValueArrays)=v.Ex_min_c
+
+opt_lin_ineq_constraints(r::ReturnObject)=opt_lin_ineq_constraints(r.vals)
+opt_lin_ineq_constraints(::Nothing)=missing
+opt_lin_ineq_constraints(v::ValueArrays)=v.Ax_min_b
+
+opt_constraint_violation(r::ReturnObject)=opt_constraint_violation(r.vals)
+opt_constraint_violation(::Nothing)=missing
+opt_constraint_violation(v::ValueArrays)=v.theta_ref[]
+
 function opt_stop_code(r::ReturnObject)
 	c = r.stop_code
 	while c isa WrappedStoppingCriterion
@@ -449,3 +479,12 @@ function opt_stop_code(r::ReturnObject)
 	return c
 end
 
+function Base.show(io::IO, ret::ReturnObject)
+	print(io, """
+	ReturnObject
+	x0   = $(pretty_row_vec(opt_initial_vars(ret)))
+	x*   = $(pretty_row_vec(opt_vars(ret)))
+	f(x*)= $(pretty_row_vec(opt_objectives(ret)))
+	code = $(opt_stop_code(ret))"""
+	)
+end

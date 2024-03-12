@@ -32,9 +32,9 @@ In the code, we often follow this notation:
 * `lb` and `ub` define box constraints.
 =#
 
-# At the beginning of an optimization routine, initialization based on the initial site 
+# At the beginning of an optimization routine, initialization 
 # can be performed:
-initialize(mop::AbstractMOP, ξ0::RVec)=mop
+initialize(mop::AbstractMOP)=mop
 
 # ## Meta-Data
 # The optional function `float_type` returns the type of result and derivative vectors:
@@ -43,10 +43,13 @@ float_type(::AbstractMOP)::Type{<:AbstractFloat}=DEFAULT_FLOAT_TYPE
 # We would also like to deterministically query the expected surrogate model types:
 model_type(::AbstractMOP)::Type{<:AbstractMOPSurrogate}=AbstractMOPSurrogate
 
-# Below functions are used to query dimension information. 
+# Below functions are used to query dimension information.
+dim_vars(::AbstractMOP)::Int=0 
 dim_objectives(::AbstractMOP)::Int=0            # mandatory
 dim_nl_eq_constraints(::AbstractMOP)::Int=0     # optional
 dim_nl_ineq_constraints(::AbstractMOP)::Int=0   # optional
+
+initial_vars(::AbstractMOP)::Union{RVec, RMat, Nothing}=nothing
 
 # ## Linear Constraints
 # An `AbstractMOP` can have constrained variables.

@@ -57,7 +57,7 @@ function finalize_step_vals!(
     ## set `step_vals.s`, `step_vals.xs`, `step_vals.fxs`
     @. step_vals.s = step_vals.n + step_vals.d
     @. step_vals.xs = vals.x + step_vals.s
-    func_vals!(step_vals.fxs, mod, step_vals.xs)
+    @ignoraise objectives!(step_vals.fxs, mod, step_vals.xs)
     return nothing
 end
 
@@ -195,7 +195,7 @@ function compute_descent_step!(
     @unpack Dfx = mod_vals
     @unpack n = step_vals
     if !iszero(n)
-        diff_objectives!(Dfx, mod, x)
+        @ignoraise diff_objectives!(Dfx, mod, x)
     end    
     
     @unpack gx, Dgx = mod_vals
@@ -241,7 +241,7 @@ function finalize_step_vals!(
         d .= 0
         step_vals.s .= step_vals.n
         step_vals.xs .= step_vals.xn
-        objectives!(step_vals.fxs, mod, step_vals.xn)
+        @ignoraise objectives!(step_vals.fxs, mod, step_vals.xn)
         return nothing
     end
     

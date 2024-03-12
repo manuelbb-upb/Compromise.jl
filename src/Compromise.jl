@@ -10,6 +10,7 @@ import LinearAlgebra as LA
 # Automatically annotated docstrings:
 using DocStringExtensions
 
+import Logging
 import Logging: @logmsg, LogLevel, Info, Debug
 import Printf: @sprintf
 
@@ -122,7 +123,7 @@ function init_scaler(::Val{:box}, lin_cons)
 end
 init_scaler(::Val{:none}, lin_cons) = IdentityScaler(lin_cons.n_vars)
 
-function init_lin_cons(mop, n_vars)
+function init_lin_cons(mop)
     lb = lower_var_bounds(mop)
     ub = upper_var_bounds(mop)
 
@@ -135,7 +136,7 @@ function init_lin_cons(mop, n_vars)
     E = lin_eq_constraints_matrix(mop)
     c = lin_eq_constraints_vector(mop)
 
-    return LinearConstraints(n_vars, lb, ub, A, b, E, c)
+    return LinearConstraints(dim_vars(mop), lb, ub, A, b, E, c)
 end
 
 function scale_lin_cons!(trgt, scaler, lin_cons)
@@ -177,10 +178,11 @@ function constraint_violation(hx, gx, Ex_min_c, Ax_min_b)
     )
 end
 
-function init_vals(mop, n_vars)
+function init_vals(mop)
     T = float_type(mop)
     
     ## initialize unscaled and scaled variables
+    n_vars = dim_vars(mop)
     ξ = Vector{T}(undef, n_vars)
     x = similar(ξ)
 
@@ -205,14 +207,14 @@ function init_step_vals(vals)
     return StepValueArrays(vals.n_vars, vals.dim_objectives, T)
 end 
 
-function init_model_vals(mod, n_vars)
+function init_model_vals(mod)
     ## pre-allocate value arrays
     fx = yoink_objectives_vector(mod)
     hx = yoink_nl_eq_constraints_vector(mod)
     gx = yoink_nl_ineq_constraints_vector(mod)
-    Dfx = yoink_objectives_grads(mod, n_vars)
-    Dhx = yoink_nl_eq_constraints_grads(mod, n_vars)
-    Dgx = yoink_nl_ineq_constraints_grads(mod, n_vars)
+    Dfx = yoink_objectives_grads(mod)
+    Dhx = yoink_nl_eq_constraints_grads(mod)
+    Dgx = yoink_nl_ineq_constraints_grads(mod)
     return SurrogateValueArrays(fx, hx, gx, Dfx, Dhx, Dgx)
 end
 
@@ -277,44 +279,103 @@ function optimize(
     MOP::AbstractMOP, ξ0::RVec;
     algo_opts :: AlgorithmOptions = AlgorithmOptions(),
     @nospecialize(user_callback = NoUserCallback()),
-)
-    (
-        update_results, mop, mod, scaler, lin_cons, scaled_cons, 
-        vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, stop_crits, 
-        algo_opts
-    ) = initialize_structs(MOP, ξ0, algo_opts)
+)   
+    return optimize_with_algo(MOP, algo_opts, ξ0; user_callback)
+end
 
-    stop_code = nothing
-    @unpack log_level = algo_opts
-    while true
-        @ignorebreak stop_code log_level
-        stop_code = do_iteration!(      # assume `copyto_model!`, otherwise, `mod, stop_code = do_iteration!...`
-            update_results, mop, mod, scaler, lin_cons, scaled_cons, 
-            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, 
-            stop_crits, algo_opts, user_callback
-        )
+function optimize(
+    MOP::AbstractMOP;
+    algo_opts :: AlgorithmOptions = AlgorithmOptions(),
+    @nospecialize(user_callback = NoUserCallback()),
+)
+    ξ0 = initial_vars(MOP)
+    
+    @assert !isnothing(ξ0) "`optimize` called without initial variable vector."
+
+    return optimize_with_algo(MOP, algo_opts, ξ0; user_callback)
+end
+
+function optimize_with_algo(
+    MOP::AbstractMOP, outer_opts::ThreadedOuterAlgorithmOptions, ξ0::RVecOrMat; 
+    @nospecialize(user_callback = NoUserCallback()),
+)
+    _ξ0 = ξ0 isa RVec ? reshape(ξ0, :, 1) : ξ0
+
+    algo_opts = outer_opts.inner_opts
+    log_level = algo_opts.log_level
+
+    ret_lock = ReentrantLock()
+    ret = Any[]
+
+    @logmsg log_level "Starting threaded evaluation of columns. (No Logging)."
+    ncols = size(_ξ0, 2)
+    Threads.@threads for i=1:ncols
+        ξ0_i = lock(ret_lock) do
+            @logmsg log_level "\tInspecting column $(i)."
+            _ξ0[:, i]
+        end
+        r = Logging.with_logger(Logging.NullLogger()) do
+            optimize_with_algo(MOP, algo_opts, ξ0_i; user_callback)
+        end
+        lock(ret_lock) do 
+            push!(ret, r)
+        end
     end
-    return ReturnObject(vals, stop_code)
+
+    return ret
+end
+
+function optimize_with_algo(
+    MOP::AbstractMOP, algo_opts::AlgorithmOptions, ξ0; 
+    @nospecialize(user_callback = NoUserCallback()),
+)
+    init_result = initialize_structs(MOP, ξ0, algo_opts)
+    if !(isa(init_result, AbstractStoppingCriterion))
+        (
+            update_results, mop, mod, scaler, lin_cons, scaled_cons, 
+            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, stop_crits, 
+            algo_opts
+        ) = init_result
+
+        _ξ0 = copy(vals.ξ)
+
+        stop_code = nothing
+        @unpack log_level = algo_opts
+        while true
+            @ignorebreak stop_code log_level
+            stop_code = do_iteration!(      # assume `copyto_model!`, otherwise, `mod, stop_code = do_iteration!...`
+                update_results, mop, mod, scaler, lin_cons, scaled_cons, 
+                vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, 
+                stop_crits, algo_opts, user_callback
+            )
+        end
+        return ReturnObject(_ξ0, vals, stop_code, mod)
+    else
+        return ReturnObject(ξ0, nothing, init_result, nothing)
+    end
 end
 
 function initialize_structs( 
     MOP::AbstractMOP, ξ0::RVec, algo_opts :: AlgorithmOptions,
 )
-
     @assert !isempty(ξ0) "Starting point array `x0` is empty."
     @assert dim_objectives(MOP) > 0 "Objective Vector dimension of problem is zero."
     
     @unpack log_level = algo_opts
     
-    ## INITIALIZATION (Iteration 0)
-    mop = initialize(MOP, ξ0)
-    T = float_type(mop)
     n_vars = length(ξ0)
+    if dim_vars(MOP) != n_vars
+        @error "`dim_vars(MOP)=$(dim_vars(mop))`, but `length(ξ0)=$(n_vars)`."
+    end
 
+    ## INITIALIZATION (Iteration 0)
+    mop = initialize(MOP)
+    T = float_type(mop)
+    
     ## struct holding constant linear constraint informaton (lb, ub, A_b, E_c)
     ## set these first, because they are needed to initialize a scaler 
     ## if `algo_opts.scaler_cfg==:box`:
-    lin_cons = init_lin_cons(mop, n_vars)
+    lin_cons = init_lin_cons(mop)
 
     ## initialize a scaler according to configuration
     scaler = init_scaler(algo_opts.scaler_cfg, lin_cons)
@@ -322,17 +383,6 @@ function initialize_structs(
     scaled_cons = deepcopy(lin_cons)
     update_lin_cons!(scaled_cons, scaler, lin_cons)
 
-    ## caches for working arrays x, fx, hx, gx, Ex, Ax, …
-    ## (perform 1 evaluation to set values already)
-    vals = init_vals(mop, n_vars)
-
-    vals.ξ .= ξ0
-    project_into_box!(vals.ξ, lin_cons)
-    scale!(vals.x, scaler, vals.ξ)
-    @ignoraise eval_mop!(vals, mop)
-
-    vals_tmp = deepcopy(vals)
- 
     ## pre-allocate surrogates `mod`
     ## (they are not trained yet)
     mod = init_models(
@@ -340,10 +390,21 @@ function initialize_structs(
         delta_max = algo_opts.delta_max,
         require_fully_linear = algo_opts.require_fully_linear_models
     )
-    
+
+    ## caches for working arrays x, fx, hx, gx, Ex, Ax, …
+    vals = init_vals(mop)
+
+    ## (perform 1 evaluation to set values already)
+    vals.ξ .= ξ0
+    project_into_box!(vals.ξ, lin_cons)
+    scale!(vals.x, scaler, vals.ξ)
+    @ignoraise eval_mop!(vals, mop)
+
+    vals_tmp = deepcopy(vals)
+     
     ## chaches for surrogate value vectors fx, hx, gx, Dfx, Dhx, Dgx
     ## (values not set yet, only after training)
-    mod_vals = init_model_vals(mod, n_vars)
+    mod_vals = init_model_vals(mod)
  
     ## pre-allocate working arrays for normal and descent step calculation:
     step_vals = init_step_vals(vals)
@@ -468,6 +529,9 @@ function do_iteration!(
         update_results, vals_tmp, Δ, mop, scaler, filter, vals, mod_vals, step_vals, algo_opts;
         it_index, indent=0
     )
+
+    @ignoraise process_trial_point!(mod, vals_tmp, update_results)
+
     ## update filter
     if update_results.it_stat == FILTER_ADD || update_results.it_stat == FILTER_ADD_SHRINK
         add_to_filter!(filter, vals_tmp.theta_ref[], vals_tmp.phi_ref[])
@@ -478,7 +542,7 @@ function do_iteration!(
         scaled_cons, mod_vals, vals, vals_tmp, step_vals, filter, algo_opts; 
         it_index, indent=0
     )
-   
+
     if update_results.point_has_changed
         ## accept trial point, mathematically ``xₖ₊₁ ← xₖ + sₖ``, pseudo-code `copyto!(vals, vals_tmp)`: 
         accept_trial_point!(vals, vals_tmp)

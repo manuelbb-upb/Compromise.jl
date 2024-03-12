@@ -1,3 +1,19 @@
+function CE.process_trial_point!(
+    rbf::RBFModel, xtrial, fxtrial, is_next::Bool;
+    log_level=Info
+)
+    if !is_next
+        @unpack params, database = rbf
+        if params.xtrial != xtrial
+            lock(database.rwlock) do
+                add_to_database!(database, xtrial, fxtrial)
+            end
+            params.xtrial .= xtrial
+        end
+    end
+    return nothing
+end
+
 function update_rbf_model!(
     rbf::RBFModel, op, Δ, x0, fx0, global_lb=nothing, global_ub=nothing; 
     norm_p=Inf, log_level=Info, force_rebuild::Bool=false, indent::Int=0
@@ -35,36 +51,29 @@ function update_rbf_model!(
             rbf, Δ, x0, fx0, global_lb, global_ub; 
             delta_max, norm_p, log_level, indent
         )
-        #@ignoraise n_X = evaluate_and_update_db!(rbf, op, x0, n_X)
         @ignoraise n_X = eval_missing_values!(rbf, op, x0, n_X)
         
         if n_X < rbf.min_points
             @warn "$(pad_str)Cannot make a fully linear RBF model."
         end
 
-        @unpack shape_parameter_ref, delta_ref = params;
+        @unpack shape_parameter_ref = params;
         val!(shape_parameter_ref, model_shape_parameter(rbf, Δ))
     
         n_X_affine_sampling = n_X
         @unpack max_search_factor = rbf
 
-        #if n_X < max_points
+        if n_X == min_points
             delta = delta_max * max_search_factor
             n_X = cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent)
-        #end
-        
-        val!(delta_ref, Δ)
-        params.x0 .= x0
-
-        val!(params.n_X_ref, n_X)
-        val!(buffers.x0_db_index_ref, buffers.db_index[1])
-
+        end
+       
         n_X_affine_sampling, n_X
     end
     
-    lock(rwlock) do
+    new_db_state = lock(rwlock) do
         put_new_evals_into_db!(rbf, x0, n_X_affine_sampling, buffers.xZ)
-        val!(params.database_state_ref, db_state(database))
+        db_state(database)
     end
 
     if n_X_affine_sampling != min_points
@@ -78,6 +87,15 @@ function update_rbf_model!(
             n_X, dim_y, dim_π
         )
     end
+     
+    val!(params.delta_ref, Δ)
+    params.x0 .= x0
+    #params.xtrial .= NaN
+
+    val!(params.n_X_ref, n_X)
+    val!(buffers.x0_db_index_ref, buffers.db_index[1])
+    val!(params.database_state_ref, db_state(database))
+
     return nothing
 end
 
@@ -141,11 +159,11 @@ end
         flags[i] = (db_index[i] <= 0)
     end
     
-    _X = X[:, 1:n_X][:, flags]
-    _Y = FX[:, 1:n_X][:, flags]
-    _Y[1, :] .= NaN
-    _X .+= x0
+    _X = X[:, 1:n_X][:, flags][:, 2:end]
+    _Y = FX[:, 1:n_X][:, flags][:, 2:end]
     
+    _X .+= x0
+    _Y[1, :] .= NaN
     @ignoraise op_code = func_vals!(_Y, op, _X)
     
     _X .-= x0
@@ -153,7 +171,7 @@ end
     ## sort the columns in X, FX, and flags to have valid entries first
     ## (there probably is a cool recursive way to do this)
     nan_check_has_completed = false
-    i_start = 1
+    i_start = 2
     i_end = n_X
     while !nan_check_has_completed
         nan_check_has_completed = true
@@ -165,7 +183,7 @@ end
                 for j=i:i_end
                     X[:, j] .= X[:, j+1]
                     FX[:, j] .= FX[:, j+1]
-                    flags[j] .= flags[j+1]
+                    flags[j] = flags[j+1]
                 end
                 nan_check_has_completed = false
                 break

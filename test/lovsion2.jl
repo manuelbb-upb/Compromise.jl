@@ -26,5 +26,5 @@ x0 = [
     -0.125,
     -0.3888888889,
 ]
-fv, r = optimize(mop, x0; algo_opts)
+r = optimize(mop, x0; algo_opts=AlgorithmOptions(stop_max_crit_loops=2))
 end

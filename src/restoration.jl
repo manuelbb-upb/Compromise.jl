@@ -15,7 +15,7 @@ function do_restoration(
     if !any(isnan.(step_vals.n))
         ret = :NOTNAN
         @. vals_tmp.x = step_vals.xn
-        eval_mop!(vals_tmp, mop, scaler)
+        @ignoraise eval_mop!(vals_tmp, mop, scaler)
         if iszero(vals_tmp.theta_ref[])
             @logmsg algo_opts.log_level "$(pad_str) Using `xn` as next iterate."
             xr_opt = copy(step_vals.xn)

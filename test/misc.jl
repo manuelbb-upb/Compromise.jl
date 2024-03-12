@@ -352,7 +352,7 @@ end
     ret = optimize(mop, [π, -ℯ]; algo_opts)
 
     @test fn_counter[] == 10
-    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa  Compromise.CompromiseEvaluators.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -364,7 +364,7 @@ end
     )
     ret = optimize(mop, [π, -ℯ]; algo_opts)
     @test dfn_counter[] == 1
-    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa  Compromise.CompromiseEvaluators.BudgetExhausted
 
     mop = MutableMOP(;num_vars=2)
     add_objectives!(
@@ -373,7 +373,7 @@ end
     )
     ret = optimize(mop, [π, -ℯ]; algo_opts)
     @test dfn_counter[] == 2
-    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa  Compromise.CompromiseEvaluators.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -386,7 +386,7 @@ end
     ret = optimize(mop, [π, -ℯ]; algo_opts)
 
     @test fn_counter[] == 100
-    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa  Compromise.CompromiseEvaluators.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -398,7 +398,7 @@ end
     )
     ret = optimize(mop, [π, -ℯ]; algo_opts)
     @test fn_counter[] == 10
-    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa  Compromise.CompromiseEvaluators.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -410,7 +410,7 @@ end
     )
     ret = optimize(mop, [π, -ℯ]; algo_opts)
     @test fn_counter[] == 10
-    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa  Compromise.CompromiseEvaluators.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -422,7 +422,7 @@ end
     )
     ret = optimize(mop, [π, -ℯ]; algo_opts)
     @test dfn_counter[] <= 5
-    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa  Compromise.CompromiseEvaluators.BudgetExhausted
     
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -435,7 +435,7 @@ end
     )
     ret = optimize(mop, [π, -ℯ]; algo_opts)
     @test fn_counter[] <= 10
-    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa  Compromise.CompromiseEvaluators.BudgetExhausted
 
     fn_counter[] = 0
     dfn_counter[] = 0
@@ -448,7 +448,7 @@ end
     )
     ret = optimize(mop, [π, -ℯ]; algo_opts)
     @test dfn_counter[] == 2
-    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa  Compromise.CompromiseEvaluators.BudgetExhausted
     
     mop = MutableMOP(;num_vars=2)
     add_objectives!(
@@ -457,7 +457,7 @@ end
         hessians=hess_objectives_function, hessians_iip=false 
     )
     ret = optimize(mop, [π, -ℯ]; algo_opts)
-    @test opt_stop_code(ret) isa Compromise.NonlinearFunctions.BudgetExhausted
+    @test opt_stop_code(ret) isa  Compromise.CompromiseEvaluators.BudgetExhausted
 
 end
 

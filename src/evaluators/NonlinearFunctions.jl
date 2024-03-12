@@ -2,13 +2,13 @@ module NonlinearFunctions
 
 include("abstract_autodiff.jl")
 
-import ..Compromise: RVec, RVecOrMat
+import ..Compromise: RVec, RMat, RVecOrMat, @ignoraise
 import ..Compromise.CompromiseEvaluators as CE
+import ..Compromise.CompromiseEvaluators: FuncCallCounter
 
 using Parameters: @with_kw
 
 # ## Wrapper for Parametric Functions
-
 @doc """
     NonlinearParametricFunction(; 
         func, grads=nothing, hessians=nothing, 
@@ -55,10 +55,10 @@ compute the derivatives if the relevant field `isnothing`.
     func_and_grads_iip :: Bool = grads_iip  # true -> func_and_grads!(y, Dy, x, p), false -> y, Dy = func_and_grads(x, p)
     func_and_grads_and_hessians_iip :: Bool = hessians_iip # true -> func_and_grads_and_hessians!(y, Dy, H, x, p), false -> y, Dy, H = func_and_grads_and_hessians(x, p)
 
-    num_func_calls :: Base.RefValue{Int} = Ref(0)
-    num_grad_calls :: Base.RefValue{Int} = Ref(0)
-    num_hess_calls :: Base.RefValue{Int} = Ref(0)
-    
+    num_func_calls :: FuncCallCounter = FuncCallCounter()
+    num_grad_calls :: FuncCallCounter = FuncCallCounter()
+    num_hess_calls :: FuncCallCounter = FuncCallCounter()
+ 
     max_func_calls :: Int = typemax(Int)
     max_grad_calls :: Int = typemax(Int)
     max_hess_calls :: Int = typemax(Int)
@@ -92,48 +92,36 @@ function CE.provides_hessians(op::NonlinearParametricFunction)
     return false
 end
 
-import ..Compromise: AbstractStoppingCriterion, stop_message, @ignoraise
-
-struct BudgetExhausted <: AbstractStoppingCriterion
-    ni :: Int
-    mi :: Int
-    order :: Int
+function CE.func_call_counter(op::NonlinearParametricFunction, ::Val{0})
+    return op.num_func_calls
+end
+function CE.func_call_counter(op::NonlinearParametricFunction, ::Val{1})
+    return op.num_grad_calls
+end
+function CE.func_call_counter(op::NonlinearParametricFunction, ::Val{2})
+    return op.num_hess_calls
 end
 
-function stop_message(crit::BudgetExhausted)
-    return "Maximum evaluation count reached, order=$(crit.order), is=$(crit.ni), max=$(crit.mi)."
+function CE.max_num_calls(op::NonlinearParametricFunction, ::Val{0})
+    return op.max_func_calls
 end
-
-function check_num_calls(op::NonlinearParametricFunction, i=0)
-    ni, mi = if i== 1
-        op.num_grad_calls[], op.max_grad_calls
-    elseif i==2
-        op.num_hess_calls[], op.max_hess_calls
-    else
-        op.num_func_calls[], op.max_func_calls
-    end
-    if ni >= mi
-        return BudgetExhausted(ni, mi, i)
-    end
-    return nothing
+function CE.max_num_calls(op::NonlinearParametricFunction, ::Val{1})
+    return op.max_grad_calls
+end
+function CE.max_num_calls(op::NonlinearParametricFunction, ::Val{2})
+    return op.max_hess_calls
 end
 
 function CE.eval_op!(y::RVec, op::NonlinearParametricFunction, x::RVec, p)
-    @ignoraise check_num_calls(op, 0)
-    
     if op.func_iip 
         op.func(y, x, p)
     else
         y .= op.func(x, p)
     end
-    op.num_func_calls[] += 1
-    
     return nothing
 end
 
 function CE.eval_grads!(Dy, op::NonlinearParametricFunction, x, p)
-    @ignoraise check_num_calls(op, 1)
-     
     if !isnothing(op.grads)
         if op.grads_iip
             op.grads(Dy, op.grads!, x, p)
@@ -152,13 +140,10 @@ function CE.eval_grads!(Dy, op::NonlinearParametricFunction, x, p)
     else
         ad_grads!(Dy, op.backend, op.func, x, p, Val(op.func_iip))
     end
-    op.num_grad_calls[] += 1
     return nothing
 end
 
 function CE.eval_hessians!(H, op::NonlinearParametricFunction, x, p)
-    @ignoraise check_num_calls(op, 2)
-    
     if !isnothing(op.hessians)
         if op.hessians_iip
             op.hessians(H, x, p)
@@ -179,15 +164,10 @@ function CE.eval_hessians!(H, op::NonlinearParametricFunction, x, p)
     else
         ad_hessians!(H, op.backend, op.func, x, p, Val(op.func_iip))
     end
-    op.num_hess_calls[] += 1
     return nothing
 end
 
 function CE.eval_op_and_grads!(y, Dy, op::NonlinearParametricFunction, x, p)
-    @ignoraise check_num_calls(op, 0)
-    @ignoraise check_num_calls(op, 1)
-
-    inc_counter = false
     if !isnothing(op.func_and_grads)
         if op.func_and_grads_iip
             op.func_and_grads(y, Dy, x, p)
@@ -197,28 +177,18 @@ function CE.eval_op_and_grads!(y, Dy, op::NonlinearParametricFunction, x, p)
             y .= _y
             Dy .= _Dy
         end
-        inc_counter = true
     elseif !isnothing(op.grads)
         @ignoraise CE.eval_op!(y, op, x, p)
         @ignoraise CE.eval_grads!(Dy, op, x, p)
     else
         ad_op_and_grads!(y, Dy, op.backend, op.func, x, p, Val(op.func_iip))
-        inc_counter = true
     end
     
-    if inc_counter
-        op.num_func_calls[] += 1
-        op.num_grad_calls[] += 1
-    end
-    return nothing
+   return nothing
 end
 
 function CE.eval_op_and_grads_and_hessians!(y, Dy, H, op::NonlinearParametricFunction, x, p)
-    @ignoraise check_num_calls(op, 0)
-    @ignoraise check_num_calls(op, 1)
-    @ignoraise check_num_calls(op, 2)
-    
-    inc_couter = false
+  
     if !isnothing(op.func_and_grads_and_hessians)
         if op.func_and_grads_and_hessians_iip
             op.func_and_grads_and_hessians(y, Dy, H, x, p)
@@ -229,21 +199,13 @@ function CE.eval_op_and_grads_and_hessians!(y, Dy, H, op::NonlinearParametricFun
             Dy .= _Dy
             H .= _H
         end
-        inc_couter = true
     elseif !isnothing(op.hessians)
         @ignoraise CE.eval_op_and_grads!(y, Dy, op, x, p)
         @ignoraise CE.eval_hessians!(H, op, x, p)
     else
         ad_op_and_grads_and_hessians!(y, Dy, H, op.backend, op.func, x, p, Val(op.func_iip))
-        inc_couter = true
     end
 
-    if inc_couter
-        op.num_func_calls[] += 1
-        op.num_grad_calls[] += 1
-        op.num_hess_calls[] += 1
-    end
-    
     return nothing
 end
 
@@ -264,23 +226,27 @@ end
 # This whole affair is a bit convoluted, and tidying things up is a TODO.
 
 ## helper to intercept and modify functions without parameters and make them accept some
-struct MakeParametric{F}
+struct MakeParametric{F} <: Function
     func :: F
 end
 
 # Re-define evaluation to take parameters.
 # For the general case, with arbitrarily many arguments,
 # a `@generated` function appears to work reasonably well...
-(f::MakeParametric)(x, p) = f.func(x)
-(f::MakeParametric)(y, x, p) = f.func(y, x)
-(f::MakeParametric)(y, Dy, x, p) = f.func(y, Dy, x)
-(f::MakeParametric)(y, Dy, Hy, x, p) = f.func(y, Dy, Hy, x)
+(@nospecialize(f::MakeParametric))(x, p) = f.func(x)
+(@nospecialize(f::MakeParametric))(y, x, p) = f.func(y, x)
+(@nospecialize(f::MakeParametric))(y, Dy, x, p) = f.func(y, Dy, x)
+(@nospecialize(f::MakeParametric))(y, Dy, Hy, x, p) = f.func(y, Dy, Hy, x)
 
 # `NonlinearFunction` simply wraps a `NonlinearParametricFunction`.
 struct NonlinearFunction{
-    WF<:CE.AbstractNonlinearOperator} <: CE.AbstractNonlinearOperator
+    WF<:CE.AbstractNonlinearOperator} <: CE.AbstractNonlinearOperatorWrapper
     wrapped_function :: WF
 end
+
+CE.wrapped_operator(op::NonlinearFunction)=op.wrapped_function
+preprocess_inputs(op::NonlinearFunction, x::RVec, p)=(x, nothing)
+preprocess_inputs(op::NonlinearFunction, x::RMat, p)=(x, nothing)
 
 # The magic happens with the keyword-argument constructor.
 # We intercept user functions without parameters and wrap them first.
@@ -296,31 +262,6 @@ function NonlinearFunction(; kwargs...)
         end
     end
     return NonlinearFunction(NonlinearParametricFunction(;new_kwargs...))
-end
-
-CE.operator_has_params(op::NonlinearFunction)=false
-CE.operator_can_partial(op::NonlinearFunction)=CE.operator_can_partial(op.wrapped_function)
-CE.operator_can_eval_multi(op::NonlinearFunction)=CE.operator_can_eval_multi(op.wrapped_function)
-CE.operator_has_name(op::NonlinearFunction)=CE.operator_has_name(op.wrapped_function)
-CE.operator_name(op::NonlinearFunction)=CE.operator_name(op.wrapped_function)
-
-CE.provides_grads(op::NonlinearFunction)=CE.provides_grads(op.wrapped_function)
-CE.provides_hessians(op::NonlinearFunction)=CE.provides_hessians(op.wrapped_function)
-
-function CE.eval_op!(y::RVec, op::NonlinearFunction, x::RVec)
-    CE.eval_op!(y, op.wrapped_function, x, nothing)
-end
-function CE.eval_grads!(Dy, op::NonlinearFunction, x)
-    CE.eval_grads!(Dy, op.wrapped_function, x, nothing)
-end
-function CE.eval_hessians!(H, op::NonlinearFunction, x)
-    CE.eval_hessians!(H, op.wrapped_function, x, nothing)
-end
-function CE.eval_op_and_grads!(y, Dy, op::NonlinearFunction, x)
-    CE.eval_op_and_grads!(y, Dy, op.wrapped_function, x, nothing)
-end
-function CE.eval_op_and_grads_and_hessians!(y, Dy, H, op::NonlinearFunction, x)
-    CE.eval_op_and_grads_and_hessians!(y, Dy, H, op.wrapped_function, x, nothing)
 end
 
 export AbstractAutoDiffBackend, NoBackend

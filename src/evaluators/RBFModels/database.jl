@@ -179,6 +179,7 @@ function add_to_database!(
         grow_db_success = db_grow!(rbf_database)
         if grow_db_success
            x_index = n_x + 1
+           min_flag = 0
         end
     end
     
@@ -190,6 +191,7 @@ function add_to_database!(
         grow_db_success = db_grow!(rbf_database; force_chunk=1)
         @assert grow_db_success
         x_index = n_x + 1
+        min_flag = 0
     end
 
     return db_set_x!(rbf_database, x, x_index, min_flag + 1)

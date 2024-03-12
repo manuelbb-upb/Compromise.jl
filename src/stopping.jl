@@ -73,10 +73,13 @@ function check_stopping_criteria(
     return nothing
 end
 
-@with_kw struct MaxIterStopping <: AbstractStoppingCriterion
+Base.@kwdef struct MaxIterStopping <: AbstractStoppingCriterion
     num_max_iter :: Int = 500
     
     indent :: Base.RefValue{Int} = Ref(0)
+end
+function Base.show(io::IO, crit::MaxIterStopping)
+    print(io, "MaxIterStopping($(crit.num_max_iter))")
 end
 
 function stop_message(crit::MaxIterStopping)
@@ -97,7 +100,7 @@ function evaluate_stopping_criterion(
     return nothing
 end
 
-@with_kw struct MinimumRadiusStopping{F} <: AbstractStoppingCriterion
+Base.@kwdef struct MinimumRadiusStopping{F} <: AbstractStoppingCriterion
     delta_min :: F = eps(Float64)
     
     indent :: Base.RefValue{Int} = Ref(0)
@@ -106,6 +109,9 @@ end
 function stop_message(crit::MinimumRadiusStopping)
     pad_str = lpad("", crit.indent[])
     "$(pad_str)EXIT, trust region radius reduced to below `delta_min` ($(crit.delta_min))."
+end
+function Base.show(io::IO, crit::MinimumRadiusStopping)
+    print(io, "MinimumRadiusStopping($(crit.delta_min))")
 end
 
 function evaluate_stopping_criterion(
@@ -134,12 +140,17 @@ function evaluate_stopping_criterion(
     return nothing
 end
 
-@with_kw struct ArgsRelTolStopping{F} <: AbstractStoppingCriterion
+Base.@kwdef struct ArgsRelTolStopping{F} <: AbstractStoppingCriterion
     tol :: F = -Inf
     only_if_point_changed :: Bool = true
 
     indent :: Base.RefValue{Int} = Ref(0)
 end
+
+function Base.show(io::IO, crit::ArgsRelTolStopping)
+    print(io, "ArgsRelTolStopping(tol=$(crit.tol))")
+end 
+
 function stop_message(crit::ArgsRelTolStopping) 
     pad_str = lpad("", crit.indent[])
     "$(pad_str)EXIT, relative parameter tolerance criterion."
@@ -163,11 +174,15 @@ function evaluate_stopping_criterion(
     return nothing
 end
 
-@with_kw struct ArgsAbsTolStopping{F} <: AbstractStoppingCriterion
+Base.@kwdef struct ArgsAbsTolStopping{F} <: AbstractStoppingCriterion
     tol :: F = -Inf
     only_if_point_changed :: Bool = true
     indent :: Base.RefValue{Int} = Ref(0)
 end
+
+function Base.show(io::IO, crit::ArgsAbsTolStopping)
+    print(io, "ArgsAbsTolStopping(tol=$(crit.tol))")
+end 
 
 function stop_message(crit::ArgsAbsTolStopping) 
     pad_str = lpad("", crit.indent[])
@@ -191,12 +206,16 @@ function evaluate_stopping_criterion(
     return nothing
 end
 
-@with_kw struct ValsRelTolStopping{F} <: AbstractStoppingCriterion
+Base.@kwdef struct ValsRelTolStopping{F} <: AbstractStoppingCriterion
     tol :: F = -Inf
     only_if_point_changed :: Bool = true
 
     indent :: Base.RefValue{Int} =Ref(0)
 end
+
+function Base.show(io::IO, crit::ValsRelTolStopping)
+    print(io, "ValsRelTolStopping(tol=$(crit.tol))")
+end 
 
 function stop_message(crit::ValsRelTolStopping) 
     pad_str = lpad("", crit.indent[])
@@ -221,11 +240,15 @@ function evaluate_stopping_criterion(
     return nothing
 end
 
-@with_kw struct ValsAbsTolStopping{F} <: AbstractStoppingCriterion
+Base.@kwdef struct ValsAbsTolStopping{F} <: AbstractStoppingCriterion
     tol :: F = -Inf
     only_if_point_changed :: Bool = true
     indent :: Base.RefValue{Int} =Ref(0)
 end
+
+function Base.show(io::IO, crit::ValsAbsTolStopping)
+    print(io, "ValsAbsTolStopping(tol=$(crit.tol))")
+end 
 
 function stop_message(crit::ValsAbsTolStopping) 
     pad_str = lpad("", crit.indent[])
@@ -249,11 +272,15 @@ function evaluate_stopping_criterion(
     return nothing
 end
 
-@with_kw struct CritAbsTolStopping{F} <: AbstractStoppingCriterion
+Base.@kwdef struct CritAbsTolStopping{F} <: AbstractStoppingCriterion
     crit_tol :: F
     theta_tol :: F
     indent :: Base.RefValue{Int} =Ref(0)
 end
+
+function Base.show(io::IO, crit::CritAbsTolStopping)
+    print(io, "CritAbsTolStopping(tol=$(crit.crit_tol))")
+end 
 
 function stop_message(crit::CritAbsTolStopping) 
     pad_str = lpad("", crit.indent[])
@@ -297,10 +324,14 @@ function crit_abs_tol_stopping(χ, θ, crit_tol, theta_tol, log_level, it_index)
     return false
 end
 
-@with_kw struct MaxCritLoopsStopping <: AbstractStoppingCriterion
+Base.@kwdef struct MaxCritLoopsStopping <: AbstractStoppingCriterion
     num :: Int
     indent :: Base.RefValue{Int} = Ref(0)
 end
+function Base.show(io::IO, crit::MaxCritLoopsStopping)
+    print(io, "MaxCritLoopsStopping($(crit.num))")
+end
+
 function stop_message(crit::MaxCritLoopsStopping) 
     pad_str = lpad("", crit.indent[])
     "$(pad_str)EXIT, maximum number of criticality loops."
@@ -321,9 +352,10 @@ function evaluate_stopping_criterion(
     return nothing
 end
 
-@with_kw struct InfeasibleStopping <: AbstractStoppingCriterion
+Base.@kwdef struct InfeasibleStopping <: AbstractStoppingCriterion
     indent :: Int = 0 
 end
+Base.show(io::IO, ::InfeasibleStopping)=print(io, "InfeasibleStopping()")
 function stop_message(crit::InfeasibleStopping)
     pad_str = lpad("", crit.indent)
     return "$(pad_str)INFEASIBLE: Cannot find a feasible point."
