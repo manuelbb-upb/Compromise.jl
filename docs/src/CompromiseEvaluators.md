@@ -2,6 +2,10 @@
 This file provides a submodule defining abstract types and interfaces for evaluation
 of vector-vector-functions and surrogate models.
 
+````julia
+import Logging: Debug
+````
+
 ## `AbstractNonlinearOperator` Interface
 An object subtyping `AbstractNonlinearOperator` represents a function mapping real-valued
 vectors to real-valued vectors.
@@ -15,27 +19,95 @@ Alternatively, this functionality can be provided by utility types implementing 
 abstract type AbstractNonlinearOperator end
 ````
 
-A function can have parameters that are constant in a single optimization run, and
-the type structure reflects this distinction:
-
-````julia
+A function can have parameters that are constant in a single optimization run.
+Previously, there was a type hierachy like
+```julia
 abstract type AbstractNonlinearOperatorWithParams <: AbstractNonlinearOperator end
 abstract type AbstractNonlinearOperatorNoParams <: AbstractNonlinearOperator end
-````
+```
+**This is no longer the case!**
 
-### Common Methods
-Both, `AbstractNonlinearOperatorWithParams` and `AbstractNonlinearOperatorNoParams`
-have methods like `eval_op!`.
-The signatures look different, though.
-That is why there is a separate section for both types.
-The below methods have the same signature for both operator supertypes:
+````julia
+operator_has_name(::AbstractNonlinearOperator)::Bool=false
+operator_name(::AbstractNonlinearOperator)=error("No name.")
+
+operator_can_eval_multi(::AbstractNonlinearOperator)::Bool=false
+operator_has_params(::AbstractNonlinearOperator)::Bool=false
+operator_can_partial(::AbstractNonlinearOperator)::Bool=false
+
+import ..Compromise: RVec, RVecOrMat, RMat, @ignoraise, universal_copy!
+````
 
 Evaluation of derivatives is optional if evaluation-based models are used.
 We have functions to indicate if an operator implements `eval_grads!`, `eval_hessians!`:
 
 ````julia
-provides_grads(op::AbstractNonlinearOperator)=false
-provides_hessians(op::AbstractNonlinearOperator)=false
+function provides_grads(op::AbstractNonlinearOperator)
+    return false
+end
+function provides_hessians(op::AbstractNonlinearOperator)
+    return false
+end
+````
+
+## Call Counting
+
+````julia
+import ..Compromise: AbstractStoppingCriterion, stop_message, @ignoraise
+
+Base.@kwdef mutable struct FuncCallCounter
+    val :: Int = 0
+    lock :: ReentrantLock = ReentrantLock()
+end
+
+function read_counter(fcc::FuncCallCounter)
+    lock(fcc.lock) do
+        fcc.val
+    end
+end
+
+function set_counter!(fcc::FuncCallCounter, v::Int)
+    lock(fcc.lock) do
+        fcc.val = v
+    end
+    return v
+end
+
+function inc_counter!(fcc::FuncCallCounter)
+    return set_counter!(fcc, read_counter(fcc) + 1)
+end
+
+func_call_counter(op::AbstractNonlinearOperator, ::Val)=nothing
+max_num_calls(op::AbstractNonlinearOperator, ::Val)::Real=Inf
+
+struct BudgetExhausted <: AbstractStoppingCriterion
+    ni :: Int
+    mi :: Int
+    order :: Int
+end
+
+function stop_message(crit::BudgetExhausted)
+    return "Maximum evaluation count reached, order=$(crit.order), is=$(crit.ni), max=$(crit.mi)."
+end
+
+function request_func_calls(op::AbstractNonlinearOperator, v::Val, N::Integer)
+    request_func_calls(func_call_counter(op, v), op, v, N)
+end
+
+request_func_calls(::Nothing, op::AbstractNonlinearOperator, v::Val, N::Integer)=Inf
+function request_func_calls(fcc::FuncCallCounter, op::AbstractNonlinearOperator, v::Val{i}, N::Integer) where i
+    mfc = max_num_calls(op, v)
+    lock(fcc.lock) do
+        cfc = fcc.val
+        rem = min(mfc - cfc, N)
+        #show cfc, mfc, N, rem
+        if rem <= 0
+            return BudgetExhausted(cfc, mfc, i)
+        end
+        fcc.val += rem
+        return rem
+    end
+end
 ````
 
 In certain situations (nonlinear subproblems relying on minimization of scalar-valued
@@ -46,57 +118,6 @@ If it returns `true`, the feature is assumed to be available for derivatives as 
 In this situation, the type should implment methods starting with `partial_`, see below
 for details.
 
-````julia
-supports_partial_evaluation(op::AbstractNonlinearOperator) = false
-````
-
-Stopping based on the number of evaluations is surprisingly hard if we don't
-want to give up most of the flexibility and composability of Operators and(/in) Problems
-and models.
-To implement such a stopping mechanism, we would like the operator to
-count the number of evaluations.
-
-````julia
-is_counted(op::AbstractNonlinearOperator)=false
-````
-
-If `is_counted` returns true, we assume that we can safely call
-`num_calls` and get a 3-tuple of values:
-the number of function evaluations, gradient evaluations and Hessian evaluations:
-
-````julia
-num_calls(op::AbstractNonlinearOperator)::Tuple{Int, Int, Int}=nothing
-````
-
-In addition, there should be a method to (re-)set the counters:
-
-````julia
-set_num_calls!(op::AbstractNonlinearOperator,vals::Tuple{Int,Int,Int})=nothing
-````
-
-Stopping based on the number of evaluations is so fundamental, I make it
-part of the interface:
-
-````julia
-max_calls(op::AbstractNonlinearOperator)::Union{Nothing,NTuple{3, Union{Int,Nothing}}}=nothing
-````
-
-If you have `enforce_max_calls` return `true`, then we automatically check the number of
-evaluations (or differentiation calls).
-You then don't have to implement this yourself in `eval_op!` etc.
-
-````julia
-enforce_max_calls(op::AbstractNonlinearOperator)=true
-````
-
-!!! note
-    Whether or not `max_calls` is respected depends on the implementation of
-    `AbstractMOPSurrogate` or the implementation of `update!` for `AbstractSurrogateModel`...
-
-### Methods for `AbstractNonlinearOperatorWithParams`
-!!! note
-    The evaluation methods should respect `is_counted` and internally increase any counters.
-
 The methods below should be implemented to evaluate parameter dependent operators:
 
 ````julia
@@ -106,7 +127,17 @@ The methods below should be implemented to evaluate parameter dependent operator
 Evaluate the operator `op` at variable vector `x` with parameters `p`
 and mutate the target vector `y` to contain the result.
 """
-function eval_op!(y, op::AbstractNonlinearOperatorWithParams, x, p)
+function eval_op!(y::RVec, op::AbstractNonlinearOperator, x::RVec, p)
+    return error("No implementation of `eval_op!` for operator $op.")
+end
+
+"""
+    eval_op!(y, op, x)
+
+Evaluate the parameterless operator `op` at variable vector `x`
+and mutate the target vector `y` to contain the result.
+"""
+function eval_op!(y::RVec, op::AbstractNonlinearOperator, x::RVec)
     return error("No implementation of `eval_op!` for operator $op.")
 end
 
@@ -117,22 +148,19 @@ Compute the gradients of the operator `op` at variable vector `x` with parameter
 and mutate the target matrix `Dy` to contain the gradients w.r.t. `x` in its columns.
 That is, `Dy` is the transposed Jacobian at `x`.
 """
-function eval_grads!(Dy, op::AbstractNonlinearOperatorWithParams, x, p)
+function eval_grads!(Dy, op::AbstractNonlinearOperator, x, p)
     return error("No implementation of `eval_grads!` for operator $op.")
 end
-````
 
-The combined forward-function `eval_op_and_grads!` is derived from `eval_op!` and
-`eval_grads!`, but can be customized easily:
+"""
+    eval_grads!(Dy, op, x)
 
-````julia
-# helper macro `@serve` instead of `return`
-import ..Compromise: @serve
-
-function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x, p)
-    @serve eval_op!(y, val, x, p)
-    @serve eval_grads!(Dy, val, x, p)
-    return nothing
+Compute the gradients of the parameterless operator `op` at variable vector `x`
+and mutate the target matrix `Dy` to contain the gradients w.r.t. `x` in its columns.
+That is, `Dy` is the transposed Jacobian at `x`.
+"""
+function eval_grads!(Dy, op::AbstractNonlinearOperator, x)
+    return error("No implementation of `eval_grads!` for operator $op.")
 end
 ````
 
@@ -155,20 +183,19 @@ Compute the Hessians of the operator `op` at variable vector `x` with parameters
 and mutate the target array `H` to contain the Hessians along its last index.
 That is, `H[:,:,i]` is the Hessian at `x` and `p` w.r.t. `x` of output `i`.
 """
-function eval_hessians!(H, op::AbstractNonlinearOperatorWithParams, x, p)
+function eval_hessians!(H, op::AbstractNonlinearOperator, x, p)
     return error("No implementation of `eval_hessians!` for operator $op.")
 end
-````
 
-The combined forward-function `eval_op_and_grads_and_hessians!`
-is derived from `eval_op_and_grads!` and `eval_hessians!`,
-but can be customized easily:
+"""
+    eval_hessians!(H, op, x, p)
 
-````julia
-function eval_op_and_grads!(y, Dy, H, op::AbstractNonlinearOperatorWithParams, x, p)
-    @serve eval_op_and_grads!(Dy, y, op, x, p)
-    @serve eval_hessians!(H, val, x, p)
-    return nothing
+Compute the Hessians of the parameterless operator `op` at variable vector `x`
+and mutate the target array `H` to contain the Hessians along its last index.
+That is, `H[:,:,i]` is the Hessian at `x` and `p` w.r.t. `x` of output `i`.
+"""
+function eval_hessians!(H, op::AbstractNonlinearOperator, x)
+    return error("No implementation of `eval_hessians!` for operator $op.")
 end
 ````
 
@@ -178,266 +205,189 @@ The argument `outputs` is an iterable of output indices, assuming `1` to be the 
 `y` is the full length vector, and `partial_op!` should set `y[outputs]`.
 
 ````julia
-function partial_op!(y, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
-    # length(y)==length(outputs)
+function eval_op!(y::RVec, op::AbstractNonlinearOperator, x::RVec, outputs::Vector{Bool})
     return error("Partial evaluation not implemented.")
 end
-function partial_grads!(Dy, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
-    # size(Dy)==(length(x), length(outputs))
+function eval_op!(y::RVec, op::AbstractNonlinearOperator, x::RVec, params, outputs::Vector{Bool})
+    return error("Partial evaluation not implemented.")
+end
+
+function eval_grads!(Dy, op::AbstractNonlinearOperator, x, outputs::Vector{Bool})
     return error("Partial Jacobian not implemented.")
 end
-function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
-    @serve partial_op!(y, op, x, p, outputs)
-    @serve partial_grads!(Dy, op, x, p, outputs)
+function eval_grads!(Dy, op::AbstractNonlinearOperator, x, params, outputs::Vector{Bool})
+    return error("Partial Jacobian not implemented.")
+end
+````
+
+Optional Parallel Evaluation:
+
+````julia
+function eval_op!(Y::RMat, op::AbstractNonlinearOperator, X::RMat)
+    error("`eval_op!` not implemented for matrices.")
+end
+function eval_op!(Y::RMat, op::AbstractNonlinearOperator, X::RMat, params)
+    error("`eval_op!` not implemented for matrices.")
+end
+function eval_op!(Y::RMat, op::AbstractNonlinearOperator, X::RMat, params, outputs::Vector{Bool})
+    error("`eval_op!` not implemented for matrices.")
+end
+````
+
+The combined forward-function `eval_op_and_grads!` is derived from `eval_op!` and
+`eval_grads!`, but can be customized easily:
+
+````julia
+function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperator, x, args...)
+    @ignoraise eval_op!(y, op, x, args...)
+    @ignoraise eval_grads!(Dy, op, x, args...)
     return nothing
 end
-function partial_hessians!(H, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
-    return error("Partial Hessians not implemented.")
-end
-function partial_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWithParams, x, p, outputs)
-    @serve partial_op_and_grads!(y, Dy, op, x, p, outputs)
-    @serve partial_hessians!(H, op, x, p, outputs)
+
+function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperator, x, args...)
+    @ignoraise eval_op_and_grads!(y, Dy, op, x, args...)
+    @ignoraise eval_hessians!(H, op, x, args...)
     return nothing
 end
 ````
 
-From the above, we derive safe-guarded functions, that can be used to pass `outputs`
-whenever convenient.
-Note, that these are defined for `AbstractNonlinearOperator`.
-By implementing the parametric-interface for `AbstractNonlinearOperatorNoParams`,
-they work out-of-the box for non-paremetric operators, too:
+# Safe-Guarded Functions
 
 ````julia
-function check_num_calls(op, ind; force::Bool=enforce_max_calls(op))
-    !is_counted(op) && return nothing
-    !force && return nothing
-    max_call_tuple = max_calls(op)
-    isnothing(max_call_tuple) && return nothing
-    ncalls = num_calls(op)
-    for i=ind
-        ni = ncalls[i]
-        mi = max_call_tuple[i]
-        isnothing(mi) && continue
-        if ni >= mi
-            return "Maximum evaluation count reached, order=$(i-1), evals $(ni) >= $(mi)."
+function redirect_call(
+    @nospecialize(target_func!),
+    op::AbstractNonlinearOperator,
+    x, params, outputs, mutable_args...
+)
+    has_params = Val(operator_has_params(op)) :: Union{Val{true}, Val{false}}
+    is_partial=Val(operator_can_partial(op)) :: Union{Val{true}, Val{false}}
+    return redirect_call(target_func!, op, has_params, is_partial, x, params, outputs, mutable_args...)
+end
+function redirect_call(
+    @nospecialize(target_func!),
+    op::AbstractNonlinearOperator,
+    has_params::Val{false},
+    is_partial::Val{false},
+    x,
+    params,
+    outputs,
+    mutable_args...
+)
+    target_func!(mutable_args..., op, x)
+end
+function redirect_call(
+    @nospecialize(target_func!),
+    op::AbstractNonlinearOperator,
+    has_params::Val{true},
+    is_partial::Val{false},
+    x,
+    params,
+    outputs,
+    mutable_args...
+)
+    target_func!(mutable_args..., op, x, params)
+end
+function redirect_call(
+    @nospecialize(target_func!),
+    op::AbstractNonlinearOperator,
+    has_params::Val{true},
+    is_partial::Val{true},
+    x,
+    params,
+    outputs,
+    mutable_args...
+)
+    target_func!(mutable_args..., op, x, params, outputs)
+end
+function redirect_call(
+    @nospecialize(target_func!),
+    op::AbstractNonlinearOperator,
+    has_params::Val{false},
+    is_partial::Val{true},
+    x,
+    params,
+    outputs,
+    mutable_args...
+)
+    target_func!(mutable_args..., op, x, outputs)
+end
+
+function func_vals!(
+    y::RVec, op::AbstractNonlinearOperator, x::RVec, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
+)
+    v0 = Val(0)
+    @ignoraise request_func_calls(op, v0, 1)
+    @ignoraise redirect_call(eval_op!, op, x, params, outputs, y)
+end
+
+function func_vals!(
+    Y::RMat, op::AbstractNonlinearOperator, X::RMat, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
+)
+    n_X = size(X, 2)
+    if n_X <= 0
+        return nothing
+    end
+    v0 = Val(0)
+    @ignoraise N = request_func_calls(op, v0, n_X)
+    if N < size(Y, 2)
+        _X = @view(X[:, 1:N])
+        _Y = @view(Y[:, 1:N])
+    else
+        _X = X
+        _Y = Y
+    end
+
+    if operator_can_eval_multi(op)
+        @ignoraise redirect_call(eval_op!, op, _X, params, outputs, _Y)
+    else
+        for (y, x) = zip(eachcol(_Y), eachcol(_X))
+            @ignoraise redirect_call(eval_op!, op, x, params, outputs, y)
+            #@ignoraise func_vals!(y, op, x, params, outputs)
         end
     end
     return nothing
 end
 
-function func_vals!(y, op::AbstractNonlinearOperator, x, p; outputs=nothing)
-    @serve check_num_calls(op, 1)
-    if !isnothing(outputs) && supports_partial_evaluation(op)
-        return partial_op!(y, op, x, p, outputs)
-    end
-    return eval_op!(y, op, x, p)
+function func_grads!(
+    Dy, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
+)
+    v1 = Val(1)
+    @ignoraise request_func_calls(op, v1, 1)
+    @ignoraise redirect_call(eval_grads!, op, x, params, outputs, Dy)
+    return nothing
 end
-function func_grads!(Dy, op::AbstractNonlinearOperator, x, p; outputs=nothing)
-    @serve check_num_calls(op, 2)
-    if !isnothing(outputs) && supports_partial_evaluation(op)
-        return partial_grads!(Dy, op, x, p, outputs)
-    end
-    return eval_grads!(Dy, op, x, p)
+
+function func_vals_and_grads!(
+    y, Dy, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
+)
+    v0 = Val(0)
+    v1 = Val(1)
+    @ignoraise request_func_calls(op, v0, 1)
+    @ignoraise request_func_calls(op, v1, 1)
+    @ignoraise redirect_call(eval_op_and_grads!, op, x, params, outputs, y, Dy)
+    return nothing
 end
-function func_vals_and_grads!(y, Dy, op::AbstractNonlinearOperator, x, p; outputs=nothing)
-    @serve check_num_calls(op, (1,2))
-    if !isnothing(outputs) && supports_partial_evaluation(op)
-        return partial_op_and_grads!(y, Dy, op, x, p, outputs)
-    end
-    return eval_op_and_grads!(y, Dy, op, x, p)
+
+function func_hessians!(
+    H, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
+)
+    v2 = Val(2)
+    @ignoraise request_func_calls(op, v2, 1)
+    @ignoraise redirect_call(eval_hessians!, op, x, params, outputs, H)
+    return nothing
 end
-function func_hessians!(H, op::AbstractNonlinearOperator, x, p; outputs=nothing)
-    @serve check_num_calls(op, 3)
-    if !isnothing(outputs) && supports_partial_evaluation(op)
-        return partial_hessians!(H, op, x, p, outputs)
-    end
-    return eval_hessians!(H, op, x, p)
-end
+
 function func_vals_and_grads_and_hessians!(
-    y, Dy, H, op::AbstractNonlinearOperator, x, p; outputs=nothing)
-    @serve check_num_calls(op, (1,2,3))
-    if !isnothing(outputs) && supports_partial_evaluation(op)
-        return partial_op_and_grads_and_hessians!(y, Dy, H, op, x, p, outputs)
-    end
-    return eval_op_and_grads_and_hessians!(y, Dy, H, op, x, p)
-end
-````
-
-### Methods `AbstractNonlinearOperatorNoParams`
-
-The interface for operators without parameters is very similar to what's above.
-In fact, we could always treat it as a special case of `AbstractNonlinearOperatorWithParams`
-and simply ignore the parameter vector.
-However, in some situation it might be desirable to have the methods without `p`
-readily at hand.
-This also makes writing extensions a tiny bit easier.
-
-````julia
-function eval_op!(y, op::AbstractNonlinearOperatorNoParams, x)
-    return error("No implementation of `eval_op!` for operator $op.")
-end
-function eval_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x)
-    return error("No implementation of `eval_grads!` for operator $op.")
-end
-````
-
-Optional, derived method for values and gradients:
-
-````julia
-function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x)
-    @serve eval_op!(y, op, x)
-    @serve eval_grads!(Dy, op, x)
-    return nothing
-end
-````
-
-Same for Hessians:
-
-````julia
-function eval_hessians!(H, op::AbstractNonlinearOperatorNoParams, x)
-    return error("No implementation of `eval_hessians!` for operator $op.")
-end
-function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorNoParams, x)
-    @serve eval_op_and_grads!(y, Dy, op, x)
-    @serve eval_hessians!(H, op, x)
-    return nothing
-end
-````
-
-Some operators might support partial evaluation.
-They should implement these methods, if `supports_partial_evaluation` returns `true`:
-
-````julia
-function partial_op!(y, op::AbstractNonlinearOperatorNoParams, x, outputs)
-    return error("Partial evaluation not implemented.")
-end
-function partial_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x, outputs)
-    return error("Partial Jacobian not implemented.")
-end
-function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x, outputs)
-    @serve partial_op!(y, op, x, outputs)
-    @serve partial_grads!(Dy, op, x, outputs)
-    return nothing
-end
-function partial_hessians!(H, op::AbstractNonlinearOperatorNoParams, x, outputs)
-    return error("Partial Hessians not implemented.")
-end
-function partial_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorNoParams, x, outputs)
-    @serve partial_op_and_grads!(y, Dy, op, x, outputs)
-    @serve partial_hessians!(H, op, x, outputs)
-    return nothing
-end
-````
-
-#### Parameter-Methods for Non-Parametric Operators
-To also be able to use non-parametric operators in the more general setting,
-implement the parametric-interface:
-
-````julia
-function eval_op!(y, op::AbstractNonlinearOperatorNoParams, x, p)
-    return eval_op!(y, op, x)
-end
-function eval_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x, p)
-    return eval_grads!(Dy, op, x)
-end
-function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x, p)
-    return eval_op_and_grads!(y, Dy, op, x)
-end
-function eval_hessians!(H, op::AbstractNonlinearOperatorNoParams, x, p)
-    return eval_hessians!(H, op, x)
-end
-function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorNoParams, x, p)
-    return eval_op_and_grads_and_hessians!(y, Dy, H, op, x)
-end
-````
-
-Partial evaluation or differentiation:
-
-````julia
-function partial_op!(y, op::AbstractNonlinearOperatorNoParams, x, p, outputs)
-    return partial_op!(y, op, x, outputs)
-end
-function partial_grads!(Dy, op::AbstractNonlinearOperatorNoParams, x, p, outputs)
-    return partial_grads!(Dy, op, x, outputs)
-end
-function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorNoParams, x, p, outputs)
-    return partial_op_and_grads!(y, Dy, op, x, outputs)
-end
-function partial_hessians!(H, op::AbstractNonlinearOperatorNoParams, x, p, outputs)
-    return partial_hessians!(H, op, x, outputs)
-end
-function partial_op_and_grads_and_hessians!(
-    y, Dy, H, op::AbstractNonlinearOperatorNoParams, x, p, outputs
+    y, Dy, H, op::AbstractNonlinearOperator, x, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
-    return partial_op_and_grads_and_hessians!(y, Dy, H, op, x, outputs)
-end
-````
-
-The safe-guarded methods can now simply forward to the parametric versions
-and pass `nothing` parameters:
-
-````julia
-function func_vals!(y, op::AbstractNonlinearOperator, x; outputs=nothing)
-    return func_vals!(y, op, x, nothing; outputs)
-end
-function func_grads!(Dy, op::AbstractNonlinearOperator, x; outputs=nothing)
-    return func_grads!(Dy, op, x, nothing; outputs)
-end
-function func_vals_and_grads!(y, Dy, op::AbstractNonlinearOperator, x; outputs=nothing)
-    return func_vals_and_grads!(y, Dy, op, x, nothing; outputs)
-end
-function func_hessians!(H, op::AbstractNonlinearOperator, x; outputs=nothing)
-    return func_hessians!(H, op, x, nothing; outputs)
-end
-function func_vals_and_grads_and_hessians!(
-    y, Dy, H, op::AbstractNonlinearOperator, x; outputs=nothing
-)
-    return func_vals_and_grads_and_hessians!(y, Dy, H, op, x, nothing; outputs)
-end
-````
-
-#### Non-Parametric Methods for Parametric Operators
-These should only be used when you know what you are doing, as we set the parameters
-to `nothing`.
-This is safe only if we now that an underlying function is not-parametric, but somehow
-wrapped in something implementing `AbstractNonlinearOperatorWithParams`.
-
-````julia
-function eval_op!(y, op::AbstractNonlinearOperatorWithParams, x)
-    return eval_op!(y, op, x, nothing)
-end
-function eval_grads!(Dy, op::AbstractNonlinearOperatorWithParams, x)
-    return eval_grads!(Dy, op, x, nothing)
-end
-
-function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x)
-    return eval_op_and_grads!(y, Dy, op, x, nothing)
-end
-
-function eval_hessians!(H, op::AbstractNonlinearOperatorWithParams, x)
-    return eval_hessians!(H, op, x, nothing)
-end
-
-function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWithParams, x)
-    return eval_op_and_grads_and_hessians!(y, Dy, H, op, x, nothing)
-end
-
-function partial_op!(y, op::AbstractNonlinearOperatorWithParams, x, outputs)
-    return partial_op!(y, op, x, nothing, outputs)
-end
-function partial_grads!(Dy, op::AbstractNonlinearOperatorWithParams, x, outputs)
-    return partial_grads!(Dy, op, x, nothing, outputs)
-end
-function partial_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWithParams, x, outputs)
-    return partial_op_and_grads!(y, Dy, op, x, nothing, outputs)
-end
-function partial_hessians!(H, op::AbstractNonlinearOperatorWithParams, x, outputs)
-    return partial_hessians!(H, op, x, nothing, outputs)
-end
-function partial_op_and_grads_and_hessians!(
-    y, Dy, H, op::AbstractNonlinearOperatorWithParams, x, outputs
-)
-    return partial_op_and_grads_and_hessians!(y, Dy, H, op, x, nothing, outputs)
+    v0 = Val(0)
+    v1 = Val(1)
+    v2 = Val(2)
+    @ignoraise request_func_calls(op, v0, 1)
+    @ignoraise request_func_calls(op, v1, 1)
+    @ignoraise request_func_calls(op, v2, 1)
+    @ignoraise redirect_call(eval_op_and_grads_and_hessians!, op, x, params, outputs, y, Dy, H)
+    return nothing
 end
 ````
 
@@ -445,16 +395,22 @@ end
 
 An `AbstractSurrogateModel` is similar to `AbstractNonlinearOperator`.
 Such a surrogate model is always non-parametric, as parameters of operators are assumed
-to be fix in between runs.
+to be fix in-between optimization runs.
 
 ````julia
-abstract type AbstractSurrogateModel end
+abstract type AbstractSurrogateModel <: AbstractNonlinearOperator end
+operator_has_params(::AbstractSurrogateModel)=false
+operator_can_partial(::AbstractSurrogateModel)=false
+operator_can_eval_multi(::AbstractSurrogateModel)=false
+
+provides_grads(::AbstractSurrogateModel)=true
 ````
 
 We also want to be able to define the behavior of models with light-weight objects:
 
 ````julia
 abstract type AbstractSurrogateModelConfig end
+num_parallel_evals(::AbstractSurrogateModelConfig)::Integer=1
 ````
 
 ### Indicator Methods
@@ -498,10 +454,13 @@ Return a model subtyping `AbstractSurrogateModel`, as defined by
 `model_config::AbstractSurrogateModelConfig`, for the nonlinear operator `nonlin_op`.
 The operator (and model) has input dimension `dim_in` and output dimension `dim_out`.
 `params` is the current parameter object for `nonlin_op` and is cached.
-`T` is a subtype of `AbstractFloat` to indicate precision of cache arrays.
+`T` is a subtype of `AbstractFloat` to indicate float_type of cache arrays.
 """
 function init_surrogate(
-    ::AbstractSurrogateModelConfig, op, dim_in, dim_out, params, T)::AbstractSurrogateModel
+    ::AbstractSurrogateModelConfig, op, dim_in, dim_out, params, T;
+    require_fully_linear::Bool=true,
+    delta_max::Union{Number, AbstractVector{<:Number}}=Inf,
+)::AbstractSurrogateModel
     return nothing
 end
 ````
@@ -512,22 +471,22 @@ Note, that the returned object does not have to be an “independent” copy, we
 for shared objects (like mutable database arrays or something of that sort)...
 
 ````julia
-copy_model(mod_src)=deepcopy(mod_src)
+universal_copy(mod::AbstractSurrogateModel)=mod
 ````
 
 A function to copy parameters between source and target models, like `Base.copy!` or
-`Base.copyto!`. Relevant mostly for trainable parameters.
+`Base.copyto!`. Relevant mostly for implicit trainable parameters.
 
 ````julia
-copyto_model!(mod_trgt::AbstractSurrogateModel, mod_src::AbstractSurrogateModel)=mod_trgt
+universal_copy!(mod_trgt::AbstractSurrogateModel, mod_src::AbstractSurrogateModel)=mod_trgt
 
-function _copy_model(mod)
-    depends_on_radius(mod) && return copy_model(mod)
+function universal_copy_model(mod)
+    depends_on_radius(mod) && return universal_copy(mod)
     return mod
 end
 
-function _copyto_model!(mod_trgt, mod_src)
-    depends_on_radius(mod_trgt) && return copyto_model!(mod_trgt, mod_src)
+function universal_copy_model!(mod_trgt, mod_src)
+    depends_on_radius(mod_trgt) && return universal_copy!(mod_trgt, mod_src)
     return mod_trgt
 end
 ````
@@ -544,105 +503,306 @@ and upper right corner `ub` (in the scaled variable domain)
 in the scaled domain. `fx` are the outputs of `nonlinear_operator` at `x`.
 """
 function update!(
-    surr::AbstractSurrogateModel, op, Δ, x, fx, lb, ub; kwargs...
+    surr::AbstractSurrogateModel, op, Δ, x, fx, lb, ub; log_level, indent, kwargs...
+)
+    return nothing
+end
+
+function process_trial_point!(
+    surr::AbstractSurrogateModel, xtrial, fxtrial, is_next::Bool
 )
     return nothing
 end
 ````
 
 ### Evaluation
-In place evaluation and differentiation, similar to `AbstractNonlinearOperatorNoParams`.
 Mandatory:
+```julia
+eval_op!(y::RVec, surr::AbstractSurrogateModel, x::RVec)=nothing
+eval_grads!(Dy, surr::AbstractSurrogateModel, x)=nothing
+eval_op_and_grads!(y, Dy, surr::AbstractSurrogateModel, x)
+```
+## Wrapper
 
 ````julia
-function model_op!(y, surr::AbstractSurrogateModel, x)
+abstract type AbstractNonlinearOperatorWrapper <: AbstractNonlinearOperator end
+wrapped_operator(op::AbstractNonlinearOperatorWrapper)=error("`wrapped_operator` not implemented.")
+
+operator_has_params(op::AbstractNonlinearOperatorWrapper)=operator_has_params(wrapped_operator(op))
+operator_can_partial(op::AbstractNonlinearOperatorWrapper)=operator_can_partial(wrapped_operator(op))
+operator_can_eval_multi(op::AbstractNonlinearOperatorWrapper)=operator_can_eval_multi(wrapped_operator(op))
+operator_has_name(op::AbstractNonlinearOperatorWrapper)=operator_has_name(wrapped_operator(op))
+operator_name(op::AbstractNonlinearOperatorWrapper)=operator_name(wrapped_operator(op))
+func_call_counter(op::AbstractNonlinearOperatorWrapper, v::Val)=func_call_counter(wrapped_operator(op), v)
+max_num_calls(op::AbstractNonlinearOperatorWrapper, v::Val)=max_num_calls(wrapped_operator(op), v)
+
+preprocess_inputs(op::AbstractNonlinearOperator, x::RVec) = x
+preprocess_inputs(op::AbstractNonlinearOperator, x::RMat) = x
+preprocess_inputs(op::AbstractNonlinearOperator, x::RVec, p) = (preprocess_inputs(op, x), p)
+preprocess_inputs(op::AbstractNonlinearOperator, x::RMat, p) = (preprocess_inputs(op, x), p)
+preprocess_inputs(op::AbstractNonlinearOperator, x::RVec, outputs::Vector{Bool}) = preprocess_inputs(op, x)
+preprocess_inputs(op::AbstractNonlinearOperator, x::RMat, outputs::Vector{Bool}) = preprocess_inputs(op, x)
+preprocess_inputs(op::AbstractNonlinearOperator, x::RVec, p, outputs::Vector{Bool}) = preprocess_inputs(op, x, p)
+preprocess_inputs(op::AbstractNonlinearOperator, x::RMat, p, outputs::Vector{Bool}) = preprocess_inputs(op, x, p)
+
+postprocess_vals!(y::RVec, op::AbstractNonlinearOperatorWrapper, x_pre, x_post)=nothing
+postprocess_vals!(y::RMat, op::AbstractNonlinearOperatorWrapper, x_pre, x_post)=nothing
+postprocess_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x_pre, x_post)=nothing
+postprocess_hessians!(H, op::AbstractNonlinearOperatorWrapper, x_pre, x_post)=nothing
+
+function postprocess_vals!(y::RVec, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, outputs::Vector{Bool})
+    postprocess_vals!(y, op, x_pre, x_post)
+end
+function postprocess_vals!(y::RMat, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, outputs::Vector{Bool})
+    postprocess_vals!(y, op, x_pre, x_post)
+end
+function postprocess_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, outputs::Vector{Bool})
+    postprocess_grads!(Dy, op, x_pre, x_post)
+end
+function postprocess_hessians!(H, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, outputs::Vector{Bool})
+    postprocess_hessians!(H, op, x_pre, x_post)
+end
+
+function postprocess_vals!(y::RVec, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post)
+    postprocess_vals!(y, op, x_pre, x_post)
+end
+function postprocess_vals!(y::RMat, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post)
+    postprocess_vals!(y, op, x_pre, x_post)
+end
+function postprocess_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post)
+    postprocess_grads!(Dy, op, x_pre, x_post)
+end
+function postprocess_hessians!(H, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post)
+    postprocess_hessians!(H, op, x_pre, x_post)
+end
+
+function postprocess_vals!(y::RVec, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post, outputs::Vector{Bool})
+    postprocess_vals!(y, op, x_pre, x_post)
+end
+function postprocess_vals!(y::RMat, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post, outputs::Vector{Bool})
+    postprocess_vals!(y, op, x_pre, x_post)
+end
+function postprocess_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post, outputs::Vector{Bool})
+    postprocess_grads!(Dy, op, x_pre, x_post)
+end
+function postprocess_hessians!(H, op::AbstractNonlinearOperatorWrapper, x_pre, x_post, params_pre, params_post, outputs::Vector{Bool})
+    postprocess_hessians!(H, op, x_pre, x_post)
+end
+
+function eval_op!(y::RVec, op::AbstractNonlinearOperatorWrapper, x::RVec)
+    x_post = preprocess_inputs(op, x)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post)
+    postprocess_vals!(y, op, x, x_post)
     return nothing
 end
-````
 
-Mandatory:
-
-````julia
-function model_grads!(Dy, surr::AbstractSurrogateModel, x)
+function eval_op!(y::RVec, op::AbstractNonlinearOperatorWrapper, x::RVec, p)
+    (x_post, p_post) = preprocess_inputs(op, x, p)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post, p_post)
+    postprocess_vals!(y, op, x, x_post, p, p_post)
     return nothing
 end
-````
 
-Optional:
-
-````julia
-function model_op_and_grads!(y, Dy, surr::AbstractSurrogateModel, x)
-    model_op!(y, surr, x )
-    model_grads!(Dy, surr, x)
+function eval_op!(y::RVec, op::AbstractNonlinearOperatorWrapper, x::RVec, outputs::Vector{Bool})
+    x_post = preprocess_inputs(op, x, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post, outputs)
+    postprocess_vals!(y, op, x, x_post, outputs)
     return nothing
 end
-````
 
-#### Optional Partial Evaluation
-
-````julia
-supports_partial_evaluation(::AbstractSurrogateModel)=false
-function model_op!(y, surr::AbstractSurrogateModel, x, outputs)
-    return error("Surrogate model does not support partial evaluation.")
-end
-function model_grads!(y, surr::AbstractSurrogateModel, x, outputs)
-    return error("Surrogate model does not support partial Jacobian.")
-end
-function model_op_and_grads!(y, Dy, surr::AbstractSurrogateModel, x, outputs)
-    model_op!(y, surr, x, outputs)
-    model_grads!(y, surr, x, outputs)
+function eval_op!(y::RVec, op::AbstractNonlinearOperatorWrapper, x::RVec, p, outputs::Vector{Bool})
+    (x_post, p_post) = preprocess_inputs(op, x, p, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post, p_post, outputs)
+    postprocess_vals!(y, op, x, x_post, p, p_post, outputs)
     return nothing
 end
-````
 
-#### Safe-guarded, internal Methods
-The methods below are used in the algorithm and have the same signature as
-the corresponding methods for `AbstractNonlinearOperator`.
-Thus, we do not have to distinguish types in practice.
+function eval_op!(y::RMat, op::AbstractNonlinearOperatorWrapper, x::RMat)
+    x_post = preprocess_inputs(op, x)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post)
+    postprocess_vals!(y, op, x, x_post)
+    return nothing
+end
 
-````julia
-function func_vals!(y, surr::AbstractSurrogateModel, x, p, outputs=nothing)
-    if !isnothing(outputs)
-        if supports_partial_evaluation(surr)
-            return model_op!(y, surr, x, outputs)
-        # else
-        #     @warn "Partial evaluation not supported by surrogate model."
-        end
-    end
-    return model_op!(y, surr, x)
+function eval_op!(y::RMat, op::AbstractNonlinearOperatorWrapper, x::RMat, p)
+    (x_post, p_post) = preprocess_inputs(op, x, p)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post, p_post)
+    postprocess_vals!(y, op, x, x_post, p, p_post)
+    return nothing
 end
-function func_grads!(Dy, surr::AbstractSurrogateModel, x, p, outputs=nothing)
-    if !isnothing(outputs)
-        if supports_partial_evaluation(surr)
-            return model_grads!(Dy, surr, x, outputs)
-        # else
-        #     @warn "Partial evaluation not supported by surrogate model."
-        end
-    end
-    return model_grads!(Dy, surr, x)
+
+function eval_op!(y::RMat, op::AbstractNonlinearOperatorWrapper, x::RMat, outputs::Vector{Bool})
+    x_post = preprocess_inputs(op, x, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post, outputs)
+    postprocess_vals!(y, op, x, x_post, outputs)
+    return nothing
 end
-function func_vals_and_grads!(y, Dy, surr::AbstractSurrogateModel, x, p, outputs=nothing)
-    if !isnothing(outputs)
-        if supports_partial_evaluation(surr)
-            return model_op_and_grads!(y, Dy, surr, x, outputs)
-        # else
-        #     @warn "Partial evaluation not supported by surrogate model."
-        end
-    end
-    return model_op_and_grads!(y, Dy, surr, x)
+
+function eval_op!(y::RMat, op::AbstractNonlinearOperatorWrapper, x::RMat, p, outputs::Vector{Bool})
+    (x_post, p_post) = preprocess_inputs(op, x, p, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op!(y, _op, x_post, p_post, outputs)
+    postprocess_vals!(y, op, x, x_post, p, p_post, outputs)
+    return nothing
+end
+
+function eval_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x)
+    x_post = preprocess_inputs(op, x)
+    _op = wrapped_operator(op)
+    @ignoraise eval_grads!(Dy, _op, x_post)
+    postprocess_grads!(Dy, op, x, x_post)
+    return nothing
+end
+
+function eval_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x, p)
+    (x_post, p_post) = preprocess_inputs(op, x, p)
+    _op = wrapped_operator(op)
+    @ignoraise eval_grads!(Dy, _op, x_post, p_post)
+    postprocess_grads!(Dy, op, x, x_post, p, p_post)
+    return nothing
+end
+
+function eval_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x, outputs::Vector{Bool})
+    x_post = preprocess_inputs(op, x, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_grads!(Dy, _op, x_post, outputs)
+    postprocess_grads!(Dy, op, x, x_post, outputs)
+    return nothing
+end
+
+function eval_grads!(Dy, op::AbstractNonlinearOperatorWrapper, x, p, outputs::Vector{Bool})
+    (x_post, p_post) = preprocess_inputs(op, x, p, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_grads!(Dy, _op, x_post, p_post, outputs)
+    postprocess_grads!(Dy, op, x, x_post, p, p_post, outputs)
+    return nothing
+end
+
+function eval_hessians!(H, op::AbstractNonlinearOperatorWrapper, x)
+    x_post = preprocess_inputs(op, x)
+    _op = wrapped_operator(op)
+    @ignoraise eval_hessians!(H, _op, x_post)
+    postprocess_hessians!(H, op, x, x_post)
+    return nothing
+end
+
+function eval_hessians!(H, op::AbstractNonlinearOperatorWrapper, x, p)
+    (x_post, p_post) = preprocess_inputs(op, x, p)
+    _op = wrapped_operator(op)
+    @ignoraise eval_hessians!(H, _op, x_post, p_post)
+    postprocess_hessians!(H, op, x, x_post, p, p_post)
+    return nothing
+end
+
+function eval_hessians!(H, op::AbstractNonlinearOperatorWrapper, x, outputs::Vector{Bool})
+    x_post = preprocess_inputs(op, x, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_hessians!(H, _op, x_post, outputs)
+    postprocess_hessians!(H, op, x, x_post, outputs)
+    return nothing
+end
+
+function eval_hessians!(H, op::AbstractNonlinearOperatorWrapper, x, p, outputs::Vector{Bool})
+    (x_post, p_post) = preprocess_inputs(op, x, p, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_hessians!(H, _op, x_post, p_post, outputs)
+    postprocess_hessians!(H, op, x, x_post, p, p_post, outputs)
+    return nothing
+end
+
+function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWrapper, x)
+    x_post = preprocess_inputs(op, x)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads!(y, Dy, _op, x_post)
+    postprocess_vals!(y, op, x, x_post)
+    postprocess_grads!(Dy, op, x, x_post)
+    return nothing
+end
+
+function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWrapper, x, p)
+    (x_post, p_post) = preprocess_inputs(op, x, p)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads!(y, Dy, _op, x_post, p_post)
+    postprocess_vals!(y, op, x, x_post, p, p_post)
+    postprocess_grads!(Dy, op, x, x_post, p, p_post)
+    return nothing
+end
+
+function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWrapper, x, outputs::Vector{Bool})
+    x_post = preprocess_inputs(op, x, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads!(y, Dy, _op, x_post, outputs)
+    postprocess_vals!(y, op, x, x_post, outputs)
+    postprocess_grads!(Dy, op, x, x_post, outputs)
+    return nothing
+end
+
+function eval_op_and_grads!(y, Dy, op::AbstractNonlinearOperatorWrapper, x, p, outputs::Vector{Bool})
+    (x_post, p_post) = preprocess_inputs(op, x, p, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads!(y, Dy, _op, x_post, p_post, outputs)
+    postprocess_vals!(y, op, x, x_post, p, p_post, outputs)
+    postprocess_grads!(Dy, op, x, x_post, p, p_post, outputs)
+    return nothing
+end
+
+function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWrapper, x)
+    x_post = preprocess_inputs(op, x)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads_and_hessians!(y, Dy, H, _op, x_post)
+    postprocess_vals!(y, op, x, x_post)
+    postprocess_grads!(Dy, op, x, x_post)
+    postprocess_hessians!(H, op, x, x_post)
+    return nothing
+end
+
+function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWrapper, x, p)
+    (x_post, p_post) = preprocess_inputs(op, x, p)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads_and_hessians!(y, Dy, H, _op, x_post, p_post)
+    postprocess_vals!(y, op, x, x_post, p, p_post)
+    postprocess_grads!(Dy, op, x, x_post, p, p_post)
+    postprocess_hessians!(H, op, x, x_post, p, p_post)
+    return nothing
+end
+
+function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWrapper, x, outputs::Vector{Bool})
+    x_post = preprocess_inputs(op, x, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads_and_hessians!(y, Dy, H, _op, x_post, outputs)
+    postprocess_vals!(y, op, x, x_post, outputs)
+    postprocess_grads!(Dy, op, x, x_post, outputs)
+    postprocess_hessians!(H, op, x, x_post, outputs)
+    return nothing
+end
+
+function eval_op_and_grads_and_hessians!(y, Dy, H, op::AbstractNonlinearOperatorWrapper, x, p, outputs::Vector{Bool})
+    (x_post, p_post) = preprocess_inputs(op, x, p, outputs)
+    _op = wrapped_operator(op)
+    @ignoraise eval_op_and_grads_and_hessians!(y, Dy, H, _op, x_post, p_post, outputs)
+    postprocess_vals!(y, op, x, x_post, p, p_post, outputs)
+    postprocess_grads!(Dy, op, x, x_post, p, p_post, outputs)
+    postprocess_hessians!(H, op, x, x_post, p, p_post, outputs)
+    return nothing
 end
 ````
 
 ## Module Exports
 
 ````julia
-export AbstractNonlinearOperator, AbstractNonlinearOperatorNoParams, AbstractNonlinearOperatorWithParams
+export AbstractNonlinearOperator
 export AbstractSurrogateModel, AbstractSurrogateModelConfig
 export supports_partial_evaluation, provides_grads, provides_hessians, requires_grads, requires_hessians
 export func_vals!, func_grads!, func_hessians!, func_vals_and_grads!, func_vals_and_grads_and_hessians!
 export eval_op!, eval_grads!, eval_hessians!, eval_op_and_grads!, eval_op_and_grads_and_hessians!
 export func_vals!, func_grads!, func_vals_and_grads!, func_vals_and_grads_and_hessians!
-export model_op!, model_grads!, model_op_and_grads!
 export init_surrogate, update!
 
 end#module

@@ -1,11 +1,11 @@
-@with_kw struct WeakFilter{T}
-	gamma :: T = DEFAULT_PRECISION(0.1) # envelope factor
+@with_kw struct StandardFilter{T}
+	gamma :: T = DEFAULT_FLOAT_TYPE(0.1) # envelope factor
 	theta_vec :: Vector{T} = T[]        # stores (1-γ)θᵢ
 	phi_vec :: Vector{T} = T[]          # stores Φᵢ - γθᵢ
 end
 
-num_entries(filter::WeakFilter) = length(filter.theta_vec)
-function add_to_filter!(filter::WeakFilter, θ, Φ)
+num_entries(filter::StandardFilter) = length(filter.theta_vec)
+function add_to_filter!(filter::StandardFilter, θ, Φ)
     γ = filter.gamma
     
     offset = γ * θ
@@ -28,19 +28,19 @@ function add_to_filter!(filter::WeakFilter, θ, Φ)
     return num_entries(filter)
 end
 
-function is_acceptable(filter::WeakFilter, θ, Φ)
+function is_acceptable(filter::StandardFilter, θ, Φ)
     n_entries = num_entries(filter)
     for j=1:n_entries
         θj = filter.theta_vec[j]
         Φj = filter.phi_vec[j]
-        if θ > θj && Φj > Φ
+        if θ > θj && Φ > Φj
             return false
         end
     end
     return true
 end
 
-function is_acceptable(filter::WeakFilter, θ_test, Φ_test, θ_add, Φ_add)
+function is_acceptable(filter::StandardFilter, θ_test, Φ_test, θ_add, Φ_add)
     offset = θ_add * filter.gamma
     θj = θ_add - offset
     Φj = Φ_add - offset

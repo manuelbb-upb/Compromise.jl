@@ -15,32 +15,70 @@ unscaling_offset(scaler::AbstractAffineScaler)=-unscaling_matrix(scaler)*scaling
 function scale!(x, scaler::AbstractAffineScaler, ξ)
     T = scaling_matrix(scaler)
     t = scaling_offset(scaler)
-    LA.mul!(x, T, ξ)
-    @views x .+= t
-    return nothing
+    return affine_map!(x, T, t, ξ)
 end
-"Unscale `x` and set `ξ` according to `ξ = inv(T)*x - inv(T)*t`."
+
+"Unscale `x` and set `ξ` according to `ξ = S*x + s`."
 function unscale!(ξ, scaler::AbstractAffineScaler, x)
-    Tinv = unscaling_matrix(scaler)
-    tinv = unscaling_offset(scaler)
-    LA.mul!(ξ, Tinv, x)
-    @views ξ .+= tinv
+    ## Suppose `T = scaling_matrix(scaler)` and `t = unscaling_offset(scaler)`.
+    ## If `x = T*ξ + t`, then `ξ = T⁻¹(x - t)`, 
+    ## so usually `S = inv(T)` and `s = -inv(T) * t`.
+    S = unscaling_matrix(scaler)
+    s = unscaling_offset(scaler)
+    return affine_map!(ξ, S, s, x)
+end
+
+function affine_map!(out, factor, offset, in)
+    LA.mul!(out, factor, in)
+    out .+= offset
     return nothing
 end
 
 scale!(x::Nothing, scaler::AbstractAffineScaler, ξ::Nothing) = nothing
 unscale!(ξ::Nothing, scaler::AbstractAffineScaler, x::Nothing) = nothing
 
-"Make `Aξ + b ? 0` applicable in scaled domain via `A(inv(T)*x - inv(T)*t) + b ? 0`."
-@views function scale_eq!((_A, _b), scaler::AbstractAffineScaler, (A,b))
-    Tinv = unscaling_matrix(scaler)
-    tinv = unscaling_offset(scaler)
+"Make `Aξ ? b` applicable in scaled domain."
+@views function scale_eq!(
+    _A::AbstractMatrix, _b::AbstractVector, 
+    scaler::AbstractAffineScaler, A::AbstractMatrix, b::AbstractVector
+)
+    # ξ = S * x + s ⇒ A*ξ = A*S*x + A*s ? b ⇒ (A * S) * x ? (b - (A * s))
+    # Hence, `_A = A*S`, `_b = b - A*s`
+    S = unscaling_matrix(scaler)
+    s = unscaling_offset(scaler)
     _b .= b
-    _b .+= tinv
-    LA.mul!(_A, A, Tinv)
+    LA.mul!(_b, A, s, -1, 1)
+    LA.mul!(_A, A, S)
     return nothing
 end
-scale_eq!(::Nothing, scaler::AbstractAffineScaler, ::Nothing)=nothing
+scale_eq!(_A, _b, scaler::AbstractAffineScaler, A, b)=nothing
+
+# Consider ``f: ℝ^n → ℝ^m`` and the unscaling map ``u: ℝ^n → ℝ^n``.
+# By the chain rule we have ``∇(f∘u)(x) = ∇f(ξ)*T``, where ``T`` is 
+# the Jacobian of ``u``.
+# As we are actually working with transposed Jacobians `Dy`, we compute
+# `T'Dy`:
+function scale_grads!(Dy, scaler::AbstractAffineScaler)
+    _Dy = copy(Dy)
+    LA.mul!(Dy, transpose(unscaling_matrix(scaler)), _Dy)
+    return nothing
+end
+
+# Usually, the chain rule for second-order derivatives is more complicated:
+# ```math
+#   ∇²(f∘u)(x) = Tᵀ∇²f(ξ)T + ∑ₖ ∇fₖ(ξ) ∇²u
+# ```
+# But ``u`` is affine, so the second term vanishes and we are left with 
+# the matrix-matrix-matrix product:
+function scale_hessians!(H, scaler)
+    T = unscaling_matrix(scaler)
+    _H = copy(H)
+    for i = axes(H, 3)
+        LA.mul!(_H[:, :, i], transpose(T), H[:, :, i])
+        LA.mul!(H[:, :, i], _H[:, :, i], T)
+    end
+    return nothing
+end
 
 struct IdentityScaler <: AbstractConstantAffineScaler 
     dim :: Int
@@ -51,23 +89,23 @@ scale!(x::RVec, scaler::IdentityScaler, ξ::RVec)=copyto!(x, ξ)
 unscale!(ξ::RVec, scaler::IdentityScaler, x::RVec)=copyto!(ξ, x)
 scaling_matrix(scaler::IdentityScaler) = LA.I(scaler.dim)
 unscaling_matrix(scaler::IdentityScaler) = LA.I(scaler.dim)
+scaling_offset(scaler::IdentityScaler) = 0
+unscaling_offset(scaler::IdentityScaler) = 0
 
 ## ξ = Tx + b
 ## x = T⁻¹(ξ - b) = T⁻¹ξ - T⁻¹b
-struct AffineVarScaler{
-    TType1<:RMat, bType1<:RVec, TType2<:RMat, bType2<:RVec
-} <: AbstractConstantAffineScaler
-    T :: TType1
-    Tinv :: TType2 
-    b :: bType1
-    binv :: bType2
+struct DiagonalVarScaler{F<:AbstractFloat} <: AbstractConstantAffineScaler
+    T :: LA.Diagonal{F, Vector{F}}
+    S :: LA.Diagonal{F, Vector{F}}
+    t :: Vector{F}
+    s :: Vector{F}
 end
-@batteries AffineVarScaler
+@batteries DiagonalVarScaler
 
-scaling_matrix(scaler::AffineVarScaler)=scaler.T
-unscaling_matrix(scaler::AffineVarScaler)=scaler.Tinv
-scaling_offset(scaler::AffineVarScaler)=scaler.b
-unscaling_offset(scaler::AffineVarScaler)=scaler.binv
+scaling_matrix(scaler::DiagonalVarScaler)=scaler.T
+unscaling_matrix(scaler::DiagonalVarScaler)=scaler.S
+scaling_offset(scaler::DiagonalVarScaler)=scaler.t
+unscaling_offset(scaler::DiagonalVarScaler)=scaler.s
 
 init_box_scaler(lb, ub, dim)=IdentityScaler(dim)
 function init_box_scaler(lb::RVec, ub::RVec, dim)
@@ -76,15 +114,35 @@ function init_box_scaler(lb::RVec, ub::RVec, dim)
     end
 
     ## set up a min-max scaler
-    ## xᵢ is scaled to be contained in [0,1] via xᵢ = (ξᵢ - lᵢ)/(uᵢ - lᵢ)
-    ## We setup `T` to contain the divisors `w` and `b` to have the offset `-lb ./ w`.
+    ## xᵢ is scaled to be contained in [0,1] via xᵢ = (ξᵢ - lᵢ)/(uᵢ - lᵢ).
+    ## ⇒ x = ξ ./ w - lb ./ w
+    ## We setup `T` to contain the divisors `w` and `t` to have the offset `-lb ./ w`.
     w = ub .- lb
     T = LA.Diagonal(1 ./ w)
-    b = - lb ./ w
+    t = -lb ./ w
 
-    ## the unscaling is `ξ = (x + lb ./ w) .* w` = x .* w + lb
-    Tinv = LA.Diagonal(w)
-    binv = lb
+    ## the unscaling is `ξ = x .* w + lb
+    S = LA.Diagonal(w)
+    s = lb
 
-    return AffineVarScaler(T, Tinv, b, binv)
+    return DiagonalVarScaler(T, S, t, s)
+end
+
+function scale_grads!(Dy, scaler::IdentityScaler)
+    return nothing
+end
+function scale_grads!(Dy, scaler::DiagonalVarScaler)
+    LA.lmul!(transpose(unscaling_matrix(scaler)), Dy)
+    return nothing
+end
+function scale_hessians!(H, scaler::IdentityScaler)
+    return nothing
+end
+function scale_hessians!(H, scaler::DiagonalVarScaler)
+    T = unscaling_matrix(scaler)
+    for i = axes(H, 3)
+        LA.lmul!(transpose(T), H[:, :, i])
+        LA.rmul!(H[:, :, i], T)
+    end
+    return nothing
 end

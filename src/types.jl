@@ -2,6 +2,7 @@
 # In this file ("src/types.jl"), we define **all** abstract types and some concrete types.
 # Every concrete type that is not defined here should only depend on types declared within
 # this file.
+const DEFAULT_FLOAT_TYPE = Float64
 
 # ## Shorthands for Real Arrays
 # Our algorithm operates on real-valued vectors and matrices, these are shorthands:
@@ -27,15 +28,6 @@ abstract type AbstractAffineScaler end
 abstract type AbstractConstantAffineScaler <: AbstractAffineScaler end
 abstract type AbstractDynamicAffineScaler <: AbstractAffineScaler end
 
-# Supertypes to indicate if a model supports scaling:
-abstract type AbstractScalingIndicator end
-abstract type AbstractAffineScalingIndicator <: AbstractScalingIndicator end
-
-# Available return values for `supports_scaling(model)`:
-struct NoScaling <: AbstractScalingIndicator end
-struct ConstantAffineScaling <: AbstractAffineScalingIndicator end
-struct DynamicAffineScaling <: AbstractAffineScalingIndicator end
-
 # ## Step Computation
 # Supertypes to configure and cache descent step computation.
 # A config is meant to be provided by the user, and the cache is passed internally.
@@ -51,7 +43,14 @@ abstract type AbstractStepCache end
 Configure the optimization by passing keyword arguments:
 $(TYPEDFIELDS)
 """
-@with_kw struct AlgorithmOptions{SC}
+Base.@kwdef struct AlgorithmOptions{_T <: Number, SC}
+	T :: Type{_T} = DEFAULT_FLOAT_TYPE
+
+	"Configuration object for descent and normal step computation."
+    step_config :: SC = SteepestDescentConfig()
+
+	require_fully_linear_models :: Bool = true
+
 	"Control verbosity by setting a min. level for `@logmsg`."
 	log_level :: LogLevel = LogLevel(0)
 
@@ -59,123 +58,232 @@ $(TYPEDFIELDS)
     max_iter :: Int = 500
 
     "Stop if the trust region radius is reduced to below `stop_delta_min`."
-	stop_delta_min :: Float64 = eps(Float64)
+	stop_delta_min :: _T = eps(T)
 
 	"Stop if the trial point ``xₜ`` is accepted and ``‖xₜ - x‖≤ δ‖x‖``."
-	stop_xtol_rel :: Float64 = -Inf
+	stop_xtol_rel :: _T = -Inf
 	"Stop if the trial point ``xₜ`` is accepted and ``‖xₜ - x‖≤ ε``."
-	stop_xtol_abs :: Float64 = -Inf
+	stop_xtol_abs :: _T = -Inf
 	"Stop if the trial point ``xₜ`` is accepted and ``‖f(xₜ) - f(x)‖≤ δ‖f(x)‖``."
-	stop_ftol_rel :: Float64 = -Inf
+	stop_ftol_rel :: _T = -Inf
 	"Stop if the trial point ``xₜ`` is accepted and ``‖f(xₜ) - f(x)‖≤ ε``."
-	stop_ftol_abs :: Float64 = -Inf
+	stop_ftol_abs :: _T = -Inf
 
 	"Stop if for the approximate criticality it holds that ``χ̂(x) <= ε`` and for the feasibility that ``θ <= δ``."
-	stop_crit_tol_abs :: Float64 = eps(Float64)
+	stop_crit_tol_abs :: _T = -Inf
 	"Stop if for the approximate criticality it holds that ``χ̂(x) <= ε`` and for the feasibility that ``θ <= δ``."
-	stop_theta_tol_abs :: Float64 = eps(Float64)
+	stop_theta_tol_abs :: _T = eps(T)
 	
 	"Stop after the criticality routine has looped `stop_max_crit_loops` times."
-	stop_max_crit_loops :: Int = 1
+	stop_max_crit_loops :: Int = 10
 
 	# criticality test thresholds
 	"Lower bound for criticality before entering Criticality Routine."
-	eps_crit :: Float64 = 0.1
+	eps_crit :: _T = 0.1
 	"Lower bound for feasibility before entering Criticality Routine."
-	eps_theta :: Float64 = 0.1
+	eps_theta :: _T = 0.05
 	"At the end of the Criticality Routine the radius is possibly set to `crit_B * χ`."
-	crit_B :: Float64 = 1000
+	crit_B :: _T = 100
 	"Criticality Routine runs until `Δ ≤ crit_M * χ`."
-	crit_M :: Float64 = 3000
+	crit_M :: _T = 3*crit_B
 	"Trust region shrinking factor in criticality loops."
-	crit_alpha :: Float64 = 0.5
+	crit_alpha :: _T = 0.1
+
+	backtrack_in_crit_routine :: Bool = true
 	
 	# initialization
 	"Initial trust region radius."
-	delta_init :: Float64 = 0.5
+	delta_init :: _T = 0.5
 	"Maximum trust region radius."
-	delta_max :: Float64 = 2^5 * delta_init
+	delta_max :: _T = 2^5 * delta_init
 
 	# trust region updates
 	"Most severe trust region reduction factor."
-	gamma_shrink_much :: Float64= 0.1 	    # 0.1 is suggested by Fletcher et. al. 
+	gamma_shrink_much :: _T = 0.1 	    # 0.1 is suggested by Fletcher et. al. 
 	"Trust region reduction factor."
-	gamma_shrink :: Float64 = 0.5 			# 0.5 is suggested by Fletcher et. al. 
+	gamma_shrink :: _T = 0.5 			# 0.5 is suggested by Fletcher et. al. 
 	"Trust region enlargement factor."
-	gamma_grow :: Float64 = 2.0 			# 2.0 is suggested by Fletcher et. al. 
+	gamma_grow :: _T = 2.0 			# 2.0 is suggested by Fletcher et. al. 
 
 	# acceptance test 
 	"Whether to require *all* objectives to be reduced or not."
 	strict_acceptance_test :: Bool = true
 	"Acceptance threshold."
-	nu_accept :: Float64 = 0.01 			# 1e-2 is suggested by Fletcher et. al. 
+	nu_accept :: _T = 1e-4 			# 1e-2 is suggested by Fletcher et. al. 
 	"Success threshold."
-	nu_success :: Float64 = 0.9 			# 0.9 is suggested by Fletcher et. al. 
+	nu_success :: _T = 0.4 			# 0.9 is suggested by Fletcher et. al. 
 	
 	# compatibilty parameters
 	"Factor for normal step compatibility test. The smaller `c_delta`, the stricter the test."
-	c_delta :: Float64 = 0.7 				# 0.7 is suggested by Fletcher et. al. 
+	c_delta :: _T = 0.9 				# 0.7 is suggested by Fletcher et. al. 
 	"Factor for normal step compatibility test. The smaller `c_mu`, the stricter the test for small radii."
-	c_mu :: Float64 = 100.0 				# 100 is suggested by Fletcher et. al.
+	c_mu :: _T = 100.0 				# 100 is suggested by Fletcher et. al.
 	"Exponent for normal step compatibility test. The larger `mu`, the stricter the test for small radii."
-	mu :: Float64 = 0.01 					# 0.01 is suggested by Fletcher et. al.
+	mu :: _T = 0.01 					# 0.01 is suggested by Fletcher et. al.
 
 	# model decrease / constraint violation test
 	"Factor in the model decrease condition."
-	kappa_theta :: Float64 = 1e-4 			# 1e-4 is suggested by Fletcher et. al. 
+	kappa_theta :: _T = 1e-4 			# 1e-4 is suggested by Fletcher et. al. 
 	"Exponent (for constraint violation) in the model decrease condition."
-	psi_theta :: Float64 = 2.0
+	psi_theta :: _T = 2.0
 
 	"Configuration to determine variable scaling (if model supports it). Either `:box` or `:none`."
     scaler_cfg :: Symbol = :box
 
-	"Configuration object for descent and normal step computation."
-    step_config :: SC = SteepestDescentConfig()
-
 	"NLopt algorithm symbol for restoration phase."
-    nl_opt :: Symbol = :LN_COBYLA
-
-    @assert scaler_cfg == :box || scaler_cfg == :none
-    @assert string(nl_opt)[2] == 'N' "Restoration algorithm must be derivative free."
+    nl_opt :: Symbol = :GN_DIRECT_L_RAND    
 end
 
 ## to be sure that equality is based on field values:
 @batteries AlgorithmOptions selfconstructor=false
 
-# ## General Array Containers 
+function AlgorithmOptions{T, SC}(
+	typekw :: Type,
+    step_config :: SC,
+	require_fully_linear_models::Bool,
+	log_level::LogLevel,
+	max_iter::Integer,
+	stop_delta_min::Real,
+	stop_xtol_abs::Real,
+	stop_ftol_rel::Real,
+	stop_ftol_abs::Real,
+	stop_crit_tol_abs :: Real,
+	stop_theta_tol_abs :: Real,
+	stop_max_crit_loops :: Integer,
+	eps_crit :: Real, 
+	eps_theta :: Real,
+	crit_B :: Real,
+	crit_M :: Real,
+	crit_alpha :: Real,
+	backtrack_in_crit_routine :: Bool,
+	delta_init :: Real,
+	delta_max :: Real,
+	gamma_shrink_much :: Real,
+	gamma_shrink :: Real,
+	gamma_grow :: Real,
+	strict_acceptance_test :: Bool,
+	nu_accept::Real,
+	nu_success :: Real,
+	c_delta :: Real,
+	c_mu :: Real,
+	mu :: Real,
+	kappa_theta :: Real,
+	psi_theta :: Real, 
+	scaler_cfg :: Symbol,
+	nl_opt :: Symbol,
+) where {T<:Real, SC}
+	@assert scaler_cfg == :box || scaler_cfg == :none
+	@assert string(nl_opt)[2] == 'N' "Restoration algorithm must be derivative free."
+	return AlgorithmOptions{T, SC}(
+		T,
+		step_config,
+		require_fully_linear_models,
+		log_level,
+		max_iter,
+		stop_delta_min,
+		stop_xtol_abs,
+		stop_ftol_rel,
+		stop_ftol_abs,
+		stop_crit_tol_abs,
+		stop_theta_tol_abs,
+		stop_max_crit_loops,
+		eps_crit, 
+		eps_theta,
+		crit_B,
+		crit_M,
+		crit_alpha,
+		backtrack_in_crit_routine,
+		delta_init,
+		delta_max,
+		gamma_shrink_much,
+		gamma_shrink,
+		gamma_grow,
+		strict_acceptance_test,
+		nu_accept,
+		nu_success,
+		c_delta,
+		c_mu,
+		mu,
+		kappa_theta,
+		psi_theta, 
+		scaler_cfg,
+		nl_opt,
+	)
+end
+function AlgorithmOptions(T::Type{_T}, step_config::SC, args...) where {_T <: Real, SC}
+	return AlgorithmOptions{T, SC}(T, step_config, args...)
+end
+function AlgorithmOptions{T}(; kwargs...) where T<:Real
+	AlgorithmOptions(; T, kwargs...)
+end
 
+Base.@kwdef struct ThreadedOuterAlgorithmOptions{A}
+	inner_opts :: A = AlgorithmOptions()
+end
+
+# ## General Array Containers
 "A struct holding values computed for or derived from an `AbstractMOP`."
-struct ValueArrays{X, FX, HX, GX, EX, AX, THETA, PHI}
-	"Internal (scaled) variable vector."
-    ξ :: X
+Base.@kwdef struct ValueArrays{
+	F<:AbstractFloat,
+	FX<:AbstractVector{F},	# usually everything is a `Vector{F}`,
+							# but we allow the type to be set with 
+							# functions like `prealloc_objectives_vector`
+	HX<:AbstractVector{F},	
+	GX<:AbstractVector{F},
+}
 	"Unscaled variable vector used for evaluation."
-    x :: X
+    ξ :: Vector{F}
+	"Internal (scaled) variable vector."
+    x :: Vector{F}
 	"Objective value vector."
     fx :: FX
 	"Nonlinear equality constraints value vector."
     hx :: HX
 	"Nonlinear inequality constraints value vector."
     gx :: GX
-	"Linear equality constraints residual."
-    Eres :: EX
-    Ex :: EX
-	"Linear inequality constraints residual."
-    Ares :: AX
-    Ax :: AX
+    
+	Ex :: Vector{F}
+    Ax :: Vector{F}
+
+	Ax_min_b :: Vector{F}
+	Ex_min_c :: Vector{F}
+	
 	"Reference to maximum constraint violation."
-    θ :: THETA
+    theta_ref :: Base.RefValue{F}
 	"Reference to maximum function value."
-    Φ :: PHI
+    phi_ref :: Base.RefValue{F}
+
+	# meta data fields
+	n_vars :: Int = length(x)
+	dim_objectives :: Int = length(fx)
+	dim_lin_eq_constraints :: Int = length(Ex)
+	dim_lin_ineq_constraints :: Int = length(Ax)
+	dim_nl_eq_constraints :: Int = length(hx)
+	dim_nl_ineq_constraints :: Int = length(gx)
 end
 
-function Base.eltype(
-    ::ValueArrays{X, FX, HX, GX, EX, AX, THETA, PHI}
-) where {X, FX, HX, GX, EX, AX, THETA, PHI}
-	T = eltype(X)
-	return reduce(promote_modulo_nothing, (FX, HX, GX, EX, AX, THETA, PHI); init=T)
+function universal_copy!(
+	vals_trgt::ValueArrays, 
+	vals_src::ValueArrays
+)
+	for fn in fieldnames(ValueArrays)
+		universal_copy!(
+			getfield(vals_trgt, fn),
+			getfield(vals_src, fn)
+		)
+	end
+	return nothing
 end
 
-struct SurrogateValueArrays{FX, HX, GX, DFX, DHX, DGX}
+struct SurrogateValueArrays{
+	F <: AbstractFloat,
+	FX <: AbstractVector{F},
+	HX <: AbstractVector{F},
+	GX <: AbstractVector{F},
+	DFX <: AbstractMatrix{F},
+	DHX <: AbstractMatrix{F},
+	DGX <: AbstractMatrix{F}
+}
     fx :: FX
     hx :: HX
     gx :: GX
@@ -183,11 +291,14 @@ struct SurrogateValueArrays{FX, HX, GX, DFX, DHX, DGX}
     Dhx :: DHX
     Dgx :: DGX
 end
-function Base.copyto!(step_vals_trgt::SurrogateValueArrays, step_vals_src::SurrogateValueArrays)
+
+function universal_copy!(
+	mod_vals_trgt::SurrogateValueArrays, 
+	mod_vals_src::SurrogateValueArrays
+)
 	for fn in fieldnames(SurrogateValueArrays)
-		trgt_fn = getfield(step_vals_trgt, fn)
-		isnothing(trgt_fn) && continue
-		copyto!(trgt_fn, getfield(step_vals_src, fn))
+		trgt_fn = getfield(mod_vals_trgt, fn)
+		universal_copy!(trgt_fn, getfield(mod_vals_src, fn))
 	end
 	return nothing
 end
@@ -198,41 +309,48 @@ struct StepValueArrays{T}
     d :: Vector{T}
 	s :: Vector{T}
     xs :: Vector{T}
-    fxs :: Vector{T}
+	fxs :: Vector{T}
 	crit_ref :: Base.RefValue{T}
 end
 
-function Base.copyto!(step_vals_trgt::StepValueArrays, step_vals_src::StepValueArrays)
+
+function universal_copy!(
+	step_vals_trgt::StepValueArrays, step_vals_src::StepValueArrays
+)
 	for fn in fieldnames(StepValueArrays)
-		fn == :crit_ref && continue
 		trgt_fn = getfield(step_vals_trgt, fn)
-		isnothing(trgt_fn) && continue
-		copyto!(trgt_fn, getfield(step_vals_src, fn))
+		universal_copy!(trgt_fn, getfield(step_vals_src, fn))
 	end
-	step_vals_trgt.crit_ref[] = step_vals_src.crit_ref[]
 	return nothing
 end
 
-function StepValueArrays(x, fx)
-    T = Base.promote_eltype(x, fx)
-    nin = length(x)
-    nout = length(fx)
+function StepValueArrays(n_vars, n_objfs, T)
     return StepValueArrays(
-        zeros(T, nin),
-        zeros(T, nin),
-        zeros(T, nin),
-        zeros(T, nin),
-        zeros(T, nin),
-        zeros(T, nout),
-		Ref(T(Inf))
-    )
+        zeros(T, n_vars),
+        zeros(T, n_vars),
+        zeros(T, n_vars),
+        zeros(T, n_vars),
+        zeros(T, n_vars),
+		zeros(T, n_objfs),
+		Ref(T(Inf)),
+	)
 end
 
-struct LinearConstraints{LB, UB, ABEQ, ABINEQ}
+struct LinearConstraints{
+	LB<:Union{Nothing, AbstractVector}, 
+	UB<:Union{Nothing, AbstractVector},
+	AType<:Union{Nothing, AbstractMatrix}, 
+	BType<:Union{Nothing, AbstractVector}, 
+	EType<:Union{Nothing, AbstractMatrix}, 
+	CType<:Union{Nothing, AbstractVector}, 
+}
+	n_vars :: Int
     lb :: LB
     ub :: UB
-    A_b :: ABEQ
-    E_c :: ABINEQ
+    A :: AType
+	b :: BType
+	E :: EType
+	c :: CType
 end
 
 @enum IT_STAT begin
@@ -247,42 +365,38 @@ end
 	CRITICAL_LOOP = 5
 end
 
-Base.@kwdef mutable struct IterationMeta{F}
+Base.@kwdef mutable struct UpdateResults{F<:AbstractFloat}
 	it_index :: Int
 	Δ_pre :: F
 	Δ_post :: F
 
-	crit_val :: F
-	num_crit_loops :: Int
-
-	it_stat_pre :: IT_STAT
-	it_stat_post :: IT_STAT
+	it_stat :: IT_STAT
 
 	point_has_changed :: Bool
 
-	vals_diff_vec :: Vector{F}
-	mod_vals_diff_vec :: Vector{F}
+	diff_x :: Vector{F}
+	diff_fx :: Vector{F}
+	diff_fx_mod :: Vector{F}
 
-	args_diff_len :: F
-	vals_diff_len :: F
-	mod_vals_diff_len :: F
+	norm2_x :: F
+	norm2_fx :: F
+	norm2_fx_mod :: F
 end
 
-function init_iter_meta(T, n_objfs, algo_opts)
-	return IterationMeta(;
+function init_update_results(T, n_vars, n_objfs, delta_init)
+	NaNT = T(NaN)
+	return UpdateResults(
 		it_index = 0,
-		Δ_pre = T(NaN),
-		Δ_post = T(algo_opts.delta_init),
-		crit_val = T(Inf),
-		num_crit_loops = 0,
-		it_stat_pre = INITIALIZATION,
-		it_stat_post = INITIALIZATION,
+		Δ_pre = NaNT,
+		Δ_post = T(delta_init),
+		it_stat = INITIALIZATION,
 		point_has_changed = true,
-		vals_diff_vec = fill(T(NaN), n_objfs),
-		mod_vals_diff_vec = fill(T(NaN), n_objfs),
-		args_diff_len = T(NaN),
-		vals_diff_len = T(NaN),
-		mod_vals_diff_len = T(NaN)
+		diff_x = fill(NaNT, n_vars),
+		diff_fx = fill(NaNT, n_objfs),
+		diff_fx_mod = fill(NaNT, n_objfs),
+		norm2_x = NaNT,
+		norm2_fx = NaNT,
+		norm2_fx_mod = NaNT
 	)
 end
 
@@ -319,13 +433,58 @@ Because of all these nuances, we rather use specific flags for acceptance and ra
 in the main loop.
 =#
 
-@enum RET_CODE begin
-	INFEASIBLE = -1
-    CONTINUE = 0
-	CRITICAL = 1
-	BUDGET = 2
-	TOLERANCE_X = 3
-	TOLERANCE_F = 4
+struct ReturnObject{X, V, S, M}
+	ξ0 :: X
+	vals :: V
+	stop_code :: S
+	mod :: M
 end
 
-const DEFAULT_PRECISION=Float32
+opt_surrogate(r::ReturnObject) = r.mod
+opt_initial_vars(r::ReturnObject) = r.ξ0
+
+opt_vars(r::ReturnObject)=opt_vars(r.vals)
+opt_vars(::Nothing) = missing
+opt_vars(v::ValueArrays)=v.ξ
+
+opt_objectives(r::ReturnObject)=opt_objectives(r.vals)
+opt_objectives(::Nothing)=missing
+opt_objectives(v::ValueArrays)=v.fx
+
+opt_nl_eq_constraints(r::ReturnObject)=opt_nl_eq_constraints(r.vals)
+opt_nl_eq_constraints(::Nothing)=missing
+opt_nl_eq_constraints(v::ValueArrays)=v.hx
+
+opt_nl_ineq_constraints(r::ReturnObject)=opt_nl_ineq_constraints(r.vals)
+opt_nl_ineq_constraints(::Nothing)=missing
+opt_nl_ineq_constraints(v::ValueArrays)=v.gx
+
+opt_lin_eq_constraints(r::ReturnObject)=opt_lin_eq_constraints(r.vals)
+opt_lin_eq_constraints(::Nothing)=missing
+opt_lin_eq_constraints(v::ValueArrays)=v.Ex_min_c
+
+opt_lin_ineq_constraints(r::ReturnObject)=opt_lin_ineq_constraints(r.vals)
+opt_lin_ineq_constraints(::Nothing)=missing
+opt_lin_ineq_constraints(v::ValueArrays)=v.Ax_min_b
+
+opt_constraint_violation(r::ReturnObject)=opt_constraint_violation(r.vals)
+opt_constraint_violation(::Nothing)=missing
+opt_constraint_violation(v::ValueArrays)=v.theta_ref[]
+
+function opt_stop_code(r::ReturnObject)
+	c = r.stop_code
+	while c isa WrappedStoppingCriterion
+		c = c.crit
+	end
+	return c
+end
+
+function Base.show(io::IO, ret::ReturnObject)
+	print(io, """
+	ReturnObject
+	x0   = $(pretty_row_vec(opt_initial_vars(ret)))
+	x*   = $(pretty_row_vec(opt_vars(ret)))
+	f(x*)= $(pretty_row_vec(opt_objectives(ret)))
+	code = $(opt_stop_code(ret))"""
+	)
+end

@@ -18,87 +18,62 @@
 # A `ScaledOperator` wraps some other `AbstractNonlinearOperator` and enables caching
 # of (un-)scaling results as well taking care of the chain rule for derivatives:
 
-struct ScaledOperator{O, S, XI, D, H} <: AbstractNonlinearOperatorNoParams
+import .CompromiseEvaluators: FuncCallCounter, AbstractNonlinearOperatorWrapper
+
+struct RecountedOperator{O} <: AbstractNonlinearOperatorWrapper
+    op :: O
+    num_func_calls :: Union{FuncCallCounter, Nothing}
+    num_grad_calls :: Union{FuncCallCounter, Nothing}
+    num_hess_calls :: Union{FuncCallCounter, Nothing}
+end
+
+function RecountedOperator(op; replace_counters::Bool=false)
+    if !replace_counters
+        return RecountedOperator(op, nothing, nothing, nothing)
+    end
+    return RecountedOperator(op, FuncCallCounter(), FuncCallCounter(), FuncCallCounter())
+end
+
+recount_operator(op::Nothing; kwargs...) = nothing
+recount_operator(op; kwargs...)=RecountedOperator(op; kwargs...)
+
+CE.wrapped_operator(sop::RecountedOperator)=sop.op
+
+function CE.func_call_counter(sop::RecountedOperator, v::Val{0})
+    isnothing(sop.num_func_calls) && return CE.func_call_counter(sop.op, v)
+    return sop.num_func_calls
+end
+function CE.func_call_counter(sop::RecountedOperator, v::Val{1})
+    isnothing(sop.num_grad_calls) && return CE.func_call_counter(sop.op, v)
+    return sop.num_grad_calls
+end
+function CE.func_call_counter(sop::RecountedOperator, v::Val{2})
+    isnothing(sop.num_hess_calls) && return CE.func_call_counter(sop.op, v)
+    return sop.num_hess_calls
+end
+
+struct ScaledOperator{F<:AbstractFloat, O, S} <: AbstractNonlinearOperatorWrapper
     op :: O
     scaler :: S
     ## cache for unscaled site
-    ξ :: XI
-    ## cache for gradients of `op` at `ξ`
-    Dy :: D
-    ## cache for Hessians of `op` at `ξ`, multiplied by unscaling matrix
-    Hy :: H
+    ξ :: Vector{F}      # TODO (elastic) matrix for parallel evaluation
 end
+CE.operator_can_eval_multi(::ScaledOperator)=false
+CE.wrapped_operator(sop::ScaledOperator)=sop.op
 
-CE.is_counted(sop::ScaledOperator)=CE.is_counted(sop.op)
-CE.num_calls(sop::ScaledOperator)=CE.num_calls(sop.op)
-CE.max_calls(sop::ScaledOperator)=CE.max_calls(sop.op)
-CE.set_num_calls!(sop::ScaledOperator, vals::Tuple{Int,Int,Int})=CE.set_num_calls!(sop.op, vals)
-CE.enforce_max_calls(sop::ScaledOperator) = CE.enforce_max_calls(sop.op)
-
-# Consider ``f: ℝ^n → ℝ^m`` and the unscaling map ``u: ℝ^n → ℝ^n``.
-# By the chain rule we have ``∇(f∘u)(x) = ∇f(ξ)*T``, where ``T`` is 
-# the Jacobian of ``u``.
-# As we are actually working with transposed Jacobians `Dy`, we compute
-# `T'Dy`:
-function scale_grads!(Dy, sop)
-    LA.mul!(Dy, transpose(unscaling_matrix(sop.scaler)), sop.Dy)
+function CE.preprocess_inputs(sop::ScaledOperator, x::RVec)
+    @unpack scaler, ξ = sop
+    unscale!(ξ, scaler, x)
+    return ξ
+end
+function CE.postprocess_grads!(Dy, sop::ScaledOperator, x_pre, x_post)
+    @unpack scaler = sop
+    scale_grads!(Dy, scaler)
     return nothing
 end
-
-# Usually, the chain rule for second-order derivatives is more complicated:
-# ```math
-#   ∇²(f∘u)(x) = Tᵀ∇²f(ξ)T + ∑ₖ ∇fₖ(ξ) ∇²u
-# ```
-# But ``u`` is affine, so the second term vanishes and we are left with 
-# the matrix-matrix-matrix product:
-function scale_hessians!(H, sop)
-    T = unscaling_matrix(sop.scaler)
-    for i = axes(H, 3)
-        LA.mul!(sop.Hy[:, :, i], transpose(T), H[:, :, i])
-        LA.mul!(H[:, :, i], sop.Hy[:, :, i], T)
-    end
-    return nothing
-end
-
-# ### Operator Interface
-
-# Evaluation of a `ScaledOperator` is straight-forward:
-function CE.eval_op!(y, sop::ScaledOperator, x)
-    unscale!(sop.ξ, sop.scaler, x)
-    return eval_op!(y, sop.op, sop.ξ)
-end
-
-# With the above chain-rule functions, it is now easy to implement the 
-# complete operator interface for `ScaledOperator`.
-# Taking gradients requires unscaling of the variables, differentiation at 
-# the unscaled site and a re-scaling of the gradients:
-function CE.eval_grads!(Dy, sop::ScaledOperator, x)
-    unscale!(sop.ξ, sop.scaler, x)
-    r = eval_grads!(sop.Dy, sop.op, sop.ξ)
-    scale_grads!(Dy, sop)
-    return r
-end
-# We don't have to unscale twice when evaluating and differentiating:
-function CE.eval_op_and_grads!(y, Dy, sop::ScaledOperator, x)
-    unscale!(sop.ξ, sop.scaler, x)
-    r = eval_op_and_grads!(y, sop.Dy, sop.op, sop.ξ)
-    scale_grads!(Dy, sop)
-    return r
-end
-
-# The procedure is similar for Hessians:
-function CE.eval_hessians!(H, sop::ScaledOperator, x)
-    unscale!(sop.ξ, sop.scaler, x)
-    r = eval_hessians!(H, sop.op, sop.ξ)
-    scale_hessians!(H, sop)
-    return r
-end
-function CE.eval_op_and_grads_and_hessians!(y, Dy, H, sop, x)
-    unscale!(sop.ξ, sop.scaler, x)
-    r = eval_op_and_grads_and_hessians!(y, sop.Dy, H, sop.op, sop.ξ)
-    scale_grads!(Dy, sop)
-    scale_hessians!(H, sop)
-    return r
+function CE.postprocess_hessians!(H, sop::ScaledOperator, x_pre, x_post)
+    @unpack scaler = sop
+    scale_hessians!(H, scaler)
 end
 
 # ## `SimpleMOP`
@@ -135,7 +110,11 @@ By default, we assume `ExactModelConfig()`, which requires differentiable object
     nl_eq_constraints :: Union{Nothing, NonlinearFunction} = nothing
     nl_ineq_constraints :: Union{Nothing, NonlinearFunction} = nothing
 
+    reset_call_counters :: Bool = true
+
     num_vars :: Int
+
+    x0 :: Union{Nothing, RVec, RMat} = nothing
 
     dim_objectives :: Int = 0
     dim_nl_eq_constraints :: Int = 0
@@ -160,14 +139,20 @@ MutableMOP(num_vars::Int)=MutableMOP(;num_vars)
 # performance reasons:
 struct TypedMOP{
     O, NLEC,NLIC,
+    XType,
     MTO, MTNLEC, MTNLIC,
-    LB, UB, EC, AB
+    LB, UB, 
+    EType, CType, AType, BType
 } <: SimpleMOP
     objectives :: O
     nl_eq_constraints :: NLEC
     nl_ineq_constraints :: NLIC
 
+    reset_call_counters :: Bool
+
     num_vars :: Int
+
+    x0 :: XType
     
     dim_objectives :: Int
     dim_nl_eq_constraints :: Int
@@ -180,19 +165,22 @@ struct TypedMOP{
     lb :: LB
     ub :: UB
 
-    E_c :: EC
-    A_b :: AB
+    E :: EType
+    c :: CType
+    A :: AType
+    b :: BType
 end
 
 # This initialization really is just a forwarding of all fields:
-function initialize(mop::MutableMOP, ξ0::RVec)
-    E_c = lin_eq_constraints(mop)
-    A_b = lin_ineq_constraints(mop)
+function initialize(mop::SimpleMOP)
+    replace_counters = mop.reset_call_counters
     return TypedMOP(
-        mop.objectives,
-        mop.nl_eq_constraints,
-        mop.nl_ineq_constraints,
+        recount_operator(mop.objectives; replace_counters),
+        recount_operator(mop.nl_eq_constraints; replace_counters),
+        recount_operator(mop.nl_ineq_constraints; replace_counters), 
+        mop.reset_call_counters,
         mop.num_vars,
+        mop.x0,
         mop.dim_objectives,
         mop.dim_nl_eq_constraints,
         mop.dim_nl_ineq_constraints,
@@ -201,8 +189,8 @@ function initialize(mop::MutableMOP, ξ0::RVec)
         mop.mcfg_nl_ineq_constraints,
         mop.lb,
         mop.ub,
-        E_c,
-        A_b
+        mop.E, mop.c,
+        mop.A, mop.b
    )
 end
 
@@ -348,14 +336,17 @@ end
 
 # ### Interface Implementation
 # Define the most basic Getters:
-precision(::SimpleMOP) = Float64
+float_type(::SimpleMOP) = Float64
 model_type(::SimpleMOP) = SimpleMOPSurrogate
+
+initial_vars(mop::SimpleMOP) = mop.x0
 
 # Box constraints are easy:
 lower_var_bounds(mop::SimpleMOP)=mop.lb
 upper_var_bounds(mop::SimpleMOP)=mop.ub
 
 # To access functions, retrieve the corresponding fields of the MOP:
+dim_vars(mop::SimpleMOP)=mop.num_vars
 for dim_func in (:dim_objectives, :dim_nl_eq_constraints, :dim_nl_ineq_constraints)
     @eval function $(dim_func)(mop::SimpleMOP)
         return getfield(mop, $(Meta.quot(dim_func)))
@@ -364,37 +355,19 @@ end
 
 # Linear constraints are returned only if the matrix is not nothing.
 # If the offset vector is nothing, we return zeros:
-function lin_eq_constraints(mop::MutableMOP)
-    isnothing(mop.E) && return nothing
-    if isnothing(mop.c)
-        mop.c = zeros(Float64, size(E, 1))
-    end
-    return mop.E, mop.C
-end
-
-function lin_ineq_constraints(mop::MutableMOP)
-    isnothing(mop.A) && return nothing
-    if isnothing(mop.b)
-        mop.b = zeros(Float64, size(A, 1))
-    end
-    return mop.A, mop.b
-end
-
-# The `TypedMOP` stores tuples (of a matrix and a vector instead):
-lin_eq_constraints(mop::TypedMOP) = mop.E_c
-lin_ineq_constraints(mop::TypedMOP) = mop.A_b
+lin_eq_constraints_matrix(mop::Union{TypedMOP, MutableMOP})=mop.E
+lin_eq_constraints_vector(mop::Union{TypedMOP, MutableMOP})=mop.c
+lin_ineq_constraints_matrix(mop::Union{TypedMOP, MutableMOP})=mop.A
+lin_ineq_constraints_vector(mop::Union{TypedMOP, MutableMOP})=mop.b
 
 # Because we store `AbstractNonlinearOperator`s, evaluation can simply be redirected:
 function eval_objectives!(y::RVec, mop::SimpleMOP, x::RVec)
-    @serve CE.check_num_calls(mop.objectives, 1; force=true)
     return func_vals!(y, mop.objectives, x)
 end
 function eval_nl_eq_constraints!(y::RVec, mop::SimpleMOP, x::RVec)
-    @serve CE.check_num_calls(mop.nl_eq_constraints, 1; force=true)
     return func_vals!(y, mop.nl_eq_constraints, x)
 end
 function eval_nl_ineq_constraints!(y::RVec, mop::SimpleMOP, x::RVec)
-    @serve CE.check_num_calls(mop.nl_ineq_constraints, 1; force=true)
     return func_vals!(y, mop.nl_ineq_constraints, x)
 end
 
@@ -406,7 +379,9 @@ end
 # We additionally store the operators, because we might wrap them as
 # `ScaledOperator` and don't want to modify the original problem.
 # (Also, I am not sure if the scaler is available when the problem is initialized).
-struct SimpleMOPSurrogate{O, NLEC, NLIC, MO, MNLEC, MNLIC} <: AbstractMOPSurrogate
+struct SimpleMOPSurrogate{
+    O, NLEC, NLIC, MO, MNLEC, MNLIC,
+} <: AbstractMOPSurrogate
     objectives :: O
     nl_eq_constraints :: NLEC
     nl_ineq_constraints :: NLIC
@@ -418,13 +393,14 @@ struct SimpleMOPSurrogate{O, NLEC, NLIC, MO, MNLEC, MNLIC} <: AbstractMOPSurroga
 
     mod_objectives :: MO
     mod_nl_eq_constraints :: MNLEC
-    mod_nl_ineq_constraints :: MNLIC 
+    mod_nl_ineq_constraints :: MNLIC
 end
 
-# The precision is again fixed:
-precision(mod::SimpleMOPSurrogate)=Float64
+# The float_type is again fixed:
+float_type(mod::SimpleMOPSurrogate)=Float64
 
 # Getters are generated automatically:
+dim_vars(mod::SimpleMOPSurrogate)=mod.num_vars
 for dim_func in (:dim_objectives, :dim_nl_eq_constraints, :dim_nl_ineq_constraints)
     @eval function $(dim_func)(mod::SimpleMOPSurrogate)
         return getfield(mod, $(Meta.quot(dim_func)))
@@ -433,9 +409,11 @@ end
 
 # The model container is dependent on the trust-region if any of the models is:
 function depends_on_radius(mod::SimpleMOPSurrogate)
-    return CE.depends_on_radius(mod.mod_objectives) ||
-        CE.depends_on_radius(mod.mod_nl_eq_constraints) ||
-        CE.depends_on_radius(mod.mod_nl_ineq_constraints)
+    return (
+        (!isnothing(mod.mod_objectives) && CE.depends_on_radius(mod.mod_objectives)) ||
+        (!isnothing(mod.mod_nl_eq_constraints) && CE.depends_on_radius(mod.mod_nl_eq_constraints)) ||
+        (!isnothing(mod.mod_nl_ineq_constraints) && CE.depends_on_radius(mod.mod_nl_ineq_constraints))
+    )
 end
 
 # At the moment, I have not yet thought about what we would need to change for dynamic scaling:
@@ -443,72 +421,70 @@ supports_scaling(::Type{<:SimpleMOPSurrogate})=ConstantAffineScaling()
 
 # Evaluation redirects to evaluation of the surrogates:
 function eval_objectives!(y::RVec, mod::SimpleMOPSurrogate, x::RVec)
-    return model_op!(y, mod.mod_objectives, x)
+    return func_vals!(y, mod.mod_objectives, x)
 end
 function eval_nl_eq_constraints!(y::RVec, mod::SimpleMOPSurrogate, x::RVec)
-    return model_op!(y, mod.mod_nl_eq_constraints, x)
+    return func_vals!(y, mod.mod_nl_eq_constraints, x)
 end
 function eval_nl_ineq_constraints!(y::RVec, mod::SimpleMOPSurrogate, x::RVec)
-    return model_op!(y, mod.mod_nl_ineq_constraints, x)
+    return func_vals!(y, mod.mod_nl_ineq_constraints, x)
 end
 # Gradients:
 function grads_objectives!(Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
-    return model_grads!(Dy, mod.mod_objectives, x)
+    return func_grads!(Dy, mod.mod_objectives, x)
 end
 function grads_nl_eq_constraints!(Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
-    return model_grads!(Dy, mod.mod_nl_eq_constraints, x)
+    return func_grads!(Dy, mod.mod_nl_eq_constraints, x)
 end
 function grads_nl_ineq_constraints!(Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
-    return model_grads!(Dy, mod.mod_nl_ineq_constraints, x)
+    return func_grads!(Dy, mod.mod_nl_ineq_constraints, x)
 end
 function eval_and_grads_objectives!(y::RVec, Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
-    return model_op_and_grads!(y, Dy, mod.mod_objectives, x)
+    return func_vals_and_grads!(y, Dy, mod.mod_objectives, x)
 end
 function eval_and_grads_nl_eq_constraints!(y::RVec, Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
-    return model_op_and_grads!(y, Dy, mod.mod_nl_eq_constraints, x)
+    return func_vals_and_grads!(y, Dy, mod.mod_nl_eq_constraints, x)
 end
 function eval_and_grads_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::SimpleMOPSurrogate, x::RVec)
-    return model_op_and_grads!(y, Dy, mod.mod_nl_ineq_constraints, x)
+    return func_vals_and_grads!(y, Dy, mod.mod_nl_ineq_constraints, x)
 end
 # ### Initialization and Training
 # These helpers make an operator respect scaling by returning `ScaledOperator`:
 scale_wrap_op(scaler::IdentityScaler, op, mcfg, dim_in, dim_out, T)=op
-function scale_wrap_op(scaler, op, mcfg, dim_in, dim_out, T)
+function scale_wrap_op(
+    scaler, op, mcfg, dim_in, dim_out, T;
+)
+    #ξ = zeros(T, dim_in, CE.num_parallel_evals(mcfg))
     ξ = zeros(T, dim_in)
-    Dy = if requires_grads(mcfg)
-        zeros(T, dim_in, dim_out)
-    else
-        nothing
-    end
-    Hy = if requires_hessians(mcfg)
-        zeros(T, dim_in, dim_in, dim_out)
-    else
-        nothing
-    end
-    return ScaledOperator(op, scaler, ξ, Dy, Hy)
+    return ScaledOperator(op, scaler, ξ)
 end
 
 # We use the `ScaledOperator` in the `SimpleMOPSurrogate` to make writing models
 # as easy as possible. 
 # Modellers should always assume working in the scaled domain and not be bothered
 # with transformations...
-function init_models(mop::SimpleMOP, n_vars, scaler)
+function init_models(mop::SimpleMOP, n_vars, scaler; kwargs...)
     d_objf = dim_objectives(mop)
     d_nl_eq = dim_nl_eq_constraints(mop)
     d_nl_ineq = dim_nl_ineq_constraints(mop)
     d_in = mop.num_vars
+
     objf = scale_wrap_op(
-        scaler, mop.objectives, mop.mcfg_objectives, d_in, d_objf, Float64)
+        scaler, mop.objectives, mop.mcfg_objectives, d_in, d_objf, Float64;
+    )
     nl_eq = scale_wrap_op(
-        scaler, mop.nl_eq_constraints, mop.mcfg_nl_eq_constraints, d_in, d_nl_eq, Float64)
+        scaler, mop.nl_eq_constraints, mop.mcfg_nl_eq_constraints, d_in, d_nl_eq, Float64;
+    )
     nl_ineq = scale_wrap_op(
-        scaler, mop.nl_ineq_constraints, mop.mcfg_nl_ineq_constraints, d_in, d_nl_ineq, Float64)
-    mobjf = init_surrogate(
-        mop.mcfg_objectives, objf, d_in, d_objf, nothing, Float64)
-    mnl_eq = init_surrogate(
-        mop.mcfg_nl_eq_constraints, nl_eq, d_in, d_nl_eq, nothing, Float64)
-    mnl_ineq = init_surrogate(
-        mop.mcfg_nl_ineq_constraints, nl_ineq, d_in, d_nl_ineq, nothing, Float64)
+        scaler, mop.nl_ineq_constraints, mop.mcfg_nl_ineq_constraints, d_in, d_nl_ineq, Float64;
+    )
+
+    mobjf = isnothing(objf) ? nothing : init_surrogate(
+        mop.mcfg_objectives, objf, d_in, d_objf, nothing, Float64; kwargs...)
+    mnl_eq = isnothing(nl_eq) ? nothing : init_surrogate(
+        mop.mcfg_nl_eq_constraints, nl_eq, d_in, d_nl_eq, nothing, Float64; kwargs...)
+    mnl_ineq = isnothing(nl_ineq) ? nothing : init_surrogate(
+        mop.mcfg_nl_ineq_constraints, nl_ineq, d_in, d_nl_ineq, nothing, Float64; kwargs...)
 
     return SimpleMOPSurrogate(
         objf, nl_eq, nl_ineq, d_in, d_objf, d_nl_eq, d_nl_ineq, mobjf, mnl_eq, mnl_ineq)
@@ -517,19 +493,27 @@ end
 # The sub-models are trained separately:
 function update_models!(
     mod::SimpleMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts;
+    indent::Int
 )
     @unpack x, fx, gx, hx = vals
     @unpack lb, ub = scaled_cons
-    log_level = algo_opts.log_level
-    Δ_max = algo_opts.delta_max
-
-    @serve update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; Δ_max, log_level)
-    @serve update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; Δ_max, log_level)
-    @serve update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; Δ_max, log_level)
+    @unpack log_level = algo_opts
+    if !isnothing(mod.mod_objectives)
+        @ignoraise update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; log_level, indent)
+    end
+    if !isnothing(mod.mod_nl_eq_constraints)
+        @ignoraise update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; log_level, indent)
+    end
+    if !isnothing(mod.mod_nl_ineq_constraints)
+        @ignoraise update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; log_level, indent)
+    end
     return nothing
 end
 
-function copy_model(mod::SimpleMOPSurrogate)
+function universal_copy(mod::SimpleMOPSurrogate)
+    mobjf = isnothing(mod.mod_objectives) ? nothing : CE.universal_copy_model(mod.mod_objectives)
+    mnleq = isnothing(mod.nl_eq_constraints) ? nothing :  CE.universal_copy_model(mod.mod_nl_eq_constraints)
+    mnlineq = isnothing(mod.nl_ineq_constraints) ? nothing : CE.universal_copy_model(mod.mod_nl_ineq_constraints)
     return SimpleMOPSurrogate(
         mod.objectives,
         mod.nl_eq_constraints,
@@ -538,15 +522,38 @@ function copy_model(mod::SimpleMOPSurrogate)
         mod.dim_objectives,
         mod.dim_nl_eq_constraints,
         mod.dim_nl_ineq_constraints,
-        CE._copy_model(mod.mod_objectives),
-        CE._copy_model(mod.mod_nl_eq_constraints),
-        CE._copy_model(mod.mod_nl_ineq_constraints),
+        mobjf,
+        mnleq,
+        mnlineq,
     )
 end
 
-function copyto_model!(mod_trgt::SimpleMOPSurrogate, mod_src::SimpleMOPSurrogate)
-    CE._copyto_model!(mod_trgt.mod_objectives, mod_src.mod_objectives)
-    CE._copyto_model!(mod_trgt.mod_nl_eq_constraints, mod_src.mod_nl_eq_constraints)
-    CE._copyto_model!(mod_trgt.mod_nl_ineq_constraints, mod_src.mod_nl_ineq_constraints)
+function universal_copy!(
+    mod_trgt::SimpleMOPSurrogate, mod_src::SimpleMOPSurrogate
+)
+    if !isnothing(mod_trgt.mod_objectives)
+        CE.universal_copy_model!(mod_trgt.mod_objectives, mod_src.mod_objectives)
+    end
+    if !isnothing(mod_trgt.mod_nl_eq_constraints)
+        CE.universal_copy_model!(mod_trgt.mod_nl_eq_constraints, mod_src.mod_nl_eq_constraints)
+    end
+    if !isnothing(mod_trgt.mod_nl_ineq_constraints)
+        CE.universal_copy_model!(mod_trgt.mod_nl_ineq_constraints, mod_src.mod_nl_ineq_constraints)
+    end
     return mod_trgt
+end
+
+function process_trial_point!(mod::SimpleMOPSurrogate, vals_trial, update_results)
+    xtrial = vals_trial.x
+    isnext = update_results.point_has_changed
+    if !isnothing(mod.mod_objectives)
+        CE.process_trial_point!(mod.mod_objectives, xtrial, vals_trial.fx, isnext)
+    end
+    if !isnothing(mod.mod_nl_eq_constraints)
+        CE.process_trial_point!(mod.mod_nl_eq_constraints, xtrial, vals_trial.hx, isnext)
+    end
+    if !isnothing(mod.mod_nl_ineq_constraints)
+        CE.process_trial_point!(mod.mod_nl_ineq_constraints, xtrial, vals_trial.gx, isnext)
+    end
+    return nothing
 end

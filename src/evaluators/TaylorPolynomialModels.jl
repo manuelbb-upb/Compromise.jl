@@ -1,11 +1,12 @@
 module TaylorPolynomialModels
 
+import Logging: @logmsg, Info
 import LinearAlgebra as LA
 using Parameters: @with_kw
 using ..Compromise.CompromiseEvaluators
 const CE = CompromiseEvaluators
 
-import ..Compromise: @serve
+import ..Compromise: @ignoraise, RVec
 
 struct TaylorPolynomial1{
     X <: AbstractVector{<:Real},
@@ -29,22 +30,6 @@ end
     degree :: Int = 1
     @assert 1 <= degree <= 2 "Taylor polynomial must have degree 1 or 2."
 end    
-#=
-CE.copy_model(tp::Union{TaylorPolynomial1,TaylorPolynomial2})=deepcopy(tp)
-function CE.copyto_model!(tp_trgt::TaylorPolynomial1, tp_src::TaylorPolynomial1)
-    Base.copyto!(tp_trgt.x0, tp_src.x0)
-    Base.copyto!(tp_trgt.Δx, tp_src.Δx)
-    Base.copyto!(tp_trgt.fx, tp_src.fx)
-    Base.copyto!(tp_trgt.Dfx, tp_src.Dfx)
-    return nothing
-end
-function CE.copyto_model!(tp_trgt::TaylorPolynomial2, tp_src::TaylorPolynomial2)
-    CE.copyto_model!(tp_trgt.tp1, tp_src.tp1)
-    Base.copyto!(tp_trgt.xtmp, tp_src.xtmp)
-    Base.copyto!(tp_trgt.Hfx, tp_src.Hfx)
-    return nothing
-end
-=#
 
 function TaylorPolynomial1(dim_in, dim_out, T)
     x0 = fill(T(NaN), dim_in)
@@ -61,7 +46,7 @@ function TaylorPolynomial2(dim_in, dim_out, T)
     return TaylorPolynomial2(tp1, Hfx, xtmp)
 end
 
-function CE.init_surrogate(tp_cfg::TaylorPolynomialConfig, op, dim_in, dim_out, params, T)
+function CE.init_surrogate(tp_cfg::TaylorPolynomialConfig, op, dim_in, dim_out, params, T; kwargs...)
     if tp_cfg.degree == 1
         return TaylorPolynomial1(dim_in, dim_out, T)
     else
@@ -74,7 +59,7 @@ CE.depends_on_radius(::TaylorPoly)=false
 CE.requires_hessians(cfg::TaylorPolynomialConfig)=(cfg.degree>=2)
 CE.requires_grads(::TaylorPolynomialConfig)=true
 
-function CE.model_op!(y, tp::TaylorPolynomial1, x)
+function CE.eval_op!(y::RVec, tp::TaylorPolynomial1, x::RVec)
     Δx = tp.Δx
     Δx .= x .- tp.x0
 
@@ -84,8 +69,8 @@ function CE.model_op!(y, tp::TaylorPolynomial1, x)
     return nothing
 end
 
-function CE.model_op!(y, tp::TaylorPolynomial2, x)
-    model_op!(y, tp.tp, x)
+function CE.eval_op!(y::RVec, tp::TaylorPolynomial2, x::RVec)
+    eval_op!(y, tp.tp, x)
     Δx = tp.tp.Δx
     H = tp.Hfx
     @views for i = axes(H, 3)
@@ -94,14 +79,14 @@ function CE.model_op!(y, tp::TaylorPolynomial2, x)
     return nothing
 end
 
-function CE.model_grads!(Dy, tp::TaylorPolynomial1, x)
+function CE.eval_grads!(Dy, tp::TaylorPolynomial1, x)
     Dy .= tp.Dfx
     return nothing
 end
 
-function CE.model_grads!(Dy, tp::TaylorPolynomial2, x)
+function CE.eval_grads!(Dy, tp::TaylorPolynomial2, x)
     tp1 = tp.tp
-    model_grads!(Dy, tp1, x)
+    eval_grads!(Dy, tp1, x)
     Δx = tp1.Δx
     Δx .= x .- tp1.x0
     H = tp.Hfx
@@ -113,7 +98,7 @@ function CE.model_grads!(Dy, tp::TaylorPolynomial2, x)
     return nothing
 end
 
-function CE.model_op_and_grads!(y, Dy, tp::TaylorPolynomial1, x)
+function CE.eval_op_and_grads!(y, Dy, tp::TaylorPolynomial1, x)
     Δx = tp.Δx
     Δx .= x .- tp.x0
 
@@ -123,9 +108,9 @@ function CE.model_op_and_grads!(y, Dy, tp::TaylorPolynomial1, x)
     return nothing
 end
 
-function CE.model_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
+function CE.eval_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
     tp1 = tp.tp
-    model_op_and_grads!(y, Dy, tp1, x)
+    eval_op_and_grads!(y, Dy, tp1, x)
     Δx = tp1.Δx
     H = tp.Hfx
     HΔx = tp.xtmp
@@ -144,22 +129,24 @@ function CE.model_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
     return nothing
 end
 
-function CE.update!(tp::TaylorPolynomial1, op, Δ, x, fx, lb, ub; kwargs...)
+function CE.update!(tp::TaylorPolynomial1, op, Δ, x, fx, lb, ub; 
+    log_level=Info, indent::Int=0, kwargs...
+)
     if tp.x0 != x || any(isnan.(tp.x0))
-        @serve CE.check_num_calls(op, (1,2); force=true)
+        @logmsg log_level "$(lpad("", indent+1)) Updating Taylor Polynomial."
         copyto!(tp.x0, x)
         #src eval_op_and_grads!(tp.fx, tp.Dfx, op, x)
-        func_vals_and_grads!(tp.fx, tp.Dfx, op, x)
+        @ignoraise func_vals_and_grads!(tp.fx, tp.Dfx, op, x)
     end
+    return nothing
 end
 
 function CE.update!(tp::TaylorPolynomial2, op, Δ, x, fx, lb, ub; kwargs...)
     tp1 = tp.tp
     if tp1.x0 != x || any(isnan.(tp1.x0))
-        @serve CE.check_num_calls(op, (1,2,3); force=true)
         copyto!(tp1.x0, x)
         #src eval_op_and_grads_and_hessians!(tp1.fx, tp1.Dfx, tp.Hfx, op, x)
-        func_vals_and_grads_and_hessians!(tp1.fx, tp1.Dfx, tp.Hfx, op, x)
+        @ignoraise func_vals_and_grads_and_hessians!(tp1.fx, tp1.Dfx, tp.Hfx, op, x)
     end
     return nothing
 end

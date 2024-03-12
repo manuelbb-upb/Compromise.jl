@@ -1,12 +1,40 @@
 function do_restoration(
-    mop, mod, scaler, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, iter_meta, algo_opts
+    mop, Δ, mod, scaler, lin_cons, scaled_cons,
+    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, update_results, 
+    stop_crits, 
+    user_callback, 
+    algo_opts;
+    it_index, indent
 )
-    @logmsg algo_opts.log_level "Iteration $(iter_meta.it_index): Starting restoration."
-    iter_meta.it_stat_post = RESTORATION
-    iter_meta.point_has_changed = false
+    indent += 1
+    pad_str = lpad("", indent)
+    @logmsg algo_opts.log_level "$(pad_str)Starting restoration."
+    update_results.it_stat = RESTORATION
 
-	(θ_opt, xr_opt, ret) = solve_restoration_problem(mop, scaler, scaled_cons, vals.x, algo_opts.nl_opt)
+    ret = :TODO
+    if !any(isnan.(step_vals.n))
+        ret = :NOTNAN
+        @. vals_tmp.x = step_vals.xn
+        @ignoraise eval_mop!(vals_tmp, mop, scaler)
+        if iszero(vals_tmp.theta_ref[])
+            @logmsg algo_opts.log_level "$(pad_str) Using `xn` as next iterate."
+            xr_opt = copy(step_vals.xn)
+            ret = :SUCCESS
+        end
+    end
+
+    if ret != :SUCCESS
+        if dim_nl_eq_constraints(mop) > 0 || dim_nl_ineq_constraints(mop) > 0
+            @logmsg algo_opts.log_level "$(pad_str) Trying to solve nonlinear subproblem"
+            x0 = ret == :NONAN ? step_vals.xn : vals.x
+	        (θ_opt, xr_opt, ret) = solve_restoration_problem(
+                mop, vals_tmp, scaler, scaled_cons, x0, algo_opts.nl_opt
+            )
+        else
+            xr_opt = copy(step_vals.xn)
+            ret = :SUCCESS
+        end
+    end
     if ret in (
         :SUCCESS, 
         :STOPVAL_REACHED, 
@@ -15,50 +43,51 @@ function do_restoration(
         :MAXEVAL_REACHED,
 		:MAXTIME_REACHED
     )
-        return postproccess_restoration(
-            xr_opt, mop, mod, scaler, scaled_cons,
-            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, iter_meta, algo_opts
-        )   
+        @ignoraise postproccess_restoration(
+            xr_opt, Δ, update_results, mop, mod, scaler, lin_cons, scaled_cons,
+            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
+            it_index, indent
+        )
+    else
+        return InfeasibleStopping(indent)
     end
+    @ignoraise finish_iteration(
+        stop_crits, user_callback,
+        update_results, mop, mod, scaler, lin_cons, scaled_cons,
+        mod_vals, vals, vals_tmp, step_vals, filter, algo_opts;
+        it_index, indent
+    )
     
-    return InfeasibleStopping()
+    accept_trial_point!(vals, vals_tmp)
+    return nothing
 end
 
-
-function restoration_objective(mop, scaler, scaled_cons)
-
+function restoration_objective(mop, vals_tmp, scaler, scaled_cons)
+    @unpack hx, gx, Ex, Ax, Ex_min_c, Ax_min_b, ξ = vals_tmp
+    @unpack A, b, E, c = scaled_cons
     function objf(xr::Vector, grad::Vector)
         if !isempty(grad)
             @error "Restoration only supports derivative-free NLopt algorithms."
         end
 
-        hx = prealloc_nl_eq_constraints_vector(mop)
-        gx = prealloc_nl_ineq_constraints_vector(mop)
-        Eres = prealloc_lin_eq_constraints_vector(mop)
-        Ares = prealloc_lin_ineq_constraints_vector(mop)
-        Ex = deepcopy(Eres)
-        Ax = deepcopy(Ares)
-
-        ξr = similar(xr)
-        unscale!(ξr, scaler, xr)
-        r_eq = nl_eq_constraints!(hx, mop, ξr)
-        !isnothing(r_eq) && error(string(r_eq))
-        r_ineq = nl_ineq_constraints!(gx, mop, ξr)
-        !isnothing(r_ineq) && error(string(r_ineq))
-        lin_cons!(Eres, Ex, scaled_cons.A_b, xr)
-        lin_cons!(Ares, Ax, scaled_cons.E_c, xr)
+        unscale!(ξ, scaler, xr)
+        @ignoraise nl_eq_constraints!(hx, mop, ξ)
+        @ignoraise nl_ineq_constraints!(gx, mop, ξ)
+        lin_cons!(Ex_min_c, Ex, E, c, xr)
+        lin_cons!(Ax_min_b, Ax, A, b, xr)
         
-        return constraint_violation(hx, gx, Eres, Ares)
+        theta = constraint_violation(hx, gx, Ex_min_c, Ax_min_b)
+        return theta
     end
     return objf
 end
 
-function solve_restoration_problem(mop, scaler, scaled_cons, x, nl_opt)
+function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, nl_opt)
     n_vars = length(x)
 
 	opt = NLopt.Opt(nl_opt, n_vars)
 
-	opt.min_objective = restoration_objective(mop, scaler, scaled_cons)
+	opt.min_objective = restoration_objective(mop, vals_tmp, scaler, scaled_cons)
 
 	if !isnothing(scaled_cons.lb)
         opt.lower_bounds = scaled_cons.lb
@@ -68,7 +97,8 @@ function solve_restoration_problem(mop, scaler, scaled_cons, x, nl_opt)
     end
 	
     #src # TODO make some of these settings configurable
-    opt.xtol_rel = 1e-4
+    opt.xtol_rel = sqrt(eps(eltype(x)))
+    opt.xtol_abs = eps(eltype(x))
 	opt.maxeval = 50 * n_vars^2
 	opt.stopval = 0
 
@@ -77,34 +107,32 @@ function solve_restoration_problem(mop, scaler, scaled_cons, x, nl_opt)
 end
 
 function postproccess_restoration(
-    xr_opt, mop, mod, scaler, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, iter_meta, algo_opts
+    xr_opt, Δ, update_results, mop, mod, scaler, lin_cons, scaled_cons,
+    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
+    it_index, indent
 )
+    @unpack log_level = algo_opts
     ## the nonlinear problem was solved successfully.
     ## pretend, trial point was next iterate and set values
-    ## (it doesn't matter if we use `vals` or `vals_tmp`: in case of successfull restoration
-    ##  we have to set `vals` eventually. in case of unsuccessfull restoration, we have to 
-    ##  abort anyways)
-    copyto!(vals.x, xr_opt)
-    mop_code = eval_mop!(vals, mop, scaler)
-    !isnothing(mop_code) && return GenericStopping(mop_code, algo_opts.log_level)
+    copyto!(vals_tmp.x, xr_opt)
+    @ignoraise eval_mop!(vals_tmp, mop, scaler)
 
-    Δ = iter_meta.Δ_pre
+    @. update_results.diff_x = vals.x - vals_tmp.x
+    @. update_results.diff_fx = vals.fx - vals_tmp.fx
+    @. update_results.diff_fx_mod = mod_vals.fx
 
     ## the next point should be acceptable for the filter:
-    if is_acceptable(filter, vals.θ[], vals.Φ[])
+    if is_acceptable(filter, vals_tmp.theta_ref[], vals_tmp.phi_ref[])
         ## make models valid at `x + r` and set model values
         ## also compute normal step based on models
-        @. iter_meta.mod_vals_diff_vec = -mod_vals.fx
-        update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts)
-        eval_and_diff_mod!(mod_vals, mod, vals.x)
+        @ignoraise update_models!(mod, Δ, mop, scaler, vals_tmp, scaled_cons, algo_opts; indent)
+        @ignoraise eval_and_diff_mod!(mod_vals, mod, vals_tmp.x)
 
-        compute_normal_step!(
-            step_cache, step_vals.n, step_vals.xn, Δ, vals.θ[], 
-            vals.ξ, vals.x, vals.fx, vals.hx, vals.gx, 
-            mod_vals.fx, mod_vals.hx, mod_vals.gx, mod_vals.Dfx, mod_vals.Dhx, mod_vals.Dgx,
-            vals.Eres, vals.Ex, vals.Ares, vals.Ax, scaled_cons.lb, scaled_cons.ub, 
-            scaled_cons.E_c, scaled_cons.A_b, mod
+        @. update_results.diff_fx_mod -= mod_vals.fx
+
+        @ignoraise do_normal_step!(
+            step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals_tmp, mod_vals;
+            it_index, log_level, indent
         )
 
         @unpack c_delta, c_mu, mu, delta_max = algo_opts
@@ -129,17 +157,14 @@ function postproccess_restoration(
             end                
         end
         if n_is_compatible
-            iter_meta.point_has_changed = true
-            iter_meta.Δ_post = _Δ
-            @. step_vals.s = vals_tmp.x - vals.x
-            @. iter_meta.vals_diff_vec = vals_tmp.fx - vals.fx
-            @. iter_meta.mod_vals_diff_vec += mod_vals.fx 
-            iter_meta.args_diff_len = LA.norm(step_vals.s)
-            iter_meta.vals_diff_len = LA.norm(iter_meta.vals_diff_vec)
-            iter_meta.mod_vals_diff_len = LA.norm(iter_meta.mod_vals_diff_vec)
-            #accept_trial_point!(vals, vals_tmp)
+            finalize_update_results!(update_results, _Δ, RESTORATION, true)
+            
+            @. step_vals.n = vals_tmp.x - vals.x
+            @. step_vals.d = 0
+            @. step_vals.s = step_vals.n
+
             return nothing
         end
     end
-    return InfeasibleStopping()
+    return InfeasibleStopping(indent)
 end
