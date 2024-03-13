@@ -121,6 +121,18 @@ function CE.eval_op!(y::RVec, op::NonlinearParametricFunction, x::RVec, p)
     return nothing
 end
 
+function CE.eval_op!(y::RMat, op::NonlinearParametricFunction, x::RMat, p)
+    if !op.func_is_multi
+        error("NonlinearParametricFunction has `func_is_multi==false`. This method should not have been called.")
+    end
+    if op.func_iip 
+        op.func(y, x, p)
+    else
+        y .= op.func(x, p)
+    end
+    return nothing
+end
+
 function CE.eval_grads!(Dy, op::NonlinearParametricFunction, x, p)
     if !isnothing(op.grads)
         if op.grads_iip

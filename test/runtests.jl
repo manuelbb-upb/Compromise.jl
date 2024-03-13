@@ -7,6 +7,10 @@ end
 using Test
 using SafeTestsets
 #%%
+@safetestset "NonlinearParametricFunction Multi" begin
+    include("multifunc.jl")
+end
+
 @safetestset "Parallel RBF Opt Shared DB" begin
     using Compromise
   
