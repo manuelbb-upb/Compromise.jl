@@ -156,7 +156,7 @@ num2vec(x::Number)=[x,]
 function _rbf_eval(rbf::RBFSurrogate, x, params)
     x = vec2col(x)
     dim_x, n_x = size(x)
-    T = Base.promote_eltype(DEFAULT_FLOAT_TYPE, eltype(x))
+    T = Base.promote_type(DEFAULT_FLOAT_TYPE, eltype(x))
     y = zeros(T, rbf.dim_y, n_x)
     _rbf_eval!(y, rbf, x, params)
     return y
@@ -251,7 +251,7 @@ function _rbf_diff(rbf::RBFSurrogate, x::NumOrVec, params)
     x = num2vec(x)
     dim_x = length(x)
     @assert dim_x == rbf.dim_x
-    T = Base.promote_eltype(DEFAULT_FLOAT_TYPE, eltype(x))
+    T = Base.promote_type(DEFAULT_FLOAT_TYPE, eltype(x))
     Dy = zeros(T, dim_x, rbf.dim_y)
     _rbf_diff!(Dy, rbf, x, params)
     return Dy
