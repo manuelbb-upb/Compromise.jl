@@ -33,7 +33,7 @@ abstract type AbstractNonlinearOperatorNoParams <: AbstractNonlinearOperator end
 operator_has_name(::AbstractNonlinearOperator)::Bool=false
 operator_name(::AbstractNonlinearOperator)=error("No name.")
 
-operator_can_eval_multi(::AbstractNonlinearOperator)::Bool=false
+operator_chunk_size(::AbstractNonlinearOperator)::Integer=1
 operator_has_params(::AbstractNonlinearOperator)::Bool=false
 operator_can_partial(::AbstractNonlinearOperator)::Bool=false
 
@@ -305,9 +305,17 @@ function func_vals!(
     Y::RMat, op::AbstractNonlinearOperator, X::RMat, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
     n_X = size(X, 2)
+    n_Y = size(Y, 2)
+    @assert n_X == n_Y
     if n_X <= 0
         return nothing
     end
+    if n_X == 1
+        _Y = reshape(Y, :)
+        _X = reshape(X, :)
+        return func_vals!(_Y, op, _X, params, outputs)
+    end
+
     v0 = Val(0)
     @ignoraise N = request_func_calls(op, v0, n_X) 
     if N < size(Y, 2)
@@ -317,15 +325,34 @@ function func_vals!(
         _X = X
         _Y = Y
     end
-    
-    if operator_can_eval_multi(op)
+
+    cs = operator_chunk_size(op)
+    if N <= cs
         @ignoraise redirect_call(eval_op!, op, _X, params, outputs, _Y)
     else
+        if cs == 1
+            for (y, x) = zip(eachcol(_Y), eachcol(_X))
+                @ignoraise redirect_call(eval_op!, op, x, params, outputs, y)
+            end
+        else
+            i_start = 1
+            i_end = 0
+            while i_end < N
+                i_end = min(i_start + cs - 1, N)
+                y = @view(_Y[:, i_start:i_end])
+                x = @view(_X[:, i_start:i_end])
+                @ignoraise redirect_call(eval_op!, op, x, params, outputs, y)
+                i_start = i_end + 1
+            end
+        end
+        #=
         for (y, x) = zip(eachcol(_Y), eachcol(_X))
             @ignoraise redirect_call(eval_op!, op, x, params, outputs, y)
             #@ignoraise func_vals!(y, op, x, params, outputs)
         end
+        =#
     end
+    
     return nothing
 end
 
@@ -379,7 +406,7 @@ end
 abstract type AbstractSurrogateModel <: AbstractNonlinearOperator end
 operator_has_params(::AbstractSurrogateModel)=false
 operator_can_partial(::AbstractSurrogateModel)=false
-operator_can_eval_multi(::AbstractSurrogateModel)=false
+operator_chunk_size(::AbstractSurrogateModel)=1
 
 provides_grads(::AbstractSurrogateModel)=true
 
@@ -486,7 +513,7 @@ wrapped_operator(op::AbstractNonlinearOperatorWrapper)=error("`wrapped_operator`
 
 operator_has_params(op::AbstractNonlinearOperatorWrapper)=operator_has_params(wrapped_operator(op))
 operator_can_partial(op::AbstractNonlinearOperatorWrapper)=operator_can_partial(wrapped_operator(op))
-operator_can_eval_multi(op::AbstractNonlinearOperatorWrapper)=operator_can_eval_multi(wrapped_operator(op))
+operator_chunk_size(op::AbstractNonlinearOperatorWrapper)=operator_chunk_size(wrapped_operator(op))
 operator_has_name(op::AbstractNonlinearOperatorWrapper)=operator_has_name(wrapped_operator(op))
 operator_name(op::AbstractNonlinearOperatorWrapper)=operator_name(wrapped_operator(op))
 func_call_counter(op::AbstractNonlinearOperatorWrapper, v::Val)=func_call_counter(wrapped_operator(op), v)

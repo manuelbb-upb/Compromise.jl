@@ -39,7 +39,7 @@ Alternatively (or additionally), an `AbstractAutoDiffBackend` can be passed to
 compute the derivatives if the relevant field `isnothing`.
 """
 @with_kw struct NonlinearParametricFunction{
-    F, G, H, FG, FGH, B
+    F, G, H, FG, FGH, B, C<:Real
 } <: CE.AbstractNonlinearOperator
     func :: F
     grads :: G = nothing
@@ -47,7 +47,8 @@ compute the derivatives if the relevant field `isnothing`.
     func_and_grads :: FG = nothing
     func_and_grads_and_hessians :: FGH = nothing
     backend :: B = NoBackend()
-    func_is_multi :: Bool = false
+    
+    chunk_size :: C = 1
 
     func_iip :: Bool = false # true -> func!(y, x, p), false -> y = func(x, p)
     grads_iip :: Bool = false # true -> grads!(Dy, x, p), false -> Dy = grads(x, p)
@@ -75,7 +76,7 @@ end
 
 CE.operator_has_params(op::NonlinearParametricFunction)=true
 CE.operator_can_partial(op::NonlinearParametricFunction)=false
-CE.operator_can_eval_multi(op::NonlinearParametricFunction)=op.func_is_multi
+CE.operator_chunk_size(op::NonlinearParametricFunction)=op.chunk_size
 CE.operator_has_name(op::NonlinearParametricFunction)=!isnothing(op.name)
 CE.operator_name(op::NonlinearParametricFunction)=op.name
 
@@ -122,8 +123,8 @@ function CE.eval_op!(y::RVec, op::NonlinearParametricFunction, x::RVec, p)
 end
 
 function CE.eval_op!(y::RMat, op::NonlinearParametricFunction, x::RMat, p)
-    if !op.func_is_multi
-        error("NonlinearParametricFunction has `func_is_multi==false`. This method should not have been called.")
+    if op.chunk_size <= 1
+        error("NonlinearParametricFunction has chunk size <= 1. This method should not have been called.")
     end
     if op.func_iip 
         op.func(y, x, p)

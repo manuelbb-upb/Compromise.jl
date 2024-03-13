@@ -51,21 +51,32 @@ function CE.func_call_counter(sop::RecountedOperator, v::Val{2})
     isnothing(sop.num_hess_calls) && return CE.func_call_counter(sop.op, v)
     return sop.num_hess_calls
 end
-
 struct ScaledOperator{F<:AbstractFloat, O, S} <: AbstractNonlinearOperatorWrapper
     op :: O
     scaler :: S
     ## cache for unscaled site
-    ξ :: Vector{F}      # TODO (elastic) matrix for parallel evaluation
+    ξ :: Matrix{F}
 end
-CE.operator_can_eval_multi(::ScaledOperator)=false
 CE.wrapped_operator(sop::ScaledOperator)=sop.op
+function CE.operator_chunk_size(sop::ScaledOperator)
+    return min(size(sop.ξ, 2), CE.operator_chunk_size(sop.op))
+end
 
 function CE.preprocess_inputs(sop::ScaledOperator, x::RVec)
     @unpack scaler, ξ = sop
-    unscale!(ξ, scaler, x)
-    return ξ
+    _ξ = @view(ξ[:, 1])
+    unscale!(_ξ, scaler, x)
+    return _ξ
 end
+
+function CE.preprocess_inputs(sop::ScaledOperator, x::RMat)
+    @unpack scaler, ξ, op = sop
+    n_x = size(x, 2) 
+    _ξ = @view(ξ[:, 1:n_x])
+    unscale!(_ξ, scaler, x)
+    return _ξ
+end
+
 function CE.postprocess_grads!(Dy, sop::ScaledOperator, x_pre, x_post)
     @unpack scaler = sop
     scale_grads!(Dy, scaler)
@@ -454,8 +465,12 @@ scale_wrap_op(scaler::IdentityScaler, op, mcfg, dim_in, dim_out, T)=op
 function scale_wrap_op(
     scaler, op, mcfg, dim_in, dim_out, T;
 )
-    #ξ = zeros(T, dim_in, CE.num_parallel_evals(mcfg))
-    ξ = zeros(T, dim_in)
+    isnothing(op) && return op
+    op_cs = CE.operator_chunk_size(op)
+    if isinf(op_cs) || op_cs <= 0
+        op_cs = dim_in + 1
+    end
+    ξ = zeros(T, dim_in, op_cs)
     return ScaledOperator(op, scaler, ξ)
 end
 
