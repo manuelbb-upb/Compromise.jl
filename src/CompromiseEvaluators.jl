@@ -325,6 +325,11 @@ function func_vals!(
         _X = X
         _Y = Y
     end
+    if N == 1
+        _Y = reshape(Y, :)
+        _X = reshape(X, :)
+        return func_vals!(_Y, op, _X, params, outputs)
+    end
 
     cs = operator_chunk_size(op)
     if N <= cs
