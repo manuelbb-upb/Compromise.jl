@@ -245,7 +245,7 @@ ismissing(opt_vars(ret2))
 # Here is a remedy:
 mop.reset_call_counters=true
 ret1 = optimize(mop, [-2, .5])
-# Now, there is no budget left for a second run:
+# Now, there **is** budget left for a second run:
 ret2 = optimize(mop, [-2, -.5])
 !ismissing(opt_vars(ret2))
 
