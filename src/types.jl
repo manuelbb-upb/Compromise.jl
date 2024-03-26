@@ -23,10 +23,8 @@ abstract type AbstractMOPSurrogate end
 # Supertypes for objects that scale variables.
 # At the moment, we only use constant scaling, and I am unsure If we should distinguish between
 # constant and variable scaling.
-# Current scalers are defined in "src/affine_scalers.jl"
+# Current scalers are defined in "src/diagonal_scalers.jl"
 abstract type AbstractAffineScaler end
-abstract type AbstractConstantAffineScaler <: AbstractAffineScaler end
-abstract type AbstractDynamicAffineScaler <: AbstractAffineScaler end
 
 # ## Step Computation
 # Supertypes to configure and cache descent step computation.
@@ -43,11 +41,14 @@ abstract type AbstractStepCache end
 Configure the optimization by passing keyword arguments:
 $(TYPEDFIELDS)
 """
-Base.@kwdef struct AlgorithmOptions{_T <: Number, SC}
+Base.@kwdef struct AlgorithmOptions{_T <: Number, SC, SCALER_CFG_TYPE}
 	T :: Type{_T} = DEFAULT_FLOAT_TYPE
 
 	"Configuration object for descent and normal step computation."
     step_config :: SC = SteepestDescentConfig()
+
+	"Configuration to determine variable scaling (if model supports it). Either `:box` or `:none`."
+    scaler_cfg :: SCALER_CFG_TYPE = :box
 
 	require_fully_linear_models :: Bool = true
 
@@ -127,9 +128,6 @@ Base.@kwdef struct AlgorithmOptions{_T <: Number, SC}
 	"Exponent (for constraint violation) in the model decrease condition."
 	psi_theta :: _T = 2.0
 
-	"Configuration to determine variable scaling (if model supports it). Either `:box` or `:none`."
-    scaler_cfg :: Symbol = :box
-
 	"NLopt algorithm symbol for restoration phase."
     nl_opt :: Symbol = :GN_DIRECT_L_RAND    
 end
@@ -137,9 +135,10 @@ end
 ## to be sure that equality is based on field values:
 @batteries AlgorithmOptions selfconstructor=false
 
-function AlgorithmOptions{T, SC}(
+function AlgorithmOptions{T, SC, SCALER_CFG_TYPE}(
 	typekw :: Type,
     step_config :: SC,
+	scaler_cfg :: SCALER_CFG_TYPE,
 	require_fully_linear_models::Bool,
 	log_level::LogLevel,
 	max_iter::Integer,
@@ -169,14 +168,14 @@ function AlgorithmOptions{T, SC}(
 	mu :: Real,
 	kappa_theta :: Real,
 	psi_theta :: Real, 
-	scaler_cfg :: Symbol,
 	nl_opt :: Symbol,
-) where {T<:Real, SC}
-	@assert scaler_cfg == :box || scaler_cfg == :none
+) where {T<:Real, SC, SCALER_CFG_TYPE}
+	@assert scaler_cfg isa AbstractAffineScaler || scaler_cfg isa Val || scaler_cfg == :box || scaler_cfg == :none
 	@assert string(nl_opt)[2] == 'N' "Restoration algorithm must be derivative free."
-	return AlgorithmOptions{T, SC}(
+	return AlgorithmOptions{T, SC, SCALER_CFG_TYPE}(
 		T,
 		step_config,
+		scaler_cfg,
 		require_fully_linear_models,
 		log_level,
 		max_iter,
@@ -206,12 +205,11 @@ function AlgorithmOptions{T, SC}(
 		mu,
 		kappa_theta,
 		psi_theta, 
-		scaler_cfg,
 		nl_opt,
 	)
 end
-function AlgorithmOptions(T::Type{_T}, step_config::SC, args...) where {_T <: Real, SC}
-	return AlgorithmOptions{T, SC}(T, step_config, args...)
+function AlgorithmOptions(T::Type{_T}, step_config::SC, scaler_cfg::ST, args...) where {_T <: Real, SC, ST}
+	return AlgorithmOptions{T, SC, ST}(T, step_config, scaler_cfg, args...)
 end
 function AlgorithmOptions{T}(; kwargs...) where T<:Real
 	AlgorithmOptions(; T, kwargs...)
@@ -337,13 +335,15 @@ function StepValueArrays(n_vars, n_objfs, T)
 end
 
 struct LinearConstraints{
-	LB<:Union{Nothing, AbstractVector}, 
-	UB<:Union{Nothing, AbstractVector},
-	AType<:Union{Nothing, AbstractMatrix}, 
-	BType<:Union{Nothing, AbstractVector}, 
-	EType<:Union{Nothing, AbstractMatrix}, 
-	CType<:Union{Nothing, AbstractVector}, 
+	F<:Number,
+	LB<:Union{Nothing, <:AbstractVector{F}}, 
+	UB<:Union{Nothing, <:AbstractVector{F}},
+	AType<:Union{Nothing, <:AbstractMatrix{F}}, 
+	BType<:Union{Nothing, <:AbstractVector{F}}, 
+	EType<:Union{Nothing, <:AbstractMatrix{F}}, 
+	CType<:Union{Nothing, <:AbstractVector{F}}, 
 }
+	_F :: Type{F}
 	n_vars :: Int
     lb :: LB
     ub :: UB
@@ -351,6 +351,36 @@ struct LinearConstraints{
 	b :: BType
 	E :: EType
 	c :: CType
+end
+float_type(::LinearConstraints{F}) where F=F
+
+function universal_copy!(
+	scaled_cons::LinearConstraints, lin_cons::LinearConstraints)
+    for fn in fieldnames(LinearConstraints)
+        universal_copy!(
+            getfield(scaled_cons, fn), 
+            getfield(lin_cons, fn)
+        )
+    end
+    return nothing
+end
+
+function init_lin_cons(mop)
+	F = float_type(mop)
+    
+	lb = ensure_float_type(lower_var_bounds(mop), F)
+    ub = ensure_float_type(upper_var_bounds(mop), F)
+
+    if !var_bounds_valid(lb, ub)
+        error("Variable bounds inconsistent.")
+    end
+
+    A = ensure_float_type(lin_ineq_constraints_matrix(mop), F)
+    b = ensure_float_type(lin_ineq_constraints_vector(mop), F)
+    E = ensure_float_type(lin_eq_constraints_matrix(mop), F)
+    c = ensure_float_type(lin_eq_constraints_vector(mop), F)
+
+    return LinearConstraints(F, dim_vars(mop), lb, ub, A, b, E, c)
 end
 
 @enum IT_STAT begin

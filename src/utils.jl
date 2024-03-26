@@ -1,3 +1,51 @@
+ensure_float_type(::Nothing, ::Type)=nothing
+function ensure_float_type(arr::AbstractArray{F}, ::Type{F}) where F
+	return arr
+end
+
+function ensure_float_type(arr::AbstractArray{F}, ::Type{T}) where {F,T}
+	return T.(arr)
+end
+
+macro forward(type_ex, call_ex)
+	@assert Meta.isexpr(type_ex, :(.), 2)
+	type_name, wrapped_fn_name = type_ex.args
+    @assert call_ex.head == :call
+    func_name = call_ex.args[1]
+    func_args = Any[]
+    kwargs = nothing
+    for arg_ex in call_ex.args[2:end]
+        if arg_ex isa Symbol
+            push!(func_args, arg_ex)
+        elseif Meta.isexpr(arg_ex, :(::))
+			if length(arg_ex.args) < 2
+				pushfirst!(arg_ex.args, gensym())
+			end
+			vt = arg_ex.args[2]
+            if vt == type_name
+                push!(func_args, :(getfield($(arg_ex.args[1]), $(wrapped_fn_name))))
+            else
+                push!(func_args, arg_ex.args[1])
+            end
+        elseif Meta.isexpr(arg_ex, :parameters)
+            kwargs = arg_ex.args
+        end
+    end
+    if isnothing(kwargs)
+        return quote 
+            function $(func_name)($(call_ex.args[2:end]...))
+                return $(func_name)($(func_args...))
+            end
+        end |> esc
+    else
+        return quote 
+            function $(func_name)($(call_ex.args[2:end]...))
+                return $(func_name)($(func_args...); $(kwargs...))
+            end
+        end |> esc
+    end
+end
+
 function vec2str(x, max_entries=typemax(Int), digits=10)
 	x_end = min(length(x), max_entries)
 	_x = x[1:x_end]
@@ -11,8 +59,6 @@ function vec2str(x, max_entries=typemax(Int), digits=10)
 	return x_str
 end
 
-promote_modulo_nothing(T1, ::Type{Nothing})=T1
-promote_modulo_nothing(T1, T2)=Base.promote_type(T1, eltype(T2))
 macro ignoraise(ex, loglevelex=nothing)
 	has_lhs = false
 	if Meta.isexpr(ex, :(=), 2)

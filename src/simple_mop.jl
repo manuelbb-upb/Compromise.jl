@@ -65,7 +65,8 @@ end
 function CE.preprocess_inputs(sop::ScaledOperator, x::RVec)
     @unpack scaler, ξ = sop
     _ξ = @view(ξ[:, 1])
-    unscale!(_ξ, scaler, x)
+    copyto!(_ξ, x)
+    apply_scaling!(_ξ, scaler, InverseScaling())
     return _ξ
 end
 
@@ -73,7 +74,8 @@ function CE.preprocess_inputs(sop::ScaledOperator, x::RMat)
     @unpack scaler, ξ, op = sop
     n_x = size(x, 2) 
     _ξ = @view(ξ[:, 1:n_x])
-    unscale!(_ξ, scaler, x)
+    copyto!(_ξ, x)
+    apply_scaling!(_ξ, scaler, InverseScaling())
     return _ξ
 end
 
@@ -348,7 +350,6 @@ end
 # ### Interface Implementation
 # Define the most basic Getters:
 float_type(::SimpleMOP) = Float64
-model_type(::SimpleMOP) = SimpleMOPSurrogate
 
 initial_vars(mop::SimpleMOP) = mop.x0
 
@@ -478,7 +479,7 @@ end
 # as easy as possible. 
 # Modellers should always assume working in the scaled domain and not be bothered
 # with transformations...
-function init_models(mop::SimpleMOP, n_vars, scaler; kwargs...)
+function init_models(mop::SimpleMOP, scaler; kwargs...)
     d_objf = dim_objectives(mop)
     d_nl_eq = dim_nl_eq_constraints(mop)
     d_nl_ineq = dim_nl_ineq_constraints(mop)

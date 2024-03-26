@@ -24,7 +24,10 @@ function do_restoration(
     end
 
     if ret != :SUCCESS
-        if dim_nl_eq_constraints(mop) > 0 || dim_nl_ineq_constraints(mop) > 0
+        if (
+            (dim_nl_eq_constraints(mop) > 0 || dim_nl_ineq_constraints(mop) > 0) ||
+            ret == :TODO
+        )
             @logmsg algo_opts.log_level "$(pad_str) Trying to solve nonlinear subproblem"
             x0 = ret == :NONAN ? step_vals.xn : vals.x
 	        (θ_opt, xr_opt, ret) = solve_restoration_problem(
@@ -35,6 +38,7 @@ function do_restoration(
             ret = :SUCCESS
         end
     end
+    
     if ret in (
         :SUCCESS, 
         :STOPVAL_REACHED, 
@@ -70,7 +74,8 @@ function restoration_objective(mop, vals_tmp, scaler, scaled_cons)
             @error "Restoration only supports derivative-free NLopt algorithms."
         end
 
-        unscale!(ξ, scaler, xr)
+        copyto!(ξ, xr)
+        apply_scaling!(ξ, scaler, InverseScaling())
         @ignoraise nl_eq_constraints!(hx, mop, ξ)
         @ignoraise nl_ineq_constraints!(gx, mop, ξ)
         lin_cons!(Ex_min_c, Ex, E, c, xr)

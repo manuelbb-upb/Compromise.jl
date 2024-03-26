@@ -40,9 +40,6 @@ initialize(mop::AbstractMOP)=mop
 # The optional function `float_type` returns the type of result and derivative vectors:
 float_type(::AbstractMOP)::Type{<:AbstractFloat}=DEFAULT_FLOAT_TYPE
 
-# We would also like to deterministically query the expected surrogate model types:
-model_type(::AbstractMOP)::Type{<:AbstractMOPSurrogate}=AbstractMOPSurrogate
-
 # Below functions are used to query dimension information.
 dim_vars(::AbstractMOP)::Int=0 
 dim_objectives(::AbstractMOP)::Int=0            # mandatory
@@ -94,7 +91,6 @@ end
 # !!! note
 #     All evaluation and differentiation methods that you see below should always 
 #     return `nothing`, **unless** you want to stop early.
-#     Then return something else, for example a string.
 
 # Evaluation of nonlinear objective functions requires the following method:
 function eval_objectives!(y::RVec, mop::M, x::RVec) where {M<:AbstractMOP}

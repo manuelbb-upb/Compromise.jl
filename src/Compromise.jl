@@ -43,7 +43,7 @@ include("mop.jl")
 include("models.jl")
 
 # Tools to scale and unscale variables:
-include("affine_scalers.jl")
+include("diagonal_scalers.jl")
 # Implementations of Filter(s):
 include("filter.jl")
 # Types and methods to compute inexact normal steps and descent steps:
@@ -117,49 +117,19 @@ function init_scaler(scaler_cfg::Symbol, lin_cons)
     return init_scaler(Val(scaler_cfg), lin_cons)
 end
 
+function init_scaler(::Val, lin_cons)
+    N = lin_cons.n_vars
+    F = float_type(lin_cons)
+    return IdentityScaler{N,F}()
+end
+
 function init_scaler(::Val{:box}, lin_cons)
     @unpack n_vars, lb, ub = lin_cons
-    return init_box_scaler(lb, ub, n_vars)
-end
-init_scaler(::Val{:none}, lin_cons) = IdentityScaler(lin_cons.n_vars)
-
-function init_lin_cons(mop)
-    lb = lower_var_bounds(mop)
-    ub = upper_var_bounds(mop)
-
-    if !var_bounds_valid(lb, ub)
-        error("Variable bounds inconsistent.")
-    end
-
-    A = lin_ineq_constraints_matrix(mop)
-    b = lin_ineq_constraints_vector(mop)
-    E = lin_eq_constraints_matrix(mop)
-    c = lin_eq_constraints_vector(mop)
-
-    return LinearConstraints(dim_vars(mop), lb, ub, A, b, E, c)
+    F = float_type(lin_cons)
+    return init_box_scaler(lb, ub, n_vars, F)
 end
 
-function scale_lin_cons!(trgt, scaler, lin_cons)
-    @unpack A, b, E, c, lb, ub = lin_cons
-    
-    scale!(trgt.lb, scaler, lb)
-    scale!(trgt.ub, scaler, ub)
-    scale_eq!(trgt.A, trgt.b, scaler, A, b)
-    scale_eq!(trgt.E, trgt.c, scaler, E, c)
-    return nothing
-end
-
-function reset_lin_cons!(scaled_cons::LinearConstraints, lin_cons::LinearConstraints)
-    for fn in fieldnames(LinearConstraints)
-        universal_copy!(
-            getfield(scaled_cons, fn), 
-            getfield(lin_cons, fn)
-        )
-    end
-    return nothing
-end
 function update_lin_cons!(scaled_cons, scaler, lin_cons)
-    reset_lin_cons!(scaled_cons, lin_cons)
     scale_lin_cons!(scaled_cons, scaler, lin_cons)
     return nothing
 end
@@ -232,7 +202,8 @@ function eval_mop!(fx, hx, gx, Ex_min_c, Ex, Ax_min_b, Ax, theta_ref, phi_ref, m
 end
 
 function eval_mop!(vals, mop, scaler)
-    unscale!(vals.ξ, scaler, vals.x)
+    copyto!(vals.ξ, vals.x)
+    apply_scaling!(vals.ξ, scaler, InverseScaling())
     return eval_mop!(vals, mop)
 end
 function eval_mop!(vals, mop)
@@ -386,7 +357,7 @@ function initialize_structs(
     ## pre-allocate surrogates `mod`
     ## (they are not trained yet)
     mod = init_models(
-        mop, n_vars, scaler; 
+        mop, scaler; 
         delta_max = algo_opts.delta_max,
         require_fully_linear = algo_opts.require_fully_linear_models
     )
@@ -397,7 +368,8 @@ function initialize_structs(
     ## (perform 1 evaluation to set values already)
     vals.ξ .= ξ0
     project_into_box!(vals.ξ, lin_cons)
-    scale!(vals.x, scaler, vals.ξ)
+    copyto!(vals.x , vals.ξ)
+    apply_scaling!(vals.x, scaler, ForwardScaling())
     @ignoraise eval_mop!(vals, mop)
 
     vals_tmp = deepcopy(vals)

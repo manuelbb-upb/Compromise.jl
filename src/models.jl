@@ -22,7 +22,7 @@ depends_on_radius(::AbstractMOPSurrogate)::Bool=true
 # Define a function to return a model for some MOP.
 # The model does not yet have to be trained.
 init_models(
-    mop::AbstractMOP, n_vars, scaler; 
+    mop::AbstractMOP, scaler; 
     delta_max::Union{Number,AbstractVector{<:Number}},
     require_fully_linear::Bool=true,
 )::AbstractMOPSurrogate=nothing
@@ -30,10 +30,7 @@ init_models(
 #
 # !!! note
 #     This method should always return `nothing`, **unless** you want to stop the algorithm.
-#     Every other return value stops the algoritm and  `GenericStopping(ret_val)` is returned
-#     as the stop code.
-#     The constructor of `GenericStopping` logs the `ret_val`, so you could return a string
-#     explaining the reason for stopping.
+
 function update_models!(
     mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts;
     indent::Int
