@@ -26,6 +26,12 @@ constraints are violated.
 I don't really keep up a consistent versioning scheme.
 But the changes in this section have been significant enough to warrant some comments.
 
+#### Version 0.0.3
+Internally, there have been major changes regarding the caching of MOP and surrogate result values.
+Previously, separate preallocation functions were required (e.g., `prealloc_fx` …).
+Now, there is only `init_value_caches`, and instead of accessing the 
+cache arrays as properties, there are dedicated getter methods.
+
 #### Version 0.0.2
 
 ##### RBF Surrogate Models
