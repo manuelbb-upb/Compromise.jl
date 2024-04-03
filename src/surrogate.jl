@@ -187,7 +187,11 @@ end
 #     in-place-functions. 
 
 # Here is what is called later on:
-"Evaluate the models `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
+"""
+    eval_mod!(mod_cache::AbstractMOPSurrogateCache, mod::AbstractMOPSurrogate, x)
+
+Evaluate `mod` at `x` and update cache `mod_cache`.
+"""
 function eval_mod!(mod_vals::AbstractMOPSurrogateCache, mod::AbstractMOPSurrogate, x)
     Base.copyto!(cached_x(mod_vals), x)
     @ignoraise objectives!(cached_fx(mod_vals), mod, x)
