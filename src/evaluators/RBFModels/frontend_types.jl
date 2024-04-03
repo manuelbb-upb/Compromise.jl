@@ -52,6 +52,8 @@
     @assert isnothing(poly_deg) || poly_deg in (0,1)
 end
 
+@batteries RBFConfig selfconstructor=false
+
 Base.@kwdef struct RBFParameters{T<:Real}
     ## meta data for `Base.show`
     dim_x :: Int

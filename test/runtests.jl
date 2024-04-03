@@ -10,7 +10,11 @@ using SafeTestsets
 @safetestset "NonlinearParametricFunction Multi" begin
     include("multifunc.jl")
 end
-
+#%%
+@safetestset "SimpleMOP and caches" begin
+    include("simple_mop.jl")
+end
+#%%
 @safetestset "Parallel RBF Opt Shared DB" begin
     using Compromise
   

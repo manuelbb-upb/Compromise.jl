@@ -46,7 +46,7 @@ cached_hx(simple_cache::SIMPLE_CACHE)=simple_cache.hx
 cached_gx(simple_cache::SIMPLE_CACHE)=simple_cache.gx
 
 cached_ξ(simple_cache::SimpleValueCache)=simple_cache.ξ
-cached_Ex(simple_cache::SimpleValueCache)=simple_cache.Ax
+cached_Ex(simple_cache::SimpleValueCache)=simple_cache.Ex
 cached_Ax(simple_cache::SimpleValueCache)=simple_cache.Ax
 cached_Ex_min_c(simple_cache::SimpleValueCache)=simple_cache.Ex_min_c
 cached_Ax_min_b(simple_cache::SimpleValueCache)=simple_cache.Ax_min_b
