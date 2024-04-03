@@ -163,7 +163,7 @@ function evaluate_stopping_criterion(
     vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
     it_index, indent::Int
 )
-    @unpack x = vals
+    x = cached_x(vals)
     @unpack norm2_x, point_has_changed = update_results
     if !crit.only_if_point_changed || point_has_changed
         if norm2_x <= crit.tol * LA.norm(x)
@@ -229,7 +229,7 @@ function evaluate_stopping_criterion(
     vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
     it_index, indent::Int
 )
-    @unpack fx = vals
+    fx = cached_fx(vals)
     @unpack norm2_fx, point_has_changed = update_results
     if !crit.only_if_point_changed || point_has_changed
         if norm2_fx <= crit.tol * LA.norm(fx)
@@ -307,7 +307,7 @@ function evaluate_stopping_criterion(
 end
 function crit_abs_tol_stopping(crit, step_vals, vals, it_index, algo_opts; indent)
     χ = abs(step_vals.crit_ref[])
-    θ = abs(vals.theta_ref[])
+    θ = abs(cached_theta(vals))
     @unpack log_level = algo_opts
     @unpack crit_tol, theta_tol = crit
     if crit_abs_tol_stopping(χ, θ, crit_tol, theta_tol, log_level, it_index)

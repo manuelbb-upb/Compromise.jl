@@ -11,6 +11,10 @@ function vec2str(x, max_entries=typemax(Int), digits=10)
 	return x_str
 end
 
+function array(T::Type, size...)
+  return Array{T}(undef, size...)
+end
+
 promote_modulo_nothing(T1, ::Type{Nothing})=T1
 promote_modulo_nothing(T1, T2)=Base.promote_type(T1, eltype(T2))
 macro ignoraise(ex, loglevelex=nothing)

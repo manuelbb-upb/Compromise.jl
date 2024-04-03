@@ -510,17 +510,20 @@ function update_models!(
     mod::SimpleMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts;
     indent::Int
 )
-    @unpack x, fx, gx, hx = vals
+    x = cached_x(vals)
     @unpack lb, ub = scaled_cons
     @unpack log_level = algo_opts
     if !isnothing(mod.mod_objectives)
-        @ignoraise update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; log_level, indent)
+        @ignoraise update!(
+            mod.mod_objectives, mod.objectives, Δ, x, cached_fx(vals), lb, ub; log_level, indent)
     end
     if !isnothing(mod.mod_nl_eq_constraints)
-        @ignoraise update!(mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, hx, lb, ub; log_level, indent)
+        @ignoraise update!(
+            mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, cached_hx(vals), lb, ub; log_level, indent)
     end
     if !isnothing(mod.mod_nl_ineq_constraints)
-        @ignoraise update!(mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, gx, lb, ub; log_level, indent)
+        @ignoraise update!(
+            mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, cached_gx(vals), lb, ub; log_level, indent)
     end
     return nothing
 end
@@ -559,16 +562,21 @@ function universal_copy!(
 end
 
 function process_trial_point!(mod::SimpleMOPSurrogate, vals_trial, update_results)
-    xtrial = vals_trial.x
+    xtrial = cached_x(vals_trial)
     isnext = update_results.point_has_changed
     if !isnothing(mod.mod_objectives)
-        CE.process_trial_point!(mod.mod_objectives, xtrial, vals_trial.fx, isnext)
+        CE.process_trial_point!(
+            mod.mod_objectives, xtrial, cached_fx(vals_trial), isnext)
     end
     if !isnothing(mod.mod_nl_eq_constraints)
-        CE.process_trial_point!(mod.mod_nl_eq_constraints, xtrial, vals_trial.hx, isnext)
+        CE.process_trial_point!(
+            mod.mod_nl_eq_constraints, xtrial, cached_hx(vals_trial), isnext)
     end
     if !isnothing(mod.mod_nl_ineq_constraints)
-        CE.process_trial_point!(mod.mod_nl_ineq_constraints, xtrial, vals_trial.gx, isnext)
+        CE.process_trial_point!(
+            mod.mod_nl_ineq_constraints, xtrial, cached_gx(vals_trial), isnext)
     end
     return nothing
 end
+
+include("simple_caches.jl")

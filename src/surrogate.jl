@@ -1,4 +1,3 @@
-
 # # AbstractMOPSurrogate Interface
 # The speciality of our algorithm is its use of local surrogate models.
 # These should subtype and implement `AbstractMOPSurrogate`.
@@ -167,61 +166,17 @@ function vals_diff_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurro
     eval_and_grads_nl_ineq_constraints!(y, Dy, mod, x)
 end
 
-# Here is what is called later on:
-"Evaluate the models `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
-function eval_mod!(mod_vals, mod, x)
-    @unpack fx, hx, gx = mod_vals
-    @ignoraise objectives!(fx, mod, x)
-    @ignoraise nl_eq_constraints!(hx, mod, x)
-    @ignoraise nl_ineq_constraints!(hx, mod, x)
+# ### Pre-Allocation
+# 
+# Just like with an `AbstractMOP`, we want to pre-allocate and modify
+# evaluation arrays.
+# To this end, `init_value_caches(mod)` has to be implemented.
+# The returned object should be of type `AbstractMOPCache` and 
+# adhere to the caching interface.
+# Whenever arrays are returned by a getter, expect them to be modified in place.
+
+function init_value_caches(::AbstractMOPSurrogate)::AbstractMOPSurrogateCache
     return nothing
-end
-
-"Evaluate the model gradients of `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
-function diff_mod!(mod_vals, mod, x)
-    @unpack Dfx, Dhx, Dgx = mod_vals
-    @ignoraise diff_objectives!(Dfx, mod, x)
-    @ignoraise diff_nl_eq_constraints!(Dhx, mod, x)
-    @ignoraise diff_nl_ineq_constraints!(hx, mod, x)
-    return nothing
-end
-
-"Evaluate and differentiate `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
-function eval_and_diff_mod!(mod_vals, mod, x)
-    @unpack fx, hx, gx, Dfx, Dhx, Dgx = mod_vals
-    @ignoraise vals_diff_objectives!(fx, Dfx, mod, x)
-    @ignoraise vals_diff_nl_eq_constraints!(hx, Dhx, mod, x)
-    @ignoraise vals_diff_nl_ineq_constraints!(gx, Dgx, mod, x)
-    return nothing
-end
-
-# ### Gradient Pre-Allocation
-# We also would like to have pre-allocated gradient arrays ready:
-## These are defined below (and I put un-specific definitions here for the Linter)
-function prealloc_objectives_grads(mod) end
-function prealloc_nl_eq_constraints_grads(mod) end
-function prealloc_nl_ineq_constraints_grads(mod) end
-for (dim_func, func_suffix) in (
-    (:dim_objectives, :objectives_grads),
-    (:dim_nl_eq_constraints, :nl_eq_constraints_grads),
-    (:dim_nl_ineq_constraints, :nl_ineq_constraints_grads),
-)   
-    func_name = Symbol("prealloc_", func_suffix)
-    yoink_name = Symbol("yoink_", func_suffix)
-    @eval begin
-        function $(func_name)(mod::AbstractMOPSurrogate)
-            n_out = $(dim_func)(mod)
-            n_in = dim_vars(mod)
-            T = float_type(mod)
-            return Matrix{T}(undef, n_in, n_out)
-        end
-
-        function $(yoink_name)(mod::AbstractMOPSurrogate)
-            y = $(func_name)(mod) :: RMat
-            @assert eltype(y) == float_type(mod) "Vector eltype does not match problem float type."
-            return y
-        end
-    end
 end
 
 # !!! note 
@@ -230,3 +185,32 @@ end
 #     external nonlinear tools, but I don't need them yet.
 #     Defining the latter methods would simply call `prealloc_XXX` first and then use some
 #     in-place-functions. 
+
+# Here is what is called later on:
+"Evaluate the models `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
+function eval_mod!(mod_vals::AbstractMOPSurrogateCache, mod::AbstractMOPSurrogate, x)
+    Base.copyto!(cached_x(mod_vals), x)
+    @ignoraise objectives!(cached_fx(mod_vals), mod, x)
+    @ignoraise nl_eq_constraints!(cached_hx(mod_vals), mod, x)
+    @ignoraise nl_ineq_constraints!(cached_gx(mod_vals), mod, x)
+    return nothing
+end
+
+"Evaluate the model gradients of `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
+function diff_mod!(mod_vals::AbstractMOPSurrogateCache, mod::AbstractMOPSurrogate, x)
+    Base.copyto!(cached_Dx(mod_vals), x)
+    @ignoraise diff_objectives!(cached_Dfx(mod_vals), mod, x)
+    @ignoraise diff_nl_eq_constraints!(cached_Dhx(mod_vals), mod, x)
+    @ignoraise diff_nl_ineq_constraints!(cached_Dhx(mod_vals), mod, x)
+    return nothing
+end
+
+"Evaluate and differentiate `mod` at `x` and store results in `mod_vals::SurrogateValueArrays`."
+function eval_and_diff_mod!(mod_vals::AbstractMOPSurrogateCache, mod, x)
+    Base.copyto!(cached_x(mod_vals), x)
+    Base.copyto!(cached_Dx(mod_vals), x)
+    @ignoraise vals_diff_objectives!(cached_fx(mod_vals), cached_Dfx(mod_vals), mod, x)
+    @ignoraise vals_diff_nl_eq_constraints!(cached_hx(mod_vals), cached_Dhx(mod_vals), mod, x)
+    @ignoraise vals_diff_nl_ineq_constraints!(cached_gx(mod_vals), cached_Dgx(mod_vals), mod, x)
+    return nothing
+end

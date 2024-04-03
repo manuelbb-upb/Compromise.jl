@@ -279,7 +279,7 @@ end
         vals, filter, algo_opts;
         indent::Int, it_index::Int, delta::Real
     )
-        if vals.x ≈ [π, -ℯ]
+        if Compromise.cached_x(vals) ≈ [π, -ℯ]
             return crit
         end
         return nothing

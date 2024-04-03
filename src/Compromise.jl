@@ -21,6 +21,7 @@ import Reexport: @reexport
 import StructHelpers: @batteries
 
 # With the external dependencies available, we can include global type definitions and constants:
+include("value_caches.jl")
 include("types.jl")
 include("utils.jl")
 
@@ -40,7 +41,8 @@ import NLopt
 # Abstract types and interfaces to handle multi-objective optimization problems...
 include("mop.jl")
 # ... and how to model them:
-include("models.jl")
+include("surrogate.jl")
+# The cache interface is defined separately:
 
 # Tools to scale and unscale variables:
 include("affine_scalers.jl")
@@ -164,82 +166,14 @@ function update_lin_cons!(scaled_cons, scaler, lin_cons)
     return nothing
 end
 
-constraint_violation(::Nothing, type_val::Val)=0
-constraint_violation(ex::RVec, ::Val{:eq})=maximum(abs.(ex); init=0)
-constraint_violation(ix::RVec, ::Val{:ineq})=max(maximum(ix; init=0), 0)
-
-function constraint_violation(hx, gx, Ex_min_c, Ax_min_b)
-    return max(
-        constraint_violation(hx, Val(:eq)),
-        constraint_violation(gx, Val(:ineq)),
-        constraint_violation(Ex_min_c, Val(:eq)),
-        constraint_violation(Ax_min_b, Val(:ineq)),
-        0
-    )
-end
-
-function init_vals(mop)
-    T = float_type(mop)
-    
-    ## initialize unscaled and scaled variables
-    n_vars = dim_vars(mop)
-    ξ = Vector{T}(undef, n_vars)
-    x = similar(ξ)
-
-    ## pre-allocate value arrays
-    fx = yoink_objectives_vector(mop)
-    hx = yoink_nl_eq_constraints_vector(mop)
-    gx = yoink_nl_ineq_constraints_vector(mop)
-    Ex = yoink_lin_eq_constraints_vector(mop)
-    Ax = yoink_lin_ineq_constraints_vector(mop)
-    Ax_min_b = deepcopy(Ax)
-    Ex_min_c = deepcopy(Ex)
-
-    ## constraint violation and filter value
-    theta_ref = Ref(zero(T))
-    phi_ref = Ref(zero(T))
-
-    return ValueArrays(; ξ, x, fx, hx, gx, Ax, Ex, Ax_min_b, Ex_min_c, theta_ref, phi_ref)
-end
-
 function init_step_vals(vals)
-    T = eltype(vals.x)
-    return StepValueArrays(vals.n_vars, vals.dim_objectives, T)
+    T = float_type(vals) 
+    return StepValueArrays(
+        dim_vars(vals), 
+        dim_objectives(vals), 
+        T
+    )
 end 
-
-function init_model_vals(mod)
-    ## pre-allocate value arrays
-    fx = yoink_objectives_vector(mod)
-    hx = yoink_nl_eq_constraints_vector(mod)
-    gx = yoink_nl_ineq_constraints_vector(mod)
-    Dfx = yoink_objectives_grads(mod)
-    Dhx = yoink_nl_eq_constraints_grads(mod)
-    Dgx = yoink_nl_ineq_constraints_grads(mod)
-    return SurrogateValueArrays(fx, hx, gx, Dfx, Dhx, Dgx)
-end
-
-function eval_mop!(fx, hx, gx, Ex_min_c, Ex, Ax_min_b, Ax, theta_ref, phi_ref, mop, ξ)
-    @ignoraise objectives!(fx, mop, ξ)
-    @ignoraise nl_eq_constraints!(hx, mop, ξ)
-    @ignoraise nl_ineq_constraints!(gx, mop, ξ)
-    lin_eq_constraints!(Ex_min_c, Ex, mop, ξ)
-    lin_ineq_constraints!(Ax_min_b, Ax, mop, ξ)
-
-    theta_ref[] = constraint_violation(hx, gx, Ex_min_c, Ax_min_b)
-    phi_ref[] = maximum(fx) # TODO this depends on the type of filter, but atm there is only StandardFilter
-
-    return nothing
-end
-
-function eval_mop!(vals, mop, scaler)
-    unscale!(vals.ξ, scaler, vals.x)
-    return eval_mop!(vals, mop)
-end
-function eval_mop!(vals, mop)
-    ## evaluate problem at unscaled site
-    @unpack ξ, x, fx, hx, gx, Ex_min_c, Ex, Ax, Ax_min_b, theta_ref, phi_ref = vals 
-    return eval_mop!(fx, hx, gx, Ex_min_c, Ex, Ax_min_b, Ax, theta_ref, phi_ref, mop, ξ)
-end
 
 function compatibility_test_rhs(c_delta, c_mu, mu, Δ)
     return c_delta * min(Δ, c_mu + Δ^(1+mu))
@@ -337,7 +271,7 @@ function optimize_with_algo(
             algo_opts
         ) = init_result
 
-        _ξ0 = copy(vals.ξ)
+        _ξ0 = copy(cached_ξ(vals))
 
         stop_code = nothing
         @unpack log_level = algo_opts
@@ -392,19 +326,19 @@ function initialize_structs(
     )
 
     ## caches for working arrays x, fx, hx, gx, Ex, Ax, …
-    vals = init_vals(mop)
+    vals = init_value_caches(mop)
 
     ## (perform 1 evaluation to set values already)
-    vals.ξ .= ξ0
-    project_into_box!(vals.ξ, lin_cons)
-    scale!(vals.x, scaler, vals.ξ)
+    Base.copyto!(cached_ξ(vals), ξ0)
+    project_into_box!(cached_ξ(vals), lin_cons)
+    scale!(cached_x(vals), scaler, cached_ξ(vals))
     @ignoraise eval_mop!(vals, mop)
 
     vals_tmp = deepcopy(vals)
      
-    ## chaches for surrogate value vectors fx, hx, gx, Dfx, Dhx, Dgx
+    ## caches for surrogate value vectors fx, hx, gx, Dfx, Dhx, Dgx
     ## (values not set yet, only after training)
-    mod_vals = init_model_vals(mod)
+    mod_vals = init_value_caches(mod)
  
     ## pre-allocate working arrays for normal and descent step calculation:
     step_vals = init_step_vals(vals)
@@ -463,9 +397,10 @@ function do_iteration!(
     #  ITERATION $(it_index).
     ###########################
     Δ = $(Δ)
-    θ = $(vals.theta_ref[])
-    x = $(vec2str(vals.ξ))
-    fx = $(vec2str(vals.fx))
+    θ = $(cached_theta(vals))
+    ξ = $(pretty_row_vec(cached_ξ(vals)))
+    x = $(pretty_row_vec(cached_x(vals)))
+    fx = $(pretty_row_vec(cached_fx(vals)))
     """
 
     ## The models are valid
@@ -480,7 +415,7 @@ function do_iteration!(
     if !models_valid
         @logmsg log_level "* Updating Surrogates."
         @ignoraise update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts; indent=0)
-        @ignoraise eval_and_diff_mod!(mod_vals, mod, vals.x)
+        @ignoraise eval_and_diff_mod!(mod_vals, mod, cached_x(vals))
     end
     @ignoraise do_normal_step!(
         step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
@@ -492,7 +427,7 @@ function do_iteration!(
     if !n_is_compatible
         ## Try to do a restoration
         @logmsg log_level "* Normal step incompatible. Trying restoration."
-        add_to_filter!(filter, vals.theta_ref[], vals.phi_ref[])
+        add_to_filter!(filter, cached_theta(vals), cached_Phi(vals))
         @ignoraise do_restoration(
             mop, Δ, mod, scaler, lin_cons, scaled_cons,
             vals, vals_tmp, step_vals, mod_vals, filter, step_cache, update_results, 
@@ -534,7 +469,7 @@ function do_iteration!(
 
     ## update filter
     if update_results.it_stat == FILTER_ADD || update_results.it_stat == FILTER_ADD_SHRINK
-        add_to_filter!(filter, vals_tmp.theta_ref[], vals_tmp.phi_ref[])
+        add_to_filter!(filter, cached_theta(vals_tmp), cached_Phi(vals_tmp))
     end
 
     @ignoraise finish_iteration(

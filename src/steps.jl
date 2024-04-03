@@ -18,7 +18,7 @@ function do_normal_step!(
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
     it_index, log_level, indent::Int=0
 )
-    if vals.theta_ref[] > 0
+    if cached_theta(vals) > 0
         pad_str = lpad("", indent)
         @logmsg log_level "$(pad_str)* Computing a normal step."   
 
@@ -26,7 +26,7 @@ function do_normal_step!(
             step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, 
             scaled_cons, vals, mod_vals; log_level
         )
-        @. step_vals.xn = vals.x + step_vals.n
+        step_vals.xn .= cached_x(vals) .+ step_vals.n
         @logmsg log_level """
             $(pad_str) Found normal step $(pretty_row_vec(step_vals.n; cutoff=60)). 
             $(pad_str) \t Hence xn=$(pretty_row_vec(step_vals.xn; cutoff=60)).""" 
@@ -34,7 +34,7 @@ function do_normal_step!(
     else
         step_vals.n .= 0
     end
-    step_vals.xn .= vals.x .+ step_vals.n
+    step_vals.xn .= cached_x(vals) .+ step_vals.n
     nothing
 end
 
@@ -56,7 +56,7 @@ function finalize_step_vals!(
     ## find stepsize and scale `step_vals.d`
     ## set `step_vals.s`, `step_vals.xs`, `step_vals.fxs`
     @. step_vals.s = step_vals.n + step_vals.d
-    @. step_vals.xs = vals.x + step_vals.s
+    step_vals.xs .= cached_x(vals) .+ step_vals.s
     @ignoraise objectives!(step_vals.fxs, mod, step_vals.xs)
     return nothing
 end
@@ -132,7 +132,7 @@ end
 function init_step_cache(
     cfg::SteepestDescentConfig, vals, mod_vals
 )
-    fxn = copy(vals.fx)
+    fxn = copy(cached_fx(vals))
     fx_tmp = copy(fxn)
     F = eltype(fxn)
     
@@ -142,11 +142,11 @@ function init_step_cache(
     @unpack normalize_gradients, strict_backtracking, descent_step_norm, 
         normal_step_norm, qp_opt = cfg
 
-    lb_tr = Vector{F}(undef, vals.n_vars)
+    lb_tr = array(F, dim_vars(vals))
     ub_tr = similar(lb_tr)
 
-    Axn = Vector{F}(undef, vals.dim_lin_ineq_constraints)
-    Dgx_n = Vector{F}(undef, vals.dim_nl_ineq_constraints)
+    Axn = array(F, dim_lin_ineq_constraints(vals))
+    Dgx_n = array(F, dim_nl_ineq_constraints(vals))
 
     return SteepestDescentCache(;
         backtracking_factor, rhs_factor, normalize_gradients, 
@@ -169,14 +169,17 @@ function compute_normal_step!(
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
     log_level
 )
-    @unpack x = vals
-    Eξ = vals.Ex
-    Aξ = vals.Ax
+    x = cached_x(vals)
+    Eξ = cached_Ex(vals)
+    Aξ = cached_Ax(vals)
     @unpack lb, ub = scaled_cons
     @unpack b, c = lin_cons
     _A = scaled_cons.A
     _E = scaled_cons.E
-    @unpack gx, hx, Dgx, Dhx = mod_vals
+    gx = cached_gx(mod_vals)
+    Dgx = cached_Dgx(mod_vals)
+    hx = cached_hx(mod_vals)
+    Dhx = cached_Dhx(mod_vals)
     @unpack qp_opt = step_cache
     n = solve_normal_step_problem(
         x, lb, ub, Eξ, _E, c, Aξ, _A, b, hx, Dhx, gx, Dgx;
@@ -191,16 +194,16 @@ function compute_descent_step!(
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
     log_level
 )
-    @unpack x = vals
-    @unpack Dfx = mod_vals
+    x = cached_x(vals)
+    Dfx = cached_Dfx(mod_vals)
     @unpack n = step_vals
     if !iszero(n)
         @ignoraise diff_objectives!(Dfx, mod, x)
-    end    
-    
-    @unpack gx, Dgx = mod_vals
+    end
+    gx = cached_gx(mod_vals)
+    Dgx = cached_Dgx(mod_vals)
     @unpack Axn, Dgx_n = step_cache
-    Aξ = vals.Ax
+    Aξ = cached_Ax(vals)
     _A = scaled_cons.A
 
     postprocess_normal_step_results!(Axn, Dgx_n, n, Aξ, _A, Dgx, gx)
@@ -209,7 +212,7 @@ function compute_descent_step!(
     @unpack lb, ub = scaled_cons
     _E = scaled_cons.E
     @unpack b, c = lin_cons
-    @unpack Dhx = mod_vals
+    Dhx = cached_Dhx(mod_vals)
     @unpack normalize_gradients, qp_opt = step_cache
     χ, _d = solve_steepest_descent_problem(
         xn, Dfx, lb, ub, _E, Axn, _A, b, Dhx, Dgx_n, Dgx; 
@@ -226,12 +229,13 @@ function finalize_step_vals!(
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
     log_level
 )
-    @unpack x = vals 
+    x = cached_x(vals)
     @unpack xn, fxs, d = step_vals
     @unpack lb, ub = scaled_cons
     _A = scaled_cons.A
     @unpack b = lin_cons
-    @unpack gx, Dgx = mod_vals
+    gx = cached_gx(mod_vals)
+    Dgx = cached_Dgx(mod_vals)
     @unpack lb_tr, ub_tr, Axn, Dgx_n = step_cache
     trust_region_bounds!(lb_tr, ub_tr, x, Δ, lb, ub)
     _, σ = initial_steplength(xn, d, lb_tr, ub_tr, Axn, _A, b, gx, Dgx_n, Dgx)
