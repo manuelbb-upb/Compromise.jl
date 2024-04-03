@@ -52,7 +52,7 @@ function criticality_routine(
             Δj *= crit_alpha 
             
             if depends_on_radius(modj)
-                @ignorebreak stop_code = update_models!(modj, Δj, mop, scaler, vals, scaled_cons, algo_opts; indent)
+                @ignorebreak stop_code = update_models!(modj, Δj, scaler, vals, scaled_cons; log_level, indent)
                 @ignorebreak stop_code = eval_and_diff_mod!(mod_valsj, modj, vals.x)
                 @ignorebreak stop_code = do_normal_step!(
                     step_cachej, step_valsj, Δj, mop, modj, scaler, lin_cons, scaled_cons, 

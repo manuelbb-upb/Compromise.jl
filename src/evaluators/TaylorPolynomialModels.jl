@@ -129,7 +129,7 @@ function CE.eval_op_and_grads!(y, Dy, tp::TaylorPolynomial2, x)
     return nothing
 end
 
-function CE.update!(tp::TaylorPolynomial1, op, Δ, x, fx, lb, ub; 
+function CE.update!(tp::TaylorPolynomial1, op, Δ, x, fx, global_lb, global_ub; 
     log_level=Info, indent::Int=0, kwargs...
 )
     if tp.x0 != x || any(isnan.(tp.x0))
@@ -141,7 +141,7 @@ function CE.update!(tp::TaylorPolynomial1, op, Δ, x, fx, lb, ub;
     return nothing
 end
 
-function CE.update!(tp::TaylorPolynomial2, op, Δ, x, fx, lb, ub; kwargs...)
+function CE.update!(tp::TaylorPolynomial2, op, Δ, x, fx, global_lb, global_ub; kwargs...)
     tp1 = tp.tp
     if tp1.x0 != x || any(isnan.(tp1.x0))
         copyto!(tp1.x0, x)

@@ -6,20 +6,24 @@ import LazyArrays: BroadcastArray
 import .CheetahViews: cheetah_vcat, cheetah_blockcat
 
 Base.@kwdef struct RestorationMOP{
-    F, M, LB<:AbstractVector{F}, UB<:AbstractVector{F}, AType, BType, OS, IS
+    F, MOPType, MODType, LB<:AbstractVector{F}, UB<:AbstractVector{F},
+    AType, BType, ValsType, SType
 } <: AbstractMOP
 
-    mop :: M
+    mop :: MOPType
+    mod :: MODType
+    
     dim_vars :: Int
     dim_nl_ineq_constraints :: Int
+
     lb :: LB
     ub :: UB
 
     A :: AType
     b :: BType
 
-    outer_scaler :: OS
-    inner_scaler :: IS
+    vals :: ValsType
+    scaler :: SType
 end
 
 float_type(::RestorationMOP{F}) where{F} = F
@@ -32,36 +36,72 @@ upper_var_bounds(rmop::RestorationMOP) = rmop.ub
 lin_ineq_constraints_matrix(rmop::RestorationMOP) = rmop.A
 lin_ineq_constraints_vector(rmop::RestorationMOP) = rmop.b
 
-function RestorationMOP(mop::M, theta_k, outer_scaler) where M<:AbstractMOP
-    lb = _restoration_lower_var_bounds(mop)    
-    ub = _restoration_upper_var_bounds(mop, theta_k)
-    A, b = _restoration_constraint_arrays(mop)
+function RestorationMOP(mop, mod, theta_k, scaler, vals, scaled_lin_cons)
+    lb = _restoration_lower_var_bounds(mop, scaled_lin_cons)    
+    ub = _restoration_upper_var_bounds(mop, scaled_lin_cons, theta_k)
+    #ξ = array(float_type(mop), dim_vars(mop))
+    A, b = _restoration_constraint_arrays(scaled_lin_cons)
     _dim_vars = dim_vars(mop) + 1
     _dim_nl_ineq_constraints = dim_nl_ineq_constraints(mop) + 2 * dim_nl_eq_constraints(mop)
-    inner_scaler = _restoration_scaler(theta_k, outer_scaler)
-    return RestorationMOP(;mop, lb, ub, A, b, 
+    return RestorationMOP(;
+        mop, mod, lb, ub, A, b, 
+        vals,
         dim_vars=_dim_vars, dim_nl_ineq_constraints=_dim_nl_ineq_constraints, 
-        outer_scaler, inner_scaler
+        scaler
     )
 end
+#=
+
+struct RestorationScaler{F, W<:AbstractDiagonalScaler} <: AbstractDiagonalScaler
+    f :: F
+    i :: F
+    wrapped :: W
+end
+
+_restoration_scaler_constant(rscaler, ::ForwardScaling)=rscaler.f
+_restoration_scaler_constant(rscaler, ::InverseScaling)=rscaler.i
 
 function _restoration_scaler(theta_k, scaler)
     f = theta_k
     i = 1/theta_k
-    fmat = cat(f, smatrix(scaler, ForwardScaling()); dims=(1,2))
-    imat = cat(i, smatrix(scaler, InverseScaling()); dims=(1,2))
-    foff = vcat(0, soffset(scaler, ForwardScaling()))
-    ioff = vcat(0, soffset(scaler, InverseScaling()))
-    return DiagonalScalerWithOffset(
-        DiagonalScaler(fmat, imat),
-        foff, 
-        ioff
+    return RestorationScaler(f, i, scaler)
+end
+
+function supports_scaling_dir(::RestorationScaler, ::AbstractScalingDirection)
+    return Val(true)
+end
+
+function offset_trait(rscaler::RestorationScaler)
+    return offset_trait(rscaler.wrapped)
+end
+
+function diag_matrix(rscaler::RestorationScaler, sense::AbstractScalingDirection)
+    # this is allocating, but should not be called anywhere, as we are also specializing
+    # `apply_scaling`...
+    return LA.Diagonal(
+        cat(
+            _restoration_scaler_constant(rscaler, sense), 
+            smatrix(rscaler.wrapped, sense);
+            dims=(1,2)
+        )
     )
 end
 
-function _restoration_lower_var_bounds(mop::AbstractMOP)
+function scaler_offset(rscaler::RestorationScaler, sense::AbstractScalingDirection)
+    return vcat(0, soffset(rscaler.wrapped, sense))
+end
+
+function apply_scaling!(x, rscaler::RestorationScaler, sense::AbstractScalingDirection)
+    c = _restoration_scaler_constant(rscaler, sense)
+    x[1] *= c
+    apply_scaling!(@view(x[2:end]), rscaler.wrapped, sense)
+    return x
+end
+=#
+
+function _restoration_lower_var_bounds(mop, scaled_lin_cons)
     return _restoration_lower_var_bounds(
-        mop, lower_var_bounds(mop)
+        mop, scaled_lin_cons.lb
     )
 end
 
@@ -74,9 +114,9 @@ function _restoration_lower_var_bounds(mop, mop_lb)
     return _restoration_padded_bounds(mop_lb, 0)
 end
 
-function _restoration_upper_var_bounds(mop::AbstractMOP, theta_k)
+function _restoration_upper_var_bounds(mop, scaled_lin_cons, theta_k)
     return _restoration_upper_var_bounds(
-        mop, upper_var_bounds(mop), theta_k
+        mop, scaled_lin_cons.ub, theta_k
     )
 end
 function _restoration_upper_var_bounds(mop, ::Nothing, theta_k)
@@ -103,20 +143,20 @@ function _inner_bounds(mop, finf::F) where F
     return PaddedView(finf, Vector{F}(undef, 0), (dim_vars(mop),))
 end
 
-function _restoration_constraint_arrays(mop)
+function _restoration_constraint_arrays(scaled_lin_cons)
+    @unpack E, c, A, b = scaled_lin_cons
     ## |Ex - c| ≤ t
     ## (i)   -t + Ex ≤ c    ⇔    Ex - c ≤ t
     ## (ii)  -t - Ex ≤ -c   ⇔   -t ≤ Ex - c
     ## and 
     ## Ax - b ≤ t
-    E = lin_eq_constraints_matrix(mop)
-    c = lin_eq_constraints_vector(mop)
-    A = lin_ineq_constraints_matrix(mop)
-    b = lin_ineq_constraints_vector(mop)
    
+    ## build RHS vector `g=[c; -c; b]`
     g = _combine_constraint_arrays(c, b)
 
+    ## first stack `_G=[E; -E; A]`
     _G = _combine_constraint_arrays(E, A)
+    ## then augment with column containing `-1` (factor for `t`).
     G = if isnothing(_G)
         nothing
     else
@@ -143,9 +183,10 @@ function eval_objectives!(y::RVec, rmop::RestorationMOP, x::RVec)
 end
 
 function eval_nl_ineq_constraints!(y::RVec, rmop::RestorationMOP, tx::RVec)
+    @unpack ξ, scaler, mop = rmop
     t = tx[1]
-    x = @view(tx[2:end])
-    mop = rmop.mop
+    @views ξ .= tx[2:end]
+    apply_scaling!(ξ, scaler, InverseScaling())
 
     i = 1
     
@@ -156,7 +197,7 @@ function eval_nl_ineq_constraints!(y::RVec, rmop::RestorationMOP, tx::RVec)
     if _j > 0
         j = i + _j - 1
         yh = @view(y[i:j])
-        @ignoraise nl_eq_constraints!(yh, mop, x)
+        @ignoraise nl_eq_constraints!(yh, mop,ξx)
         
         i = j + 1
         j = i + _j - 1
@@ -169,15 +210,43 @@ function eval_nl_ineq_constraints!(y::RVec, rmop::RestorationMOP, tx::RVec)
         i = j + 1
     end
 
-    # g(x) ≤ t
+    # g(x) - t ≤ 0
     _j = dim_nl_ineq_constraints(mop) 
     if _j > 0
         j = i + _j - 1
         yg = @view(y[i:j])
-        @ignoraise nl_ineq_constraints!(yg, mop, x)
+        @ignoraise nl_ineq_constraints!(yg, mop, ξ)
         yg .-= t
         i = j + 1
     end
 
     return nothing
 end
+
+struct RestorationSurrogate{M} <: AbstractMOPSurrogate 
+    mop :: M
+end
+
+function init_models(
+    mop::RestorationMOP, scaler; 
+    kwargs...
+)
+    return RestorationSurrogate(mop)
+end
+
+@forward RestorationSurrogate.mop float_type(mod::RestorationSurrogate)
+@forward RestorationSurrogate.mop dim_vars(mod::RestorationSurrogate)
+@forward RestorationSurrogate.mop dim_objectives(mod::RestorationSurrogate)
+@forward RestorationSurrogate.mop dim_nl_ineq_constraints(mod::RestorationSurrogate)
+# TODO prealloc with views
+
+function update_models!(
+    mod::RestorationSurrogate, Δ, scaler, vals, scaled_cons;
+    log_level, indent::Int
+)
+    @unpack mop = mod
+    @unpack x = mop.vals
+    @unpack scaler = mop
+    #apply_scaling
+end
+    

@@ -115,13 +115,3 @@ end
 
 function unscale_radius!(Δ, scaler, _Δ)
 end
-
-# ‖x‖ ≤ _Δ
-# ‖T*ξ + t‖ ≤ Δ
-function update_models!(
-    smod::ScaledMOPSurrogate,
-    _Δ, mop, vals, algo_opts;
-    kwargs...
-)
-
-end

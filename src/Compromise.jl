@@ -451,7 +451,7 @@ function do_iteration!(
 
     if !models_valid
         @logmsg log_level "* Updating Surrogates."
-        @ignoraise update_models!(mod, Δ, mop, scaler, vals, scaled_cons, algo_opts; indent=0)
+        @ignoraise update_models!(mod, Δ, scaler, vals, scaled_cons; log_level, indent=0)
         @ignoraise eval_and_diff_mod!(mod_vals, mod, vals.x)
     end
     @ignoraise do_normal_step!(

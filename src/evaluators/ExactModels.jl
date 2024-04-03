@@ -30,7 +30,7 @@ function CE.eval_op_and_grads!(y, Dy, surr::ExactModel, x)
 end
 
 function CE.update!(
-    surr::ExactModel, op, Δ, x, fx, lb, ub; kwargs...
+    surr::ExactModel, op, Δ, x, fx, global_lb, global_ub; kwargs...
 )
     #src return CE.check_num_calls(op, (1,2)) #TODO think about this
     return nothing

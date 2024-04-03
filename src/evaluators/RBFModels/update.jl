@@ -94,7 +94,7 @@ function update_rbf_model!(
 
     val!(params.n_X_ref, n_X)
     val!(buffers.x0_db_index_ref, buffers.db_index[1])
-    val!(params.database_state_ref, db_state(database))
+    val!(params.database_state_ref, new_db_state)
 
     return nothing
 end

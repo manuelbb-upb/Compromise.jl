@@ -486,13 +486,14 @@ end
 """
     update!(surrogate_model, nonlinear_operator, Δ, x, fx, lb, ub)
 
-Update the model on a trust region of size `Δ` in a box with lower left corner `lb`
+Update the model on a trust region of size `Δ` in a global box with lower left corner `lb`
 and upper right corner `ub` (in the scaled variable domain)
 `x` is a sub-vector of the current iterate conforming to the inputs of `nonlinear_operator`
 in the scaled domain. `fx` are the outputs of `nonlinear_operator` at `x`.
 """
 function update!(
-    surr::AbstractSurrogateModel, op, Δ, x, fx, lb, ub; log_level, indent, kwargs...
+    surr::AbstractSurrogateModel, op, Δ, x, fx, global_lb, global_ub; 
+    log_level, indent, kwargs...
 )
     return nothing    
 end

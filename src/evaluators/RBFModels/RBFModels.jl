@@ -114,10 +114,13 @@ function CE.init_surrogate(
 end
 
 function CE.update!(
-    rbf::RBFModel, op, Δ, x, fx, lb, ub; 
+    rbf::RBFModel, op, Δ, x, fx, global_lb, global_ub; 
     log_level=Info, indent::Int=0, kwargs...
 )
-    update_rbf_model!(rbf, op, Δ, x, fx, lb, ub; log_level, norm_p=Inf, indent)
+    return update_rbf_model!(
+        rbf, op, Δ, x, fx, global_lb, global_ub; 
+        log_level, norm_p=Inf, indent
+    )
 end
 
 function CE.universal_copy(rbf::RBFModel)

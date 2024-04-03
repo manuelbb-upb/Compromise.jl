@@ -32,8 +32,8 @@ init_models(
 #     This method should always return `nothing`, **unless** you want to stop the algorithm.
 
 function update_models!(
-    mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts;
-    indent::Int
+    mod::AbstractMOPSurrogate, Δ, scaler, vals, scaled_cons;
+    log_level::LogLevel, indent::Int
 )
     return nothing
 end

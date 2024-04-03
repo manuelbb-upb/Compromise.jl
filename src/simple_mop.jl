@@ -508,12 +508,11 @@ end
 
 # The sub-models are trained separately:
 function update_models!(
-    mod::SimpleMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts;
-    indent::Int
+    mod::SimpleMOPSurrogate, Δ, scaler, vals, scaled_cons;
+    log_level::LogLevel, indent::Int
 )
     @unpack x, fx, gx, hx = vals
     @unpack lb, ub = scaled_cons
-    @unpack log_level = algo_opts
     if !isnothing(mod.mod_objectives)
         @ignoraise update!(mod.mod_objectives, mod.objectives, Δ, x, fx, lb, ub; log_level, indent)
     end

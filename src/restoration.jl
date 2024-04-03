@@ -130,7 +130,7 @@ function postproccess_restoration(
     if is_acceptable(filter, vals_tmp.theta_ref[], vals_tmp.phi_ref[])
         ## make models valid at `x + r` and set model values
         ## also compute normal step based on models
-        @ignoraise update_models!(mod, Δ, mop, scaler, vals_tmp, scaled_cons, algo_opts; indent)
+        @ignoraise update_models!(mod, Δ, scaler, vals_tmp, scaled_cons; log_level, indent)
         @ignoraise eval_and_diff_mod!(mod_vals, mod, vals_tmp.x)
 
         @. update_results.diff_fx_mod -= mod_vals.fx

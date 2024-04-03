@@ -106,6 +106,30 @@ offset_trait(::DiagonalScalerWithOffset) = HasOffset()
 scaler_offset(scaler::DiagonalScalerWithOffset, ::ForwardScaling)=scaler.foff
 scaler_offset(scaler::DiagonalScalerWithOffset, ::InverseScaling)=scaler.ioff
 
+struct ViewScaler{F, W<:AbstractDiagonalScaler{F}} <: AbstractDiagonalScaler{F}
+    i1 :: Int
+    i2 :: Int
+    wrapped :: W
+end
+
+function supports_scaling_dir(scaler::ViewScaler, sense::AbstractScalingDirection)
+    return Val(true)
+end
+function diag_matrix(scaler::ViewScaler, sense::AbstractScalingDirection)
+    @unpack i1, i2 = scaler
+    inner = smatrix(scaler.wrapped, sense)
+    return LA.Diagonal(
+        view(inner, view(LA.diagind(inner), i1:i2))
+    )
+end
+function offset_trait(scaler::ViewScaler)
+    return offset_trait(scaler.wrapped)
+end
+function scaler_offset(scaler::ViewScaler, sense::AbstractScalingDirection)
+    @unpack i1, i2 = scaler
+    return view(soffset(scaler.wrapped, sense), i1:i2)
+end
+
 # ============================================================================= #
 function scale_lin_cons!(trgt_cons, scaler, lin_cons)
     universal_copy!(trgt_cons, lin_cons)
@@ -129,9 +153,10 @@ end
     # ξ = S * x + s ⇒ A*ξ = A*S*x + A*s ? b ⇒ (A * S) * x ? (b - (A * s))
     # Hence, `_A = A*S`, `_b = b - A*s`
     S = smatrix(scaler, scaling_sense)
-    s = soffset(scaler, scaling_sense)
-
-    LA.mul!(b, A, s, -1, 1)     # b ← b - A * s
+    if offset_trait(scaler) isa HasOffset
+        s = soffset(scaler, scaling_sense)
+        LA.mul!(b, A, s, -1, 1)     # b ← b - A * s
+    end
     LA.rmul!(A, S)              # A ← A * S
 
     return nothing
