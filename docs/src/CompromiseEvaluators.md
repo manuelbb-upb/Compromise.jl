@@ -324,9 +324,17 @@ function func_vals!(
     Y::RMat, op::AbstractNonlinearOperator, X::RMat, params=nothing, outputs::Union{Nothing,Vector{Bool}}=nothing
 )
     n_X = size(X, 2)
+    n_Y = size(Y, 2)
+    @assert n_X == n_Y
     if n_X <= 0
         return nothing
     end
+    if n_X == 1
+        _Y = reshape(Y, :)
+        _X = reshape(X, :)
+        return func_vals!(_Y, op, _X, params, outputs)
+    end
+
     v0 = Val(0)
     @ignoraise N = request_func_calls(op, v0, n_X)
     if N < size(Y, 2)
@@ -336,19 +344,30 @@ function func_vals!(
         _X = X
         _Y = Y
     end
+    if N == 1
+        _Y = reshape(Y, :)
+        _X = reshape(X, :)
+        return func_vals!(_Y, op, _X, params, outputs)
+    end
 
     cs = operator_chunk_size(op)
-    if 1 < cs <= N
+    if N <= cs
         @ignoraise redirect_call(eval_op!, op, _X, params, outputs, _Y)
     else
-        i_start = 1
-        i_end = 0
-        while i_end < N
-            i_end = min(i_start + cs - 1, N)
-            y = @view(_Y[:, i_start:i_end])
-            x = @view(_X[:, i_start:i_end])
-            @ignoraise redirect_call(eval_op!, op, x, params, outputs, y)
-            i_start = i_end + 1
+        if cs == 1
+            for (y, x) = zip(eachcol(_Y), eachcol(_X))
+                @ignoraise redirect_call(eval_op!, op, x, params, outputs, y)
+            end
+        else
+            i_start = 1
+            i_end = 0
+            while i_end < N
+                i_end = min(i_start + cs - 1, N)
+                y = @view(_Y[:, i_start:i_end])
+                x = @view(_X[:, i_start:i_end])
+                @ignoraise redirect_call(eval_op!, op, x, params, outputs, y)
+                i_start = i_end + 1
+            end
         end
         #=
         for (y, x) = zip(eachcol(_Y), eachcol(_X))
@@ -357,6 +376,7 @@ function func_vals!(
         end
         =#
     end
+
     return nothing
 end
 
@@ -542,7 +562,7 @@ wrapped_operator(op::AbstractNonlinearOperatorWrapper)=error("`wrapped_operator`
 
 operator_has_params(op::AbstractNonlinearOperatorWrapper)=operator_has_params(wrapped_operator(op))
 operator_can_partial(op::AbstractNonlinearOperatorWrapper)=operator_can_partial(wrapped_operator(op))
-operator_can_eval_multi(op::AbstractNonlinearOperatorWrapper)=operator_can_eval_multi(wrapped_operator(op))
+operator_chunk_size(op::AbstractNonlinearOperatorWrapper)=operator_chunk_size(wrapped_operator(op))
 operator_has_name(op::AbstractNonlinearOperatorWrapper)=operator_has_name(wrapped_operator(op))
 operator_name(op::AbstractNonlinearOperatorWrapper)=operator_name(wrapped_operator(op))
 func_call_counter(op::AbstractNonlinearOperatorWrapper, v::Val)=func_call_counter(wrapped_operator(op), v)

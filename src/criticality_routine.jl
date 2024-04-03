@@ -14,7 +14,7 @@ function criticality_routine(
         backtrack_in_crit_routine = algo_opts
         
     χ = step_vals.crit_ref[]
-    θ = vals.theta_ref[]
+    θ = cached_theta(vals)
     Δ_init = Δ
     stop_code = nothing
     if θ < eps_theta && (χ < eps_crit && Δ > crit_M * χ )
@@ -53,7 +53,7 @@ function criticality_routine(
             
             if depends_on_radius(modj)
                 @ignorebreak stop_code = update_models!(modj, Δj, mop, scaler, vals, scaled_cons, algo_opts; indent)
-                @ignorebreak stop_code = eval_and_diff_mod!(mod_valsj, modj, vals.x)
+                @ignorebreak stop_code = eval_and_diff_mod!(mod_valsj, modj, cached_x(vals))
                 @ignorebreak stop_code = do_normal_step!(
                     step_cachej, step_valsj, Δj, mop, modj, scaler, lin_cons, scaled_cons, 
                     vals, mod_valsj; log_level, it_index, indent

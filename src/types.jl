@@ -222,86 +222,6 @@ Base.@kwdef struct ThreadedOuterAlgorithmOptions{A}
 end
 
 # ## General Array Containers
-"A struct holding values computed for or derived from an `AbstractMOP`."
-Base.@kwdef struct ValueArrays{
-	F<:AbstractFloat,
-	FX<:AbstractVector{F},	# usually everything is a `Vector{F}`,
-							# but we allow the type to be set with 
-							# functions like `prealloc_objectives_vector`
-	HX<:AbstractVector{F},	
-	GX<:AbstractVector{F},
-}
-	"Unscaled variable vector used for evaluation."
-    ξ :: Vector{F}
-	"Internal (scaled) variable vector."
-    x :: Vector{F}
-	"Objective value vector."
-    fx :: FX
-	"Nonlinear equality constraints value vector."
-    hx :: HX
-	"Nonlinear inequality constraints value vector."
-    gx :: GX
-    
-	Ex :: Vector{F}
-    Ax :: Vector{F}
-
-	Ax_min_b :: Vector{F}
-	Ex_min_c :: Vector{F}
-	
-	"Reference to maximum constraint violation."
-    theta_ref :: Base.RefValue{F}
-	"Reference to maximum function value."
-    phi_ref :: Base.RefValue{F}
-
-	# meta data fields
-	n_vars :: Int = length(x)
-	dim_objectives :: Int = length(fx)
-	dim_lin_eq_constraints :: Int = length(Ex)
-	dim_lin_ineq_constraints :: Int = length(Ax)
-	dim_nl_eq_constraints :: Int = length(hx)
-	dim_nl_ineq_constraints :: Int = length(gx)
-end
-
-function universal_copy!(
-	vals_trgt::ValueArrays, 
-	vals_src::ValueArrays
-)
-	for fn in fieldnames(ValueArrays)
-		universal_copy!(
-			getfield(vals_trgt, fn),
-			getfield(vals_src, fn)
-		)
-	end
-	return nothing
-end
-
-struct SurrogateValueArrays{
-	F <: AbstractFloat,
-	FX <: AbstractVector{F},
-	HX <: AbstractVector{F},
-	GX <: AbstractVector{F},
-	DFX <: AbstractMatrix{F},
-	DHX <: AbstractMatrix{F},
-	DGX <: AbstractMatrix{F}
-}
-    fx :: FX
-    hx :: HX
-    gx :: GX
-    Dfx :: DFX
-    Dhx :: DHX
-    Dgx :: DGX
-end
-
-function universal_copy!(
-	mod_vals_trgt::SurrogateValueArrays, 
-	mod_vals_src::SurrogateValueArrays
-)
-	for fn in fieldnames(SurrogateValueArrays)
-		trgt_fn = getfield(mod_vals_trgt, fn)
-		universal_copy!(trgt_fn, getfield(mod_vals_src, fn))
-	end
-	return nothing
-end
 
 struct StepValueArrays{T}
     n :: Vector{T}
@@ -312,7 +232,6 @@ struct StepValueArrays{T}
 	fxs :: Vector{T}
 	crit_ref :: Base.RefValue{T}
 end
-
 
 function universal_copy!(
 	step_vals_trgt::StepValueArrays, step_vals_src::StepValueArrays
@@ -445,31 +364,31 @@ opt_initial_vars(r::ReturnObject) = r.ξ0
 
 opt_vars(r::ReturnObject)=opt_vars(r.vals)
 opt_vars(::Nothing) = missing
-opt_vars(v::ValueArrays)=v.ξ
+opt_vars(v::AbstractMOPCache)=cached_ξ(v)
 
 opt_objectives(r::ReturnObject)=opt_objectives(r.vals)
 opt_objectives(::Nothing)=missing
-opt_objectives(v::ValueArrays)=v.fx
+opt_objectives(v::AbstractMOPCache)=cached_fx(v)
 
 opt_nl_eq_constraints(r::ReturnObject)=opt_nl_eq_constraints(r.vals)
 opt_nl_eq_constraints(::Nothing)=missing
-opt_nl_eq_constraints(v::ValueArrays)=v.hx
+opt_nl_eq_constraints(v::AbstractMOPCache)=cached_hx(v)
 
 opt_nl_ineq_constraints(r::ReturnObject)=opt_nl_ineq_constraints(r.vals)
 opt_nl_ineq_constraints(::Nothing)=missing
-opt_nl_ineq_constraints(v::ValueArrays)=v.gx
+opt_nl_ineq_constraints(v::AbstractMOPCache)=cached_gx(v)
 
 opt_lin_eq_constraints(r::ReturnObject)=opt_lin_eq_constraints(r.vals)
 opt_lin_eq_constraints(::Nothing)=missing
-opt_lin_eq_constraints(v::ValueArrays)=v.Ex_min_c
+opt_lin_eq_constraints(v::AbstractMOPCache)=cached_Ex_min_c(v)
 
 opt_lin_ineq_constraints(r::ReturnObject)=opt_lin_ineq_constraints(r.vals)
 opt_lin_ineq_constraints(::Nothing)=missing
-opt_lin_ineq_constraints(v::ValueArrays)=v.Ax_min_b
+opt_lin_ineq_constraints(v::AbstractMOPCache)=cached_Ax_min_b(v)
 
 opt_constraint_violation(r::ReturnObject)=opt_constraint_violation(r.vals)
 opt_constraint_violation(::Nothing)=missing
-opt_constraint_violation(v::ValueArrays)=v.theta_ref[]
+opt_constraint_violation(v::AbstractMOPCache)=cached_theta(v)
 
 function opt_stop_code(r::ReturnObject)
 	c = r.stop_code

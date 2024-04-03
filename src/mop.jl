@@ -143,39 +143,76 @@ end
 
 # ## Pre-Allocation
 
-# The vectors to hold objective values, constraint values, etc., 
-# are allocated using these functions:
-## hx = nonlinear equality constraints at x
-## gx = nonlinear inequality constraints at x
-function prealloc_objectives_vector(mop) end
-function prealloc_lin_eq_constraints_vector(mop) end
-function prealloc_lin_ineq_constraints_vector(mop) end
-function prealloc_nl_eq_constraints_vector(mop) end
-function prealloc_nl_ineq_constraints_vector(mop) end
-# I have implemented some defaults to just allocate a `Vector` of correct
-# length.
-# The `yoink_` functions are called internally, do not overwrite them, 
-# unless you know what you are doing.
-for (dim_func, func_suffix) in (
-    (:dim_objectives, :objectives_vector),
-    (:dim_nl_eq_constraints, :nl_eq_constraints_vector),
-    (:dim_nl_ineq_constraints, :nl_ineq_constraints_vector),
-    (:dim_lin_eq_constraints, :lin_eq_constraints_vector),  # don't modify this…
-    (:dim_lin_ineq_constraints, :lin_ineq_constraints_vector),  # and this, else type mismatch in value structs
-)
-    func_name = Symbol("prealloc_", func_suffix)
-    yoink_name = Symbol("yoink_", func_suffix)
-    @eval begin 
-        function $(func_name)(mop::AbstractMOP)
-            dim = $(dim_func)(mop) 
-            T = float_type(mop)
-            return Vector{T}(undef, dim)
-        end
+# Every `mop` of type `AbstractMOP` has to implement `init_value_caches(mop)`.
+# It should return an object of type `AbstractValueCache`.
+# This cache is queried for evaluation data by methods such as 
+# `cached_fx(mop_cache)` to retrieve the objective values for example.
+# Note, that the getter calls should return arrays, and we want to modify 
+# these array.
+# When scalar values are expected (`cached_theta`, `cached_Phi`), 
+# then the cache should implement setters (`cached_theta!`, `cached_Phi!`).
 
-        function $(yoink_name)(mop::AbstractMOP)
-            y = $(func_name)(mop) :: RVec
-            @assert eltype(y) == float_type(mop) "Vector eltype does not match problem float type."
-            return y
-        end
-    end
+function init_value_caches(::AbstractMOP)::AbstractMOPCache
+    return nothing
 end
+
+# The function `init_value_caches` replaces previous pre-allocation methods, 
+# i.e., 
+# `prealloc_objectives_vector(mop)`,
+# `prealloc_lin_eq_constraints_vector(mop)`,
+# `prealloc_lin_ineq_constraints_vector(mop)`,
+# `prealloc_nl_eq_constraints_vector(mop)`,
+# `prealloc_nl_ineq_constraints_vector(mop)`.
+# Internally, the safe-guarded `yoink_` methods are no longer needed, neither.
+
+# From the above definitions we can derive a cached evaluation function:
+function eval_mop!(mop_cache, mop, scaler)
+    unscale!(cached_ξ(mop_cache), scaler, cached_x(mop_cache))
+    return eval_mop!(mop_cache, mop)
+end
+
+function eval_mop!(mop_cache, mop)
+    ## evaluate problem at unscaled site
+    ξ = cached_ξ(mop_cache)
+    @ignoraise θ, Φ = eval_mop!(
+        cached_fx(mop_cache),
+        cached_hx(mop_cache), 
+        cached_gx(mop_cache),
+        cached_Ex_min_c(mop_cache), 
+        cached_Ex(mop_cache), 
+        cached_Ax_min_b(mop_cache), 
+        cached_Ax(mop_cache), 
+        mop, ξ
+    )
+    cached_theta!(mop_cache, θ)
+    cached_Phi!(mop_cache, Φ)
+    return nothing
+end
+
+"Evaluate `mop` at unscaled site `ξ` and modify result arrays in place."
+function eval_mop!(
+    fx, hx, gx, Ex_min_c, Ex, Ax_min_b, Ax, mop, ξ
+)
+    @ignoraise objectives!(fx, mop, ξ)
+    @ignoraise nl_eq_constraints!(hx, mop, ξ)
+    @ignoraise nl_ineq_constraints!(gx, mop, ξ)
+    lin_eq_constraints!(Ex_min_c, Ex, mop, ξ)
+    lin_ineq_constraints!(Ax_min_b, Ax, mop, ξ)
+    θ = constraint_violation(hx, gx, Ex_min_c, Ax_min_b)
+    Φ = maximum(fx)
+    return (θ, Φ)
+end
+
+function constraint_violation(hx, gx, Ex_min_c, Ax_min_b)
+    return max(
+        constraint_violation(hx, Val(:eq)),
+        constraint_violation(gx, Val(:ineq)),
+        constraint_violation(Ex_min_c, Val(:eq)),
+        constraint_violation(Ax_min_b, Val(:ineq)),
+        0
+    )
+end
+
+constraint_violation(::Nothing, type_val::Val)=0
+constraint_violation(ex::RVec, ::Val{:eq})=maximum(abs.(ex); init=0)
+constraint_violation(ix::RVec, ::Val{:ineq})=max(maximum(ix; init=0), 0)

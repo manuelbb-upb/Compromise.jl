@@ -11,16 +11,22 @@ function test_trial_point!(
     @unpack strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success = algo_opts
 
     # Use `vals_tmp` to hold the true values at `xs`:
-    copyto!(vals_tmp.x, step_vals.xs)
+    copyto!(cached_x(vals_tmp), step_vals.xs)
     @ignoraise eval_mop!(vals_tmp, mop, scaler)
     
-    @unpack x, fx = vals
-    xs, fxs = vals_tmp.x, vals_tmp.fx
+    x = cached_x(vals)
+    fx = cached_fx(vals)
 
-    θx, Φx = vals.theta_ref[], vals.phi_ref[]
-    θxs, Φxs = vals_tmp.theta_ref[], vals_tmp.phi_ref[]
+    xs = cached_x(vals_tmp)
+    fxs = cached_fx(vals_tmp)
 
-    fx_mod = mod_vals.fx
+    θx = cached_theta(vals)
+    Φx = cached_Phi(vals)
+    
+    θxs = cached_theta(vals_tmp)
+    Φxs = cached_Phi(vals_tmp)
+
+    fx_mod = cached_fx(mod_vals)
     fxs_mod = step_vals.fxs
 
     new_it_stat = test_trial_point!(
