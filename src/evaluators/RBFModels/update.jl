@@ -5,7 +5,7 @@ function CE.process_trial_point!(
     if !is_next
         @unpack params, database = rbf
         if params.xtrial != xtrial
-            lock(database.rwlock) do
+            lock_write(database.rwlock) do
                 add_to_database!(database, xtrial, fxtrial)
             end
             params.xtrial .= xtrial
@@ -71,7 +71,7 @@ function update_rbf_model!(
         n_X_affine_sampling, n_X
     end
     
-    new_db_state = lock(rwlock) do
+    new_db_state = lock_write(rwlock) do
         put_new_evals_into_db!(rbf, x0, n_X_affine_sampling, buffers.xZ)
         db_state(database)
     end
@@ -94,7 +94,7 @@ function update_rbf_model!(
 
     val!(params.n_X_ref, n_X)
     val!(buffers.x0_db_index_ref, buffers.db_index[1])
-    val!(params.database_state_ref, db_state(database))
+    val!(params.database_state_ref, new_db_state)
 
     return nothing
 end

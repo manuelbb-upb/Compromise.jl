@@ -216,6 +216,15 @@ parse_mcfg(::Val{:exact})=ExactModelConfig()
 parse_mcfg(::Val{:rbf})=RBFConfig()
 parse_mcfg(::Val{:taylor1})=TaylorPolynomialConfig(;degree=1)
 parse_mcfg(::Val{:taylor2})=TaylorPolynomialConfig(;degree=2)
+function parse_mcfg(::Val{:rbfLocked})
+    rw_ext = Base.get_extension(@__MODULE__, :ConcurrentRWLockExt)
+    if isnothing(rw_ext)
+        error("Cannot add RBF with read-write-lock without `ConcurrentUtils`.")
+    end
+    database_rwlock = init_rw_lock(rw_ext.ConcurrentRWLock)
+    cfg = RBFConfig(; database_rwlock)
+    return cfg
+end
 # The default value `nothing` redirects to an `ExactModelConfig`:
 parse_mcfg(::Nothing)=parse_mcfg(:exact)
 

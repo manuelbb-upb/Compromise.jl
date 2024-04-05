@@ -24,6 +24,7 @@ import StructHelpers: @batteries
 include("value_caches.jl")
 include("types.jl")
 include("utils.jl")
+include("concurrent_locks.jl")
 
 # #### Optimization Packages
 # At some point, the choice of solver is meant to be configurable, with different
