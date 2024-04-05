@@ -286,6 +286,7 @@ multiple optimization runs are done concurrently.
 There even is an “algorithm” for this:
 
 ````@example README
+using ConcurrentUtils
 mop = MutableMOP(; num_vars=2)
 add_objectives!(
     mop, counted_objf, :rbfLocked; dim_out=2, func_iip=false,

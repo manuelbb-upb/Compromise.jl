@@ -227,6 +227,7 @@ objf_counter[]
 # The RBF update algorithm has a lock to access the database in a safe way (?) when
 # multiple optimization runs are done concurrently.
 # There even is an “algorithm” for this:
+using ConcurrentUtils
 mop = MutableMOP(; num_vars=2)
 add_objectives!(
     mop, counted_objf, :rbfLocked; dim_out=2, func_iip=false,
