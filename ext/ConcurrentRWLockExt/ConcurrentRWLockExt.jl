@@ -14,6 +14,7 @@ end
 struct ConcurrentRWLock <: AbstractReadWriteLock
     wrapped :: ReadWriteLock
 end
+ConcurrentRWLock() = ConcurrentRWLock(ReadWriteLock())
 
 lock_read(l::ConcurrentRWLock)=CU.lock_read(l.wrapped)
 lock_read(@nospecialize(f), l::ConcurrentRWLock)=CU.lock_read(f, l.wrapped)

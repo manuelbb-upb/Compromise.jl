@@ -102,11 +102,11 @@ end
 function ConcurrentRWLock()
     if !isdefined(Base, :get_extension)
         if isdefined(@__MODULE__, :ConcurrentRWLock)
-            return ConcurrentRWLock
+            return ConcurrentRWLock()
         end
         return nothing
     else
-        m = Base.get_extension(@__MODULE__, :ConcurrentRWLock)
+        m = Base.get_extension(@__MODULE__, :ConcurrentRWLockExt)
         return isnothing(m) ? m : m.ConcurrentRWLock()
     end
 end
