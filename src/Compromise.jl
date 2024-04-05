@@ -81,7 +81,7 @@ using Requires
         end
         @require ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477" begin
             include("../ext/ConcurrentRWLockExt/ConcurrentRWLockExt.jl")
-            import .ConcurrentRWLockExt: ConcurrentRWLock
+            import .ConcurrentRWLockExt
         end
     end
 end
@@ -101,8 +101,8 @@ function ForwardDiffBackend()
 end
 function ConcurrentRWLock()
     if !isdefined(Base, :get_extension)
-        if isdefined(@__MODULE__, :ConcurrentRWLock)
-            return ConcurrentRWLock()
+        if isdefined(@__MODULE__, :ConcurrentRWLockExt)
+            return ConcurrentRWLockExt.ConcurrentRWLock()
         end
         return nothing
     else
