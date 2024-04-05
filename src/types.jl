@@ -353,10 +353,10 @@ in the main loop.
 =#
 
 struct ReturnObject{X, V, S, M}
-	ξ0 :: X
-	vals :: V
+	ξ0 :: X
+	vals :: V
 	stop_code :: S
-	mod :: M
+	mod :: M
 end
 
 opt_surrogate(r::ReturnObject) = r.mod

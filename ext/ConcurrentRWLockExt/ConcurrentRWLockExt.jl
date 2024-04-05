@@ -2,8 +2,14 @@ module ConcurrentRWLockExt
 
 import Compromise as C
 import Compromise: AbstractReadWriteLock, lock_write, unlock_write, lock_read, unlock_read, init_rw_lock
-import ConcurrentUtils as CU
-import ConcurrentUtils: ReadWriteLock
+
+if isdefined(Base, :get_extension)
+    import ConcurrentUtils as CU
+    import ConcurrentUtils: ReadWriteLock
+else
+    import ..ConcurrentUtils as CU
+    import ..ConcurrentUtils: ReadWriteLock
+end
 
 struct ConcurrentRWLock <: AbstractReadWriteLock
     wrapped :: ReadWriteLock
