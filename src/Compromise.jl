@@ -79,9 +79,10 @@ using Requires
             include("../ext/ForwardDiffBackendExt/ForwardDiffBackendExt.jl")
             import .ForwardDiffBackendExt
         end
-        @require ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477"
-        include("../ext/ConcurrentRWLockExt/ConcurrentRWLockExt.jl")
-        import .ConcurrentRWLockExt: ConcurrentRWLock
+        @require ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477" begin
+            include("../ext/ConcurrentRWLockExt/ConcurrentRWLockExt.jl")
+            import .ConcurrentRWLockExt: ConcurrentRWLock
+        end
     end
 end
 
