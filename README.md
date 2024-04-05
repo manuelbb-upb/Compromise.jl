@@ -21,6 +21,14 @@ constraints are violated.
 I don't really keep up a consistent versioning scheme.
 But the changes in this section have been significant enough to warrant some comments.
 
+#### Version 0.1.0
+This release is breaking, because the the RBF database is no longer thread-safe by default.
+Instead, `ConcurrentUtils` is a weak dependency and no longer mandatory.
+To use a thread-safe RBF database, either configure your problem functions
+with `:rbfLocked`, use an `RBFConfig` with
+`database_rwlock = ConcurrentRWLock()`
+or pre-initialize a thread-safe database by setting the field `rwlock`.
+
 #### Version 0.0.3
 Internally, there have been major changes regarding the caching of MOP and surrogate result values.
 Previously, separate preallocation functions were required (e.g., `prealloc_fx` …).
@@ -274,6 +282,10 @@ multiple optimization runs are done concurrently.
 There even is an “algorithm” for this:
 
 ````julia
+mop = MutableMOP(; num_vars=2)
+add_objectives!(
+    mop, counted_objf, :rbfLocked; dim_out=2, func_iip=false,
+)
 X0 = [
     -2.0    -2.0    0.0
     0.5     0.0     0.0
