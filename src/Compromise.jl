@@ -79,6 +79,9 @@ using Requires
             include("../ext/ForwardDiffBackendExt/ForwardDiffBackendExt.jl")
             import .ForwardDiffBackendExt
         end
+        @require ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477"
+        include("../ext/ConcurrentRWLockExt/ConcurrentRWLockExt.jl")
+        import .ConcurrentRWLockExt: ConcurrentRWLock
     end
 end
 
@@ -95,7 +98,18 @@ function ForwardDiffBackend()
         return isnothing(m) ? m : m.ForwardDiffBackend()
     end
 end
-export ForwardDiffBackend
+function ConcurrentRWLock()
+    if !isdefined(Base, :get_extension)
+        if isdefined(@__MODULE__, :ConcurrentRWLock)
+            return ConcurrentRWLock
+        end
+        return nothing
+    else
+        m = Base.get_extension(@__MODULE__, :ConcurrentRWLock)
+        return isnothing(m) ? m : m.ConcurrentRWLock()
+    end
+end
+export ForwardDiffBackend, ConcurrentRWLock
 
 # Import Radial Basis Function surrogates:
 include("evaluators/RBFModels/RBFModels.jl")

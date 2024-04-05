@@ -55,7 +55,7 @@ r = Compromise.optimize_with_algo(mop, opts, ξ0);
 @test objf_counter.val <= 10 * 10
 
 rbf_db = Compromise.RBFModels.init_rbf_database(
-    2, 2, nothing, nothing, Float64, Compromise.init_rw_lock(CU.ReadWriteLock)
+    2, 2, nothing, nothing, Float64, Compromise.ConcurrentRWLock()
 )
 
 cfg = RBFConfig(; database=rbf_db)
