@@ -24,6 +24,7 @@ import StructHelpers: @batteries
 include("value_caches.jl")
 include("types.jl")
 include("utils.jl")
+include("concurrent_locks.jl")
 
 # #### Optimization Packages
 # At some point, the choice of solver is meant to be configurable, with different
@@ -78,6 +79,10 @@ using Requires
             include("../ext/ForwardDiffBackendExt/ForwardDiffBackendExt.jl")
             import .ForwardDiffBackendExt
         end
+        @require ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477" begin
+            include("../ext/ConcurrentRWLockExt/ConcurrentRWLockExt.jl")
+            import .ConcurrentRWLockExt
+        end
     end
 end
 
@@ -94,7 +99,18 @@ function ForwardDiffBackend()
         return isnothing(m) ? m : m.ForwardDiffBackend()
     end
 end
-export ForwardDiffBackend
+function ConcurrentRWLock()
+    if !isdefined(Base, :get_extension)
+        if isdefined(@__MODULE__, :ConcurrentRWLockExt)
+            return ConcurrentRWLockExt.ConcurrentRWLock()
+        end
+        return nothing
+    else
+        m = Base.get_extension(@__MODULE__, :ConcurrentRWLockExt)
+        return isnothing(m) ? m : m.ConcurrentRWLock()
+    end
+end
+export ForwardDiffBackend, ConcurrentRWLock
 
 # Import Radial Basis Function surrogates:
 include("evaluators/RBFModels/RBFModels.jl")

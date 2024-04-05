@@ -1,5 +1,5 @@
 # ### Sample Database
-Base.@kwdef struct RBFDatabase{T<:Number}
+Base.@kwdef struct RBFDatabase{T<:Number, RWLType<:AbstractReadWriteLock}
     dim_x :: Int
     dim_y :: Int
 
@@ -13,7 +13,7 @@ Base.@kwdef struct RBFDatabase{T<:Number}
     current_size :: Base.RefValue{Int}
     state :: MutableNumber{UInt64}
 
-    rwlock :: ReadWriteLock
+    rwlock :: RWLType = default_rw_lock()
 end
 
 function db_current_size(db)
@@ -55,7 +55,8 @@ function filtered_view_y(db::RBFDatabase, flags)
 end
 
 function init_rbf_database(
-    rbf_cfg, dim_x, dim_y, T=DEFAULT_FLOAT_TYPE
+    rbf_cfg, dim_x, dim_y, T=DEFAULT_FLOAT_TYPE, 
+    rwlock::AbstractReadWriteLock=default_rw_lock()
 )
     @unpack database_size, database_chunk_size = rbf_cfg
     return init_rbf_database(dim_x, dim_y, database_size, database_chunk_size, T)
@@ -65,7 +66,8 @@ function init_rbf_database(
     dim_x::Integer, dim_y::Integer, 
     database_size::Union{Nothing,Integer},
     database_chunk_size::Union{Nothing, Integer}, 
-    ::Type{T}=DEFAULT_FLOAT_TYPE
+    ::Type{T}=DEFAULT_FLOAT_TYPE,
+    rwlock::Union{Nothing,AbstractReadWriteLock}=nothing
 ) where {T<:Number}
     min_points = dim_x + 1 :: Integer
 
@@ -102,8 +104,11 @@ function init_rbf_database(
     flags_y = zeros(Int, chunk_size)
 
     state = MutableNumber(zero(UInt64))
-    rwlock = ReadWriteLock()
+    if isnothing(rwlock)
+        rwlock = default_rw_lock()
+    end
     current_size = Ref(chunk_size)
+    
     return RBFDatabase(;
         dim_x, dim_y, max_size, chunk_size, x, y, 
         flags_x, flags_y, state, rwlock, current_size

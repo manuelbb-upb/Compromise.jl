@@ -1,10 +1,9 @@
 name = "Compromise"
 uuid = "254bc946-86ae-484f-a9da-8147cb79ba93"
 authors = ["Manuel Berkemeier <manuelbb@mail.uni-paderborn.de> and contributors"]
-version = "0.0.3"
+version = "0.1.0"
 
 [deps]
-ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477"
 Dictionaries = "85a47980-9c8c-11e8-2b9f-f7ca1fa99fb4"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 ElasticArrays = "fdbdab4c-e67f-52f5-8c3f-e7b388dad3d4"
@@ -23,20 +22,23 @@ StridedViews = "4db3bf67-4bd7-4b4e-b153-31dc3fb37143"
 StructHelpers = "4093c41a-2008-41fd-82b8-e3f9d02b504f"
 
 [weakdeps]
+ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 
 [extensions]
 ForwardDiffBackendExt = "ForwardDiff"
+ConcurrentRWLockExt = "ConcurrentUtils"
 
 [compat]
 julia = "1"
 
 [extras]
+ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["SafeTestsets", "Test", "ForwardDiff", "Random", "LinearAlgebra"]
+test = ["SafeTestsets", "Test", "ConcurrentUtils", "ForwardDiff", "Random", "LinearAlgebra"]
