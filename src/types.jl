@@ -48,7 +48,7 @@ Base.@kwdef struct AlgorithmOptions{_T <: Number, SC, SCALER_CFG_TYPE}
     step_config :: SC = SteepestDescentConfig()
 
 	"Configuration to determine variable scaling (if model supports it). Either `:box` or `:none`."
-    scaler_cfg :: SCALER_CFG_TYPE = :box
+    scaler_cfg :: SCALER_CFG_TYPE = Val(:box)
 
 	require_fully_linear_models :: Bool = true
 

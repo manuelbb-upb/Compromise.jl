@@ -69,6 +69,17 @@ function apply_scaling!(
     return x
 end
 
+#src # for backward compatibility:
+function scale!(trgt_arr, scaler, src_array)
+    copyto!(trgt_arr, src_array)
+    return apply_scaling!(trgt_arr, scaler, ForwardScaling())
+end
+
+function unscale!(trgt_arr, scaler, src_array)
+    copyto!(trgt_arr, src_array)
+    return apply_scaling!(trgt_arr, scaler, InverseScaling())
+end
+
 function apply_scaling!(
     x, scaler::AbstractDiagonalScaler, 
     sdir::AbstractScalingDirection, has_offset::HasOffset
