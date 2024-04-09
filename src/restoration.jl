@@ -14,9 +14,9 @@ function do_restoration(
     ret = :TODO
     if !any(isnan.(step_vals.n))
         ret = :NOTNAN
-        @. vals_tmp.x = step_vals.xn
+        copyto!(cached_x(vals_tmp), step_vals.xn)
         @ignoraise eval_mop!(vals_tmp, mop, scaler)
-        if iszero(vals_tmp.theta_ref[])
+        if iszero(cached_theta(vals_tmp))
             @logmsg algo_opts.log_level "$(pad_str) Using `xn` as next iterate."
             xr_opt = copy(step_vals.xn)
             ret = :SUCCESS
@@ -29,7 +29,7 @@ function do_restoration(
             ret == :TODO
         )
             @logmsg algo_opts.log_level "$(pad_str) Trying to solve nonlinear subproblem"
-            x0 = ret == :NONAN ? step_vals.xn : vals.x
+            x0 = ret == :NONAN ? step_vals.xn : cached_x(vals)
 	        (θ_opt, xr_opt, ret) = solve_restoration_problem(
                 mop, vals_tmp, scaler, scaled_cons, x0, algo_opts.nl_opt
             )
@@ -67,21 +67,25 @@ function do_restoration(
 end
 
 function restoration_objective(mop, vals_tmp, scaler, scaled_cons)
-    @unpack hx, gx, Ex, Ax, Ex_min_c, Ax_min_b, ξ = vals_tmp
     @unpack A, b, E, c = scaled_cons
     function objf(xr::Vector, grad::Vector)
         if !isempty(grad)
             @error "Restoration only supports derivative-free NLopt algorithms."
         end
 
-        copyto!(ξ, xr)
-        apply_scaling!(ξ, scaler, InverseScaling())
-        @ignoraise nl_eq_constraints!(hx, mop, ξ)
-        @ignoraise nl_ineq_constraints!(gx, mop, ξ)
-        lin_cons!(Ex_min_c, Ex, E, c, xr)
-        lin_cons!(Ax_min_b, Ax, A, b, xr)
+        ξ = cached_ξ(vals_tmp)
+        unscale!(ξ, scaler, xr)
+        @ignoraise nl_eq_constraints!(cached_hx(vals_tmp), mop, ξ)
+        @ignoraise nl_ineq_constraints!(cached_gx(vals_tmp), mop, ξ)
+        lin_cons!(cached_Ex_min_c(vals_tmp), cached_Ex(vals_tmp), E, c, xr)
+        lin_cons!(cached_Ax_min_b(vals_tmp), cached_Ax(vals_tmp), A, b, xr)
         
-        theta = constraint_violation(hx, gx, Ex_min_c, Ax_min_b)
+        theta = constraint_violation(
+            cached_hx(vals_tmp), 
+            cached_gx(vals_tmp), 
+            cached_Ex_min_c(vals_tmp), 
+            cached_Ax_min_b(vals_tmp)
+        )
         return theta
     end
     return objf
@@ -119,21 +123,21 @@ function postproccess_restoration(
     @unpack log_level = algo_opts
     ## the nonlinear problem was solved successfully.
     ## pretend, trial point was next iterate and set values
-    copyto!(vals_tmp.x, xr_opt)
+    copyto!(cached_x(vals_tmp), xr_opt)
     @ignoraise eval_mop!(vals_tmp, mop, scaler)
 
-    @. update_results.diff_x = vals.x - vals_tmp.x
-    @. update_results.diff_fx = vals.fx - vals_tmp.fx
-    @. update_results.diff_fx_mod = mod_vals.fx
+    update_results.diff_x .= cached_x(vals) .- cached_x(vals_tmp)
+    update_results.diff_fx .= cached_fx(vals) .- cached_fx(vals_tmp)
+    update_results.diff_fx_mod .= cached_fx(mod_vals)
 
     ## the next point should be acceptable for the filter:
-    if is_acceptable(filter, vals_tmp.theta_ref[], vals_tmp.phi_ref[])
+    if is_acceptable(filter, cached_theta(vals_tmp), cached_Phi(vals_tmp))
         ## make models valid at `x + r` and set model values
         ## also compute normal step based on models
         @ignoraise update_models!(mod, Δ, scaler, vals_tmp, scaled_cons; log_level, indent)
         @ignoraise eval_and_diff_mod!(mod_vals, mod, vals_tmp.x)
 
-        @. update_results.diff_fx_mod -= mod_vals.fx
+        update_results.diff_fx_mod .-= cached_fx(mod_vals)
 
         @ignoraise do_normal_step!(
             step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals_tmp, mod_vals;
@@ -164,7 +168,7 @@ function postproccess_restoration(
         if n_is_compatible
             finalize_update_results!(update_results, _Δ, RESTORATION, true)
             
-            @. step_vals.n = vals_tmp.x - vals.x
+            step_vals.n .= cached_x(vals_tmp) .- cached_x(vals)
             @. step_vals.d = 0
             @. step_vals.s = step_vals.n
 

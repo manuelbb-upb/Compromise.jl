@@ -59,6 +59,10 @@ function vec2str(x, max_entries=typemax(Int), digits=10)
 	return x_str
 end
 
+function array(T::Type, size...)
+  return Array{T}(undef, size...)
+end
+
 macro ignoraise(ex, loglevelex=nothing)
 	has_lhs = false
 	if Meta.isexpr(ex, :(=), 2)

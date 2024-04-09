@@ -14,7 +14,7 @@ function criticality_routine(
         backtrack_in_crit_routine = algo_opts
         
     χ = step_vals.crit_ref[]
-    θ = vals.theta_ref[]
+    θ = cached_theta(vals)
     Δ_init = Δ
     stop_code = nothing
     if θ < eps_theta && (χ < eps_crit && Δ > crit_M * χ )

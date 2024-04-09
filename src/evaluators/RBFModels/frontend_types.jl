@@ -28,6 +28,7 @@
     max_points :: Union{Int, Nothing} = nothing
 
     database :: Union{Nothing, RBFDatabase} = nothing
+    database_rwlock :: Union{Nothing, AbstractReadWriteLock}=nothing
     database_size :: Union{Int, Nothing} = nothing
     database_chunk_size :: Union{Int, Nothing} = nothing
 
@@ -51,6 +52,8 @@
     ## TODO `max_evals` (soft limit on maximum number of evaluations)
     @assert isnothing(poly_deg) || poly_deg in (0,1)
 end
+
+@batteries RBFConfig selfconstructor=false
 
 Base.@kwdef struct RBFParameters{T<:Real}
     ## meta data for `Base.show`
@@ -386,6 +389,7 @@ function rbf_init_model(
     kernel :: AbstractRBFKernel,
     shape_parameter_function :: Union{Nothing, Number, Function},
     database :: Union{Nothing, RBFDatabase},
+    database_rwlock :: Union{Nothing, AbstractReadWriteLock}, 
     database_size :: Union{Nothing, Integer}, 
     database_chunk_size :: Union{Nothing, Integer},
     max_points :: Union{Nothing, Integer}, 
@@ -411,7 +415,8 @@ function rbf_init_model(
     surrogate = RBFSurrogate(; dim_x, dim_y, kernel, poly_deg, dim_φ=-1)
 
     if isnothing(database) || database.dim_x != dim_x || database.dim_y != dim_y
-      database = init_rbf_database(dim_x, dim_y, database_size, database_chunk_size, T)
+      database = init_rbf_database(
+        dim_x, dim_y, database_size, database_chunk_size, T, database_rwlock)
     end
 
     @unpack poly_deg, dim_π = surrogate

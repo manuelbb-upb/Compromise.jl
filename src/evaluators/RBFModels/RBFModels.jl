@@ -3,6 +3,7 @@ module RBFModels
 using ..Compromise.CompromiseEvaluators
 const CE = CompromiseEvaluators
 import ..Compromise: @ignoraise, DEFAULT_FLOAT_TYPE, project_into_box!
+import ..Compromise: AbstractReadWriteLock, default_rw_lock, lock_read, unlock_read, lock_write
 import ..Compromise: subscript, supscript, pretty_row_vec, RVec
 import ..Compromise: trust_region_bounds!, intersect_box, AbstractStoppingCriterion, stop_message
 import Printf: @sprintf
@@ -12,7 +13,6 @@ using ElasticArrays: resize! # explicit import to avoid false linter hints
 import LinearAlgebra as LA
 using Parameters: @with_kw, @unpack
 using StructHelpers: @batteries
-import ConcurrentUtils: ReadWriteLock, lock_read, unlock_read
 import Logging: @logmsg, Info
 
 struct RBFConstructionImpossible <: AbstractStoppingCriterion end
@@ -99,7 +99,7 @@ function CE.init_surrogate(
 )
     @unpack (
         kernel, search_factor, max_search_factor, th_qr, th_cholesky, max_points, 
-        database, database_size, database_chunk_size, enforce_fully_linear, poly_deg, 
+        database, database_rwlock, database_size, database_chunk_size, enforce_fully_linear, poly_deg, 
         shape_parameter_function, sampling_factor, max_sampling_factor,
     ) = cfg
     if require_fully_linear
@@ -107,7 +107,7 @@ function CE.init_surrogate(
     end
     return rbf_init_model(
         dim_in, dim_out, poly_deg, delta_max, kernel, shape_parameter_function, 
-        database, database_size, database_chunk_size, max_points, enforce_fully_linear, 
+        database, database_rwlock, database_size, database_chunk_size, max_points, enforce_fully_linear, 
         search_factor, max_search_factor, sampling_factor, max_sampling_factor, 
         th_qr, th_cholesky, T
     )
