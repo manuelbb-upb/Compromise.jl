@@ -569,9 +569,9 @@ function universal_copy!(
     return mod_trgt
 end
 
-function process_trial_point!(mod::SimpleMOPSurrogate, vals_trial, update_results)
+function process_trial_point!(mod::SimpleMOPSurrogate, vals_trial, iteration_status)
     xtrial = cached_x(vals_trial)
-    isnext = update_results.point_has_changed
+    isnext = _trial_point_accepted(iteration_status)
     if !isnothing(mod.mod_objectives)
         CE.process_trial_point!(
             mod.mod_objectives, xtrial, cached_fx(vals_trial), isnext)

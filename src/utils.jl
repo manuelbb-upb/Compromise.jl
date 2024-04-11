@@ -7,45 +7,6 @@ function ensure_float_type(arr::AbstractArray{F}, ::Type{T}) where {F,T}
 	return T.(arr)
 end
 
-macro forward(type_ex, call_ex)
-	@assert Meta.isexpr(type_ex, :(.), 2)
-	type_name, wrapped_fn_name = type_ex.args
-    @assert call_ex.head == :call
-    func_name = call_ex.args[1]
-    func_args = Any[]
-    kwargs = nothing
-    for arg_ex in call_ex.args[2:end]
-        if arg_ex isa Symbol
-            push!(func_args, arg_ex)
-        elseif Meta.isexpr(arg_ex, :(::))
-			if length(arg_ex.args) < 2
-				pushfirst!(arg_ex.args, gensym())
-			end
-			vt = arg_ex.args[2]
-            if vt == type_name
-                push!(func_args, :(getfield($(arg_ex.args[1]), $(wrapped_fn_name))))
-            else
-                push!(func_args, arg_ex.args[1])
-            end
-        elseif Meta.isexpr(arg_ex, :parameters)
-            kwargs = arg_ex.args
-        end
-    end
-    if isnothing(kwargs)
-        return quote 
-            function $(func_name)($(call_ex.args[2:end]...))
-                return $(func_name)($(func_args...))
-            end
-        end |> esc
-    else
-        return quote 
-            function $(func_name)($(call_ex.args[2:end]...))
-                return $(func_name)($(func_args...); $(kwargs...))
-            end
-        end |> esc
-    end
-end
-
 function vec2str(x, max_entries=typemax(Int), digits=10)
 	x_end = min(length(x), max_entries)
 	_x = x[1:x_end]
@@ -63,70 +24,67 @@ function array(T::Type, size...)
   return Array{T}(undef, size...)
 end
 
-macro ignoraise(ex, loglevelex=nothing)
-	has_lhs = false
+function _parse_ignoraise_expr(ex)
+	has_lhs = false
 	if Meta.isexpr(ex, :(=), 2)
 		lhs, rhs = esc.(ex.args)
 		has_lhs = true
 	else
+		lhs = nothing	# not really necessary
 		rhs = esc(ex)
 	end
+	return has_lhs, lhs, rhs
+end
+
+"""
+	@ignoraise a, b, c = critical_function(args...) [indent=0]
+
+Evaluate the right-hand side.
+If it returns an `AbstractStoppingCriterion`, make sure it is wrapped and return it.
+Otherwise, unpack the returned values into the left-hand side.
+
+Also valid:
+```julia
+@ignoraise critical_function(args...)
+@ignoraise critical_function(args...) indent_var
+```
+The indent expression must evaluate to an `Int`.
+"""
+macro ignoraise(ex, indent_ex=0)
+	has_lhs, lhs, rhs = _parse_ignoraise_expr(ex)
 	
 	return quote
 		ret_val = $(rhs)
-		if isa(ret_val, AbstractStoppingCriterion)
-			wrapped = if !isa(ret_val, WrappedStoppingCriterion)
-				WrappedStoppingCriterion(ret_val, $(QuoteNode(__source__)), false)
-			else
-				ret_val
-			end
-			$(if !isnothing(loglevelex)
-				quote
-					if !wrapped.has_logged
-						stop_msg = stop_message(wrapped.crit)
-						if !isnothing(stop_msg)
-							@logmsg $(esc(loglevelex)) stop_msg
-						end
-						wrapped.has_logged = true
-					end
-				end
-			end)
-			return wrapped
+		if ret_val isa AbstractStoppingCriterion
+			return wrap_stop_crit(
+				ret_val, $(QuoteNode(__source__)), $(esc(indent_ex))
+			)
 		end
 		$(if has_lhs
-			:($(lhs) = ret_val)
+			:($(lhs) = wrapped)
 		else
 			:(ret_val = nothing)
 		end)
 	end
 end
 
-macro ignorebreak(ex, loglevelex=nothing)
-	has_lhs = false
-	if Meta.isexpr(ex, :(=), 2)
-		lhs, rhs = esc.(ex.args)
-		has_lhs = true
-	else
-		rhs = esc(ex)
-	end
-	
+"""
+	@ignorebreak ret_var = critical_function(args...)
+
+Similar to `@ignoraise`, but instead of returning if `critical_function` returns 
+an `AbstractStoppingCriterion`, we `break`.
+This allows for post-processing before eventually returning.
+`ret_var` is optional, but in constrast to `@ignoraise`, we unpack unconditionally,
+so length of return values should match length of left-hand side expression.
+"""
+macro ignorebreak(ex, indent_ex=0)
+	has_lhs, lhs, rhs = _parse_ignoraise_expr(ex)
+		
 	return quote
 		ret_val = $(rhs)
-		do_break = isa(ret_val, AbstractStoppingCriterion)
-		$(if !isnothing(loglevelex)
-			quote
-				if ret_val isa WrappedStoppingCriterion
-					wrapped = ret_val
-					if !wrapped.has_logged
-						stop_msg = stop_message(wrapped.crit)
-						if !isnothing(stop_msg)
-							@logmsg $(esc(loglevelex)) stop_msg
-						end
-						wrapped.has_logged = true
-					end
-				end
-			end
-		end)
+		ret_val = wrap_stop_crit(
+			ret_val, $(QuoteNode(__source__)), $(esc(indent_ex)))
+		do_break = ret_val isa AbstractStoppingCriterion
 		$(if has_lhs
 			:($(lhs) = ret_val)
 		else
@@ -144,6 +102,13 @@ end
 function universal_copy!(trgt::Base.RefValue{T}, src::Base.RefValue{F}) where {T, F}
 	trgt[] = src[]
 	nothing
+end
+
+function custom_copy!(trgt, src)
+	if objectid(trgt) == objectid(src)
+		return nothing
+	end
+	return universal_copy!(trgt, src)
 end
 
 """
@@ -201,6 +166,14 @@ const SUBSCRIPT_DICT = Base.ImmutableDict(
 	8 => "₈",
 	9 => "₉"
 )
+
+const INDENT_STRINGS = Base.ImmutableDict(
+	(i => lpad("", i) for i = 1:10)...
+)
+
+function indent_str(i)
+	return INDENT_STRINGS[i]
+end
 
 function supscript(num::Integer)
 	return join((SUPERSCRIPT_DICT[i] for i in reverse(digits(num))), "")

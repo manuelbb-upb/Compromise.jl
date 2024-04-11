@@ -115,6 +115,7 @@ function test_simple_cache(@nospecialize(mop))
     @test isequal(C.cached_Ex_min_c(cache), cache.Ex_min_c)
     @test isequal(C.cached_Ax_min_b(cache), cache.Ax_min_b)
     
+    #=
     @test isequal(C.cached_theta(cache), cache.theta_ref[])
     C.cached_theta!(cache, 3.14)
     @test C.cached_theta(cache) == 3.14
@@ -124,6 +125,7 @@ function test_simple_cache(@nospecialize(mop))
     C.cached_Phi!(cache, 3.14)
     @test C.cached_Phi(cache) == 3.14
     @test isequal(C.cached_Phi(cache), cache.phi_ref[])
+    =#
 
     @test C.dim_vars(cache) == length(cache.x)
     @test C.dim_vars(cache) == length(cache.ξ)

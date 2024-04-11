@@ -1,9 +1,78 @@
+# This file describes type to treat the restoration problem of an outer run 
+# as a MOP, which is to be solved in an inner run.
+# Mathematically, the restoration problem of the outer run is 
+#=
+```math
+\min_{x} 
+\max \{0, g(x), |h(x)|, Ax-b, |Ex-c|, lb - x, x - ub\}
+```
+Let's assume that ``x`` is feasible for the box constraints and that we can maintain 
+feasibility for box-constraints.
+We can rewrite as
+```math
+\begin{aligned}
+&\min_{x, t} t &\text{subject to} \\
+&t ≥ 0, \\
+g(x) ≤ t, \\
+|h(x)| ≤ t, \\
+Ax - b ≤ t, \\
+|Ex - c| ≤ t.
+\end{aligned}
+```
+Further, the absolute value of equality constraints can be eliminated:
+```math
+|h(x)| ≤ t ⇔ -t ≤ h(x) ≤ t ⇔ (-t - h(x) ≤ 0) ∧ (-t + h(x) ≤ 0) 
+```
+In standard form, the new problem reads:
+```math
+\begin{aligned}
+&
+    \min{t, x} t 
+    &
+        \text{subject to} 
+    \\
+&
+    t ∈ [0, ∞), \; lb ≤ x ≤ ub,
+    \\
+&
+    -t +g(x) ≤ 0,
+    \\
+&
+    -t -h(x) ≤ 0,
+    \\
+&
+    -t +h(x) ≤ 0,
+    \\
+&
+    -t + Ax - b ≤ 0,
+    \\
+&
+    -t - Ex + c ≤ 0,
+    \\
+&
+    -t + Ex - c ≤ 0.
+\end{aligned}
+```
+The new problem has 
+* ``n+1`` variables, ``[t, x_1, …, x_n]``,
+* one objective,
+* and only inequality constraints (nonlinear and linear).
+
+We want to re-use as much stuff as possible from the outer optimization loop.
+=#
+
 include("CheetahViews/CheetahViews.jl")
 
 import PaddedViews: PaddedView
 import LazyArrays: BroadcastArray
 
 import .CheetahViews: cheetah_vcat, cheetah_blockcat
+
+Base.@kwdef function RestorationValueCache{F, wrappedType} <: AbstractValueCache{F}
+    wrapped :: wrappedType
+    t :: Base.RefValue{F} = Ref(float_type(wrapped)(NaN))
+    const_empty_vec :: Vector{F} = array(float_type(wrapped), 0)
+end
 
 Base.@kwdef struct RestorationMOP{
     F, MOPType, MODType, LB<:AbstractVector{F}, UB<:AbstractVector{F},

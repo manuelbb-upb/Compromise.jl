@@ -51,22 +51,6 @@ cached_Ax(simple_cache::SimpleValueCache)=simple_cache.Ax
 cached_Ex_min_c(simple_cache::SimpleValueCache)=simple_cache.Ex_min_c
 cached_Ax_min_b(simple_cache::SimpleValueCache)=simple_cache.Ax_min_b
 
-cached_theta(simple_cache::SimpleValueCache)=simple_cache.theta_ref[]
-cached_Phi(simple_cache::SimpleValueCache)=simple_cache.phi_ref[]
-
-function cached_theta!(
-    simple_cache::SimpleValueCache, val
-)
-    simple_cache.theta_ref[]=val
-    return true
-end
-function cached_Phi!(
-    simple_cache::SimpleValueCache, val
-)
-    simple_cache.phi_ref[]=val
-    return true
-end
-
 cached_Dx(simple_cache::SimpleSurrogateValueCache)=simple_cache.Dx
 cached_Dfx(simple_cache::SimpleSurrogateValueCache)=simple_cache.Dfx
 cached_Dhx(simple_cache::SimpleSurrogateValueCache)=simple_cache.Dhx
@@ -126,7 +110,7 @@ function universal_copy!(
 )
 	for fn in fieldnames(typeof(mod_vals_trgt))
 		trgt_fn = getfield(mod_vals_trgt, fn)
-		universal_copy!(trgt_fn, getfield(mod_vals_src, fn))
+		custom_copy!(trgt_fn, getfield(mod_vals_src, fn))
 	end
 	return nothing
 end

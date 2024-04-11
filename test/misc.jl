@@ -273,7 +273,7 @@ end
     #%%
     struct MyCallback <: Compromise.AbstractStoppingCriterion end
             
-    function Compromise.evaluate_stopping_criterion(
+    function Compromise.check_stopping_criterion(
         crit::MyCallback, ::Compromise.CheckPreIteration,
         mop, scaler, lin_cons, scaled_cons,
         vals, filter, algo_opts;

@@ -1,15 +1,19 @@
 function do_restoration(
-    mop, Δ, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, update_results, 
-    stop_crits, 
-    user_callback, 
-    algo_opts;
-    it_index, indent
+    optimizer_caches, algo_opts
 )
+    indent = 1
+    @unpack (
+        mop, mod, scaler, lin_cons, scaled_cons,
+        vals, vals_tmp, step_vals, mod_vals, filter, step_cache, 
+        stop_crits, iteration_scalars, iteration_status 
+    ) = optimizer_caches
+    Δ = iteration_scalars.delta
+    
     indent += 1
     pad_str = lpad("", indent)
     @logmsg algo_opts.log_level "$(pad_str)Starting restoration."
-    update_results.it_stat = RESTORATION
+    
+    iteration_status.iteration_type = RESTORATION
 
     ret = :TODO
     if !any(isnan.(step_vals.n))
@@ -48,20 +52,17 @@ function do_restoration(
 		:MAXTIME_REACHED
     )
         @ignoraise postproccess_restoration(
-            xr_opt, Δ, update_results, mop, mod, scaler, lin_cons, scaled_cons,
+            xr_opt, Δ, trial_caches, mop, mod, scaler, lin_cons, scaled_cons,
             vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
-            it_index, indent
-        )
+            indent
+        ) indent
     else
         return InfeasibleStopping(indent)
     end
-    @ignoraise finish_iteration(
-        stop_crits, user_callback,
-        update_results, mop, mod, scaler, lin_cons, scaled_cons,
-        mod_vals, vals, vals_tmp, step_vals, filter, algo_opts;
-        it_index, indent
-    )
     
+    # If we are here, then restoration was successfull and `trial_caches` are set
+    iteration_scalars.delta = Δ
+    @ignoraise check_stopping_criterion(stop_crits, CheckPostIteration(), optimizer_caches, algo_opts) indent
     accept_trial_point!(vals, vals_tmp)
     return nothing
 end
@@ -116,9 +117,9 @@ function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, nl_opt
 end
 
 function postproccess_restoration(
-    xr_opt, Δ, update_results, mop, mod, scaler, lin_cons, scaled_cons,
+    xr_opt, Δ, trial_caches, mop, mod, scaler, lin_cons, scaled_cons,
     vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
-    it_index, indent
+    indent
 )
     @unpack log_level = algo_opts
     ## the nonlinear problem was solved successfully.
@@ -126,9 +127,9 @@ function postproccess_restoration(
     copyto!(cached_x(vals_tmp), xr_opt)
     @ignoraise eval_mop!(vals_tmp, mop, scaler)
 
-    update_results.diff_x .= cached_x(vals) .- cached_x(vals_tmp)
-    update_results.diff_fx .= cached_fx(vals) .- cached_fx(vals_tmp)
-    update_results.diff_fx_mod .= cached_fx(mod_vals)
+    trial_caches.diff_x .= cached_x(vals) .- cached_x(vals_tmp)
+    trial_caches.diff_fx .= cached_fx(vals) .- cached_fx(vals_tmp)
+    trial_caches.diff_fx_mod .= cached_fx(mod_vals)
 
     ## the next point should be acceptable for the filter:
     if is_acceptable(filter, cached_theta(vals_tmp), cached_Phi(vals_tmp))
@@ -137,11 +138,11 @@ function postproccess_restoration(
         @ignoraise update_models!(mod, Δ, scaler, vals_tmp, scaled_cons; log_level, indent)
         @ignoraise eval_and_diff_mod!(mod_vals, mod, vals_tmp.x)
 
-        update_results.diff_fx_mod .-= cached_fx(mod_vals)
+        trial_caches.diff_fx_mod .-= cached_fx(mod_vals)
 
         @ignoraise do_normal_step!(
             step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals_tmp, mod_vals;
-            it_index, log_level, indent
+            log_level, indent
         )
 
         @unpack c_delta, c_mu, mu, delta_max = algo_opts
@@ -166,8 +167,6 @@ function postproccess_restoration(
             end                
         end
         if n_is_compatible
-            finalize_update_results!(update_results, _Δ, RESTORATION, true)
-            
             step_vals.n .= cached_x(vals_tmp) .- cached_x(vals)
             @. step_vals.d = 0
             @. step_vals.s = step_vals.n
@@ -175,5 +174,6 @@ function postproccess_restoration(
             return nothing
         end
     end
+    # if we have not returned here, then no compatible normal step was found :(
     return InfeasibleStopping(indent)
 end

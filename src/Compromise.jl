@@ -21,10 +21,11 @@ import Reexport: @reexport
 import StructHelpers: @batteries
 
 # With the external dependencies available, we can include global type definitions and constants:
+include("macros.jl")
 include("value_caches.jl")
 include("types.jl")
-include("utils.jl")
 include("concurrent_locks.jl")
+include("utils.jl")
 
 # #### Optimization Packages
 # At some point, the choice of solver is meant to be configurable, with different
@@ -131,69 +132,6 @@ export MutableMOP, add_objectives!, add_nl_ineq_constraints!, add_nl_eq_constrai
 # ## The Algorithm
 # (This still neads some re-factoring...)
 
-function init_scaler(scaler_cfg::Symbol, lin_cons)
-    return init_scaler(Val(scaler_cfg), lin_cons)
-end
-
-function init_scaler(::Val, lin_cons)
-    N = lin_cons.n_vars
-    F = float_type(lin_cons)
-    return IdentityScaler{N,F}()
-end
-
-function init_scaler(::Val{:box}, lin_cons)
-    @unpack n_vars, lb, ub = lin_cons
-    F = float_type(lin_cons)
-    return init_box_scaler(lb, ub, n_vars, F)
-end
-
-function update_lin_cons!(scaled_cons, scaler, lin_cons)
-    scale_lin_cons!(scaled_cons, scaler, lin_cons)
-    return nothing
-end
-
-function init_step_vals(vals)
-    T = float_type(vals) 
-    return StepValueArrays(
-        dim_vars(vals), 
-        dim_objectives(vals), 
-        T
-    )
-end 
-
-function compatibility_test_rhs(c_delta, c_mu, mu, Δ)
-    return c_delta * min(Δ, c_mu + Δ^(1+mu))
-end
-
-function compatibility_test(n, c_delta, c_mu, mu, Δ)
-    return LA.norm(n, Inf) <= compatibility_test_rhs(c_delta, c_mu, mu, Δ)
-end
-
-function compatibility_test(n, algo_opts, Δ)
-    any(isnan.(n)) && return false
-    @unpack c_delta, c_mu, mu = algo_opts
-    return compatibility_test(n, c_delta, c_mu, mu, Δ)
-end
-
-function accept_trial_point!(vals, vals_tmp)
-    return universal_copy!(vals, vals_tmp)
-end
-
-function stopping_criteria(algo_opts)
-    return (
-        MaxIterStopping(;num_max_iter=algo_opts.max_iter),
-        MinimumRadiusStopping(;delta_min=algo_opts.stop_delta_min),
-        ArgsRelTolStopping(;tol=algo_opts.stop_xtol_rel),
-        ArgsAbsTolStopping(;tol=algo_opts.stop_xtol_abs),
-        ValsRelTolStopping(;tol=algo_opts.stop_ftol_rel),
-        ValsAbsTolStopping(;tol=algo_opts.stop_ftol_abs),
-        CritAbsTolStopping(;
-            crit_tol=algo_opts.stop_crit_tol_abs,
-            theta_tol=algo_opts.stop_theta_tol_abs
-        ),
-        MaxCritLoopsStopping(;num=algo_opts.stop_max_crit_loops)
-    )
-end
 
 function optimize(
     MOP::AbstractMOP, ξ0::RVec;
@@ -249,30 +187,27 @@ function optimize_with_algo(
     MOP::AbstractMOP, algo_opts::AlgorithmOptions, ξ0; 
     @nospecialize(user_callback = NoUserCallback()),
 )
-    init_result = initialize_structs(MOP, ξ0, algo_opts)
-    if !(isa(init_result, AbstractStoppingCriterion))
-        (
-            update_results, mop, mod, scaler, lin_cons, scaled_cons, 
-            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, stop_crits, 
-            algo_opts
-        ) = init_result
-
-        _ξ0 = copy(cached_ξ(vals))
+    optimizer_caches = initialize_structs(MOP, ξ0, algo_opts)
+    @unpack log_level = algo_opts
+    if !(isa(optimizer_caches, AbstractStoppingCriterion))
+        @unpack vals = optimizer_caches
+        
+        _ξ0 = copy(cached_ξ(vals))    # for final ReturnObject
 
         stop_code = nothing
-        @unpack log_level = algo_opts
         while true
-            @ignorebreak stop_code log_level
-            stop_code = do_iteration!(      # assume `copyto_model!`, otherwise, `mod, stop_code = do_iteration!...`
-                update_results, mop, mod, scaler, lin_cons, scaled_cons, 
-                vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, 
-                stop_crits, algo_opts, user_callback
-            )
+            @ignorebreak stop_code = do_iteration!(optimizer_caches, algo_opts)
         end
+        log_stop_code(stop_code, log_level)
         return ReturnObject(_ξ0, vals, stop_code, mod)
     else
-        return ReturnObject(ξ0, nothing, init_result, nothing)
+        log_stop_code(optimizer_caches, log_level)
+        return ReturnObject(ξ0, nothing, optimizer_caches, nothing)
     end
+end
+
+function log_stop_code(crit, log_level)
+    @logmsg log_level stop_message(crit)
 end
 
 function initialize_structs( 
@@ -291,6 +226,7 @@ function initialize_structs(
     ## INITIALIZATION (Iteration 0)
     mop = initialize(MOP)
     T = float_type(mop)
+    NaNT = T(NaN)
     
     ## struct holding constant linear constraint informaton (lb, ub, A_b, E_c)
     ## set these first, because they are needed to initialize a scaler 
@@ -312,13 +248,13 @@ function initialize_structs(
     )
 
     ## caches for working arrays x, fx, hx, gx, Ex, Ax, …
-    vals = init_value_caches(mop)
+    vals = WrappedMOPCache(init_value_caches(mop))
 
     ## (perform 1 evaluation to set values already)
     Base.copyto!(cached_ξ(vals), ξ0)
     project_into_box!(cached_ξ(vals), lin_cons)
     scale!(cached_x(vals), scaler, cached_ξ(vals))
-    @ignoraise eval_mop!(vals, mop)
+    @ignoraise eval_mop!(vals, mop) indent
 
     vals_tmp = deepcopy(vals)
      
@@ -331,58 +267,66 @@ function initialize_structs(
     step_cache = init_step_cache(algo_opts.step_config, vals, mod_vals)
 
     crit_cache = CriticalityRoutineCache(
-        deepcopy(mod_vals),
+        NaNT,
+        -1,
         deepcopy(step_vals),
-        deepcopy(step_cache),
-        universal_copy_model(mod)
     )
 
     ## initialize empty filter
     filter = StandardFilter{T}()
 
+    ## caches for trial point checking:
+    trial_caches = TrialCaches{T}(;
+        diff_fx = array(T, dim_objectives(mop)),
+        diff_fx_mod = array(T, dim_objectives(mop))
+    )
+
     ## finally, compose information about the 0-th iteration for next_iterations:
-    update_results = init_update_results(T, n_vars, dim_objectives(mop), algo_opts.delta_init)
+    iteration_status = IterationStatus(;
+        iteration_type = INITIALIZATION,
+        radius_change = INITIAL_RADIUS,
+        step_class = INITIAL_STEP,
+    )
+    @unpack delta_init = algo_opts
+    iteration_scalars = IterationScalars{T}(;
+        it_index = 0,
+        delta = T(delta_init),
+    )
     
     ## prepare stopping
-    stop_crits = stopping_criteria(algo_opts)
-    return (
-        update_results, mop, mod, scaler, lin_cons, scaled_cons, 
-        vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, stop_crits, 
-        algo_opts
+    stop_crits = stopping_criteria(algo_opts, user_callback)
+
+    return OptimizerCaches(
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp, mod_vals, filter, 
+        step_cache, crit_cache, trial_caches, iteration_status, iteration_scalars, 
+        stop_crits
     )
 end
 
 function do_iteration!(
-    update_results, mop, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, crit_cache, stop_crits, algo_opts,
-    @nospecialize(user_callback);
+    optimizer_caches, algo_opts
 )
-    ## assumptions at the start of an iteration:
-    ## * `vals` holds valid values for the stored argument vector `x`.
-    ## * If the models `mod` are valid for `vals`, then `mod_vals` are valid, too.
-    @unpack Δ_pre, Δ_post, it_index, point_has_changed = update_results
-    last_it_stat = update_results.it_stat
+    indent = 0
 
-    Δ = Δ_post
-    radius_has_changed = Δ_pre != Δ_post
-    it_index += 1
-
+    @unpack (
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp, mod_vals, filter, 
+        step_cache, crit_cache, trial_caches, iteration_status, iteration_scalars, 
+        stop_crits, 
+    ) = optimizer_caches
+   
     @unpack log_level = algo_opts
+    
+    iteration_scalars.it_index += 1
+    @unpack it_index, delta = iteration_scalars
 
-    @ignoraise check_stopping_criteria(
-        stop_crits, CheckPreIteration(), mop, scaler, lin_cons, scaled_cons, vals, filter, algo_opts;
-        it_index, delta=Δ, indent=0
-    )
     @ignoraise check_stopping_criterion(
-        user_callback, CheckPreIteration(), mop, scaler, lin_cons, scaled_cons, vals, filter, algo_opts;
-        it_index, delta=Δ, indent=0
-    )
+        stop_crits, CheckPreIteration(), optimizer_caches, algo_opts) indent
 
     @logmsg log_level """\n
     ###########################
     #  ITERATION $(it_index).
     ###########################
-    Δ = $(Δ)
+    Δ = $(delta)
     θ = $(cached_theta(vals))
     ξ = $(pretty_row_vec(cached_ξ(vals)))
     x = $(pretty_row_vec(cached_x(vals)))
@@ -393,78 +337,63 @@ function do_iteration!(
     ## - the last iteration was a successfull restoration iteration.
     ## - if the point has not changed and the models do not depend on the radius or  
     ##   radius has not changed neither.
+    radius_has_changed = Int8(iteration_status.radius_update) > 1
     models_valid = (
-        last_it_stat == RESTORATION || 
-        !point_has_changed && !(depends_on_radius(mod) && radius_has_changed)
+        iteration_status.iteration_type == RESTORATION ||
+        !_trial_point_accepted(iteration_status) && !(depends_on_radius(mod) && radius_has_changed)
     )
 
     if !models_valid
         @logmsg log_level "* Updating Surrogates."
-        @ignoraise update_models!(mod, Δ, scaler, vals, scaled_cons; log_level, indent=0)
-        @ignoraise eval_and_diff_mod!(mod_vals, mod, vals.x)
+        @ignoraise update_models!(mod, delta, scaler, vals, scaled_cons; log_level, indent) indent
+        @ignoraise eval_and_diff_mod!(mod_vals, mod, vals.x) indent
     end
     @ignoraise do_normal_step!(
-        step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
-        it_index, log_level, indent=0
-    )
+        step_cache, step_vals, delta, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
+        log_level, indent=0
+    ) indent
 
-    n_is_compatible = compatibility_test(step_vals.n, algo_opts, Δ)
+    n_is_compatible = compatibility_test(step_vals.n, algo_opts, delta)
 
     if !n_is_compatible
         ## Try to do a restoration
         @logmsg log_level "* Normal step incompatible. Trying restoration."
         add_to_filter!(filter, cached_theta(vals), cached_Phi(vals))
-        @ignoraise do_restoration(
-            mop, Δ, mod, scaler, lin_cons, scaled_cons,
-            vals, vals_tmp, step_vals, mod_vals, filter, step_cache, update_results, 
-            stop_crits, user_callback, algo_opts;
-            it_index, indent=0
-        )
+        @ignoraise do_restoration(optimizer_caches, algo_opts) indent
     end
 
     @logmsg log_level "* Computing a descent step."
     @ignoraise do_descent_step!(
-        step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
-        log_level)
+        step_cache, step_vals, delta, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
+        log_level
+    ) indent
     
     @logmsg log_level " - Criticality χ=$(step_vals.crit_ref[]), ‖d‖₂=$(LA.norm(step_vals.d)), ‖s‖₂=$(LA.norm(step_vals.s))."
 
-    @ignoraise check_stopping_criteria(
-        stop_crits, CheckPostDescentStep(), mop, mod, scaler, lin_cons, scaled_cons, 
-        vals, mod_vals, step_vals, filter, algo_opts; it_index, delta=Δ
-    ) 
     @ignoraise check_stopping_criterion(
-        user_callback, CheckPostDescentStep(), mop, mod, scaler, lin_cons, scaled_cons, 
-        vals, mod_vals, step_vals, filter, algo_opts; it_index, delta=Δ
-    )
-   
+        stop_crits, CheckPostDescentStep(), optimizer_caches, algo_opts) indent
+ 
     ## For the convergence analysis to work, we also have to have the Criticality Routine:
-    @ignoraise Δ = criticality_routine(
-        Δ, mod, step_vals, mod_vals, step_cache, crit_cache,
-        mop, scaler, lin_cons, scaled_cons, vals, vals_tmp, stop_crits, algo_opts, 
-        user_callback; it_index, indent=0
-    )
+    @ignoraise delta_new = criticality_routine(optimizer_caches, algo_opts; indent) indent
+    iteration_scalars.delta = delta_new
+    delta = iteration_scalars.delta
     
-    ## test if trial point is acceptable for filter and set missing meta data in `update_results`:
-    @ignoraise test_trial_point!(
-        update_results, vals_tmp, Δ, mop, scaler, filter, vals, mod_vals, step_vals, algo_opts;
-        it_index, indent=0
-    )
+    ## test if trial point is acceptable
+    @ignoraise delta_new = test_trial_point!(optimizer_caches, algo_opts; indent) indent
+    iteration_scalars.delta = delta_new
+    delta = iteration_scalars.delta
+    
+    @ignoraise check_stopping_criterion(
+        stop_crits, CheckPostIteration(), optimizer_caches, algo_opts) indent
 
-    @ignoraise process_trial_point!(mod, vals_tmp, update_results)
+    @ignoraise process_trial_point!(mod, vals_tmp, iteration_status) indent
 
     ## update filter
-    if update_results.it_stat == FILTER_ADD || update_results.it_stat == FILTER_ADD_SHRINK
+    if iteration_status.iteration_type == THETA_STEP
         add_to_filter!(filter, cached_theta(vals_tmp), cached_Phi(vals_tmp))
     end
-
-    @ignoraise finish_iteration(
-        stop_crits, user_callback, update_results, mop, mod, scaler, lin_cons,
-        scaled_cons, mod_vals, vals, vals_tmp, step_vals, filter, algo_opts; 
-        it_index, indent=0
-    )
-
-    if update_results.point_has_changed
+   
+    if _trial_point_accepted(iteration_status)
         ## accept trial point, mathematically ``xₖ₊₁ ← xₖ + sₖ``, pseudo-code `copyto!(vals, vals_tmp)`: 
         accept_trial_point!(vals, vals_tmp)
     end
@@ -472,26 +401,53 @@ function do_iteration!(
     return nothing
 end
 
-function finish_iteration(
-    stop_crits, user_callback,
-    update_results, mop, mod, scaler, lin_cons,
-    scaled_cons, mod_vals, vals, vals_tmp, step_vals, filter, algo_opts; 
-    it_index, indent
-)
-    # Now, check stopping criteria.
-    # It has to happen here, so that the criteria have access to both `vals` and `vals_tmp`.
-    @ignoraise check_stopping_criteria(
-        stop_crits, CheckPostIteration(), 
-        update_results, mop, mod, scaler, lin_cons, scaled_cons,
-        vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
-        it_index, indent
+
+function init_scaler(scaler_cfg::Symbol, lin_cons)
+    return init_scaler(Val(scaler_cfg), lin_cons)
+end
+
+function init_scaler(::Val, lin_cons)
+    N = lin_cons.n_vars
+    F = float_type(lin_cons)
+    return IdentityScaler{N,F}()
+end
+
+function init_scaler(::Val{:box}, lin_cons)
+    @unpack n_vars, lb, ub = lin_cons
+    F = float_type(lin_cons)
+    return init_box_scaler(lb, ub, n_vars, F)
+end
+
+function update_lin_cons!(scaled_cons, scaler, lin_cons)
+    scale_lin_cons!(scaled_cons, scaler, lin_cons)
+    return nothing
+end
+
+function init_step_vals(vals)
+    T = float_type(vals) 
+    return StepValueArrays(
+        dim_vars(vals), 
+        dim_objectives(vals), 
+        T
     )
-    @ignoraise check_stopping_criterion(
-        user_callback, CheckPostIteration(), 
-        update_results, mop, mod, scaler, lin_cons, scaled_cons,
-        vals, mod_vals, vals_tmp, step_vals, filter, algo_opts;
-        it_index, indent
-    )
+end 
+
+function compatibility_test_rhs(c_delta, c_mu, mu, Δ)
+    return c_delta * min(Δ, c_mu + Δ^(1+mu))
+end
+
+function compatibility_test(n, c_delta, c_mu, mu, Δ)
+    return LA.norm(n, Inf) <= compatibility_test_rhs(c_delta, c_mu, mu, Δ)
+end
+
+function compatibility_test(n, algo_opts, Δ)
+    any(isnan.(n)) && return false
+    @unpack c_delta, c_mu, mu = algo_opts
+    return compatibility_test(n, c_delta, c_mu, mu, Δ)
+end
+
+function accept_trial_point!(vals, vals_tmp)
+    return universal_copy!(vals, vals_tmp)
 end
 
 export optimize, AlgorithmOptions

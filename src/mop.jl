@@ -145,8 +145,6 @@ end
 # `cached_fx(mop_cache)` to retrieve the objective values for example.
 # Note, that the getter calls should return arrays, and we want to modify 
 # these array.
-# When scalar values are expected (`cached_theta`, `cached_Phi`), 
-# then the cache should implement setters (`cached_theta!`, `cached_Phi!`).
 
 function init_value_caches(::AbstractMOP)::AbstractMOPCache
     return nothing
@@ -180,8 +178,6 @@ function eval_mop!(mop_cache, mop)
         cached_Ax(mop_cache), 
         mop, ξ
     )
-    cached_theta!(mop_cache, θ)
-    cached_Phi!(mop_cache, Φ)
     return nothing
 end
 

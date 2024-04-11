@@ -34,191 +34,7 @@ abstract type AbstractAffineScaler end
 abstract type AbstractStepConfig end
 abstract type AbstractStepCache end
 
-# ## AlgorithmOptions
-"""
-	AlgorithmOptions(; kwargs...)
-
-Configure the optimization by passing keyword arguments:
-$(TYPEDFIELDS)
-"""
-Base.@kwdef struct AlgorithmOptions{_T <: Number, SC, SCALER_CFG_TYPE}
-	T :: Type{_T} = DEFAULT_FLOAT_TYPE
-
-	"Configuration object for descent and normal step computation."
-    step_config :: SC = SteepestDescentConfig()
-
-	"Configuration to determine variable scaling (if model supports it). Either `:box` or `:none`."
-    scaler_cfg :: SCALER_CFG_TYPE = Val(:box)
-
-	require_fully_linear_models :: Bool = true
-
-	"Control verbosity by setting a min. level for `@logmsg`."
-	log_level :: LogLevel = LogLevel(0)
-
-	"Maximum number of iterations."
-    max_iter :: Int = 500
-
-    "Stop if the trust region radius is reduced to below `stop_delta_min`."
-	stop_delta_min :: _T = eps(T)
-
-	"Stop if the trial point ``xₜ`` is accepted and ``‖xₜ - x‖≤ δ‖x‖``."
-	stop_xtol_rel :: _T = -Inf
-	"Stop if the trial point ``xₜ`` is accepted and ``‖xₜ - x‖≤ ε``."
-	stop_xtol_abs :: _T = -Inf
-	"Stop if the trial point ``xₜ`` is accepted and ``‖f(xₜ) - f(x)‖≤ δ‖f(x)‖``."
-	stop_ftol_rel :: _T = -Inf
-	"Stop if the trial point ``xₜ`` is accepted and ``‖f(xₜ) - f(x)‖≤ ε``."
-	stop_ftol_abs :: _T = -Inf
-
-	"Stop if for the approximate criticality it holds that ``χ̂(x) <= ε`` and for the feasibility that ``θ <= δ``."
-	stop_crit_tol_abs :: _T = -Inf
-	"Stop if for the approximate criticality it holds that ``χ̂(x) <= ε`` and for the feasibility that ``θ <= δ``."
-	stop_theta_tol_abs :: _T = eps(T)
-	
-	"Stop after the criticality routine has looped `stop_max_crit_loops` times."
-	stop_max_crit_loops :: Int = 10
-
-	# criticality test thresholds
-	"Lower bound for criticality before entering Criticality Routine."
-	eps_crit :: _T = 0.1
-	"Lower bound for feasibility before entering Criticality Routine."
-	eps_theta :: _T = 0.05
-	"At the end of the Criticality Routine the radius is possibly set to `crit_B * χ`."
-	crit_B :: _T = 100
-	"Criticality Routine runs until `Δ ≤ crit_M * χ`."
-	crit_M :: _T = 3*crit_B
-	"Trust region shrinking factor in criticality loops."
-	crit_alpha :: _T = 0.1
-
-	backtrack_in_crit_routine :: Bool = true
-	
-	# initialization
-	"Initial trust region radius."
-	delta_init :: _T = 0.5
-	"Maximum trust region radius."
-	delta_max :: _T = 2^5 * delta_init
-
-	# trust region updates
-	"Most severe trust region reduction factor."
-	gamma_shrink_much :: _T = 0.1 	    # 0.1 is suggested by Fletcher et. al. 
-	"Trust region reduction factor."
-	gamma_shrink :: _T = 0.5 			# 0.5 is suggested by Fletcher et. al. 
-	"Trust region enlargement factor."
-	gamma_grow :: _T = 2.0 			# 2.0 is suggested by Fletcher et. al. 
-
-	# acceptance test 
-	"Whether to require *all* objectives to be reduced or not."
-	strict_acceptance_test :: Bool = true
-	"Acceptance threshold."
-	nu_accept :: _T = 1e-4 			# 1e-2 is suggested by Fletcher et. al. 
-	"Success threshold."
-	nu_success :: _T = 0.4 			# 0.9 is suggested by Fletcher et. al. 
-	
-	# compatibilty parameters
-	"Factor for normal step compatibility test. The smaller `c_delta`, the stricter the test."
-	c_delta :: _T = 0.9 				# 0.7 is suggested by Fletcher et. al. 
-	"Factor for normal step compatibility test. The smaller `c_mu`, the stricter the test for small radii."
-	c_mu :: _T = 100.0 				# 100 is suggested by Fletcher et. al.
-	"Exponent for normal step compatibility test. The larger `mu`, the stricter the test for small radii."
-	mu :: _T = 0.01 					# 0.01 is suggested by Fletcher et. al.
-
-	# model decrease / constraint violation test
-	"Factor in the model decrease condition."
-	kappa_theta :: _T = 1e-4 			# 1e-4 is suggested by Fletcher et. al. 
-	"Exponent (for constraint violation) in the model decrease condition."
-	psi_theta :: _T = 2.0
-
-	"NLopt algorithm symbol for restoration phase."
-    nl_opt :: Symbol = :GN_DIRECT_L_RAND    
-end
-
-## to be sure that equality is based on field values:
-@batteries AlgorithmOptions selfconstructor=false
-
-function AlgorithmOptions{T, SC, SCALER_CFG_TYPE}(
-	typekw :: Type,
-    step_config :: SC,
-	scaler_cfg :: SCALER_CFG_TYPE,
-	require_fully_linear_models::Bool,
-	log_level::LogLevel,
-	max_iter::Integer,
-	stop_delta_min::Real,
-	stop_xtol_abs::Real,
-	stop_ftol_rel::Real,
-	stop_ftol_abs::Real,
-	stop_crit_tol_abs :: Real,
-	stop_theta_tol_abs :: Real,
-	stop_max_crit_loops :: Integer,
-	eps_crit :: Real, 
-	eps_theta :: Real,
-	crit_B :: Real,
-	crit_M :: Real,
-	crit_alpha :: Real,
-	backtrack_in_crit_routine :: Bool,
-	delta_init :: Real,
-	delta_max :: Real,
-	gamma_shrink_much :: Real,
-	gamma_shrink :: Real,
-	gamma_grow :: Real,
-	strict_acceptance_test :: Bool,
-	nu_accept::Real,
-	nu_success :: Real,
-	c_delta :: Real,
-	c_mu :: Real,
-	mu :: Real,
-	kappa_theta :: Real,
-	psi_theta :: Real, 
-	nl_opt :: Symbol,
-) where {T<:Real, SC, SCALER_CFG_TYPE}
-	@assert scaler_cfg isa AbstractAffineScaler || scaler_cfg isa Val || scaler_cfg == :box || scaler_cfg == :none
-	@assert string(nl_opt)[2] == 'N' "Restoration algorithm must be derivative free."
-	return AlgorithmOptions{T, SC, SCALER_CFG_TYPE}(
-		T,
-		step_config,
-		scaler_cfg,
-		require_fully_linear_models,
-		log_level,
-		max_iter,
-		stop_delta_min,
-		stop_xtol_abs,
-		stop_ftol_rel,
-		stop_ftol_abs,
-		stop_crit_tol_abs,
-		stop_theta_tol_abs,
-		stop_max_crit_loops,
-		eps_crit, 
-		eps_theta,
-		crit_B,
-		crit_M,
-		crit_alpha,
-		backtrack_in_crit_routine,
-		delta_init,
-		delta_max,
-		gamma_shrink_much,
-		gamma_shrink,
-		gamma_grow,
-		strict_acceptance_test,
-		nu_accept,
-		nu_success,
-		c_delta,
-		c_mu,
-		mu,
-		kappa_theta,
-		psi_theta, 
-		nl_opt,
-	)
-end
-function AlgorithmOptions(T::Type{_T}, step_config::SC, scaler_cfg::ST, args...) where {_T <: Real, SC, ST}
-	return AlgorithmOptions{T, SC, ST}(T, step_config, scaler_cfg, args...)
-end
-function AlgorithmOptions{T}(; kwargs...) where T<:Real
-	AlgorithmOptions(; T, kwargs...)
-end
-
-Base.@kwdef struct ThreadedOuterAlgorithmOptions{A}
-	inner_opts :: A = AlgorithmOptions()
-end
-
+include("algorithm_options.jl")
 # ## General Array Containers
 
 struct StepValueArrays{T}
@@ -302,85 +118,99 @@ function init_lin_cons(mop)
     return LinearConstraints(F, dim_vars(mop), lb, ub, A, b, E, c)
 end
 
-@enum IT_STAT begin
-	RESTORATION = -3
-	FILTER_FAIL = -2
-	INACCEPTABLE = -1
-	INITIALIZATION = 0
-	FILTER_ADD_SHRINK = 1
-	FILTER_ADD = 2
-	ACCEPTABLE = 3
-	SUCCESSFUL = 4
-	CRITICAL_LOOP = 5
+@enum RADIUS_UPDATE :: Int8 begin
+	SHRINK_FAIL = -2
+	GROW_FAIL = -1
+	INITIAL_RADIUS = 0
+	SHRINK = 1
+	GROW = 2
 end
 
-Base.@kwdef mutable struct UpdateResults{F<:AbstractFloat}
+@enum ITERATION_TYPE :: UInt8 begin
+	INITIALIZATION
+	RESTORATION
+	FILTER_FAIL
+	F_STEP
+	THETA_STEP
+end
+
+@enum STEP_CLASS :: Int8 begin
+	INITIAL_STEP = -1
+	INACCEPTABLE = 0
+	ACCEPTABLE = 1 
+	SUCCESSFUL = 2
+end
+
+Base.@kwdef mutable struct IterationStatus
+	iteration_type :: ITERATION_TYPE
+	radius_change :: RADIUS_UPDATE
+	step_class :: STEP_CLASS
+end
+
+_trial_point_accepted(iteration_status)=_trial_point_accepted(iteration_status.step_class)
+function _trial_point_accepted(step_class::STEP_CLASS)
+	return Int8(step_class) > 0
+end
+
+Base.@kwdef mutable struct IterationScalars{F}
 	it_index :: Int
-	Δ_pre :: F
-	Δ_post :: F
+	delta_pre :: F
+	delta :: F
+end
 
-	it_stat :: IT_STAT
-
-	point_has_changed :: Bool
-
+Base.@kwdef mutable struct TrialCaches{F}
+	delta :: F
 	diff_x :: Vector{F}
 	diff_fx :: Vector{F}
-	diff_fx_mod :: Vector{F}
-
-	norm2_x :: F
-	norm2_fx :: F
-	norm2_fx_mod :: F
+	diff_fx_mod :: Vector{F}
 end
 
-function init_update_results(T, n_vars, n_objfs, delta_init)
-	NaNT = T(NaN)
-	return UpdateResults(
-		it_index = 0,
-		Δ_pre = NaNT,
-		Δ_post = T(delta_init),
-		it_stat = INITIALIZATION,
-		point_has_changed = true,
-		diff_x = fill(NaNT, n_vars),
-		diff_fx = fill(NaNT, n_objfs),
-		diff_fx_mod = fill(NaNT, n_objfs),
-		norm2_x = NaNT,
-		norm2_fx = NaNT,
-		norm2_fx_mod = NaNT
-	)
-end
-
-mutable struct CriticalityRoutineCache{MV, SV, SC, M}
-	mod_vals :: MV
+mutable struct CriticalityRoutineCache{F, MV, SV}
+	delta :: F
+	num_crit_loops :: Int
 	step_vals :: SV
-	step_cache :: SC
-	mod :: M
 end
 
-#=
-The iteration status already encodes much information:
+Base.@kwdef struct OptimizerCaches{
+	mopType <: AbstractMOP,
+	modType <: AbstractMOPSurrogate,
+	scalerType <: AbstractAffineScaler,
+	lin_consType <: LinearConstraints,
+	scaled_consType <: LinearConstraints,
+	valsType <: WrappedMOPCache,
+	mod_valsType <: AbstractMOPSurrogateCache,
+	filterType <: StandardFilter,
+	step_cacheType <: StepValueArrays,
+	crit_cacheType <: CriticalityRoutineCache,
+	trial_cachesType <: TrialCaches,
+	iteration_statusType <: IterationStatus,
+	iteration_scalarsType <: IterationScalars,
+	stop_critsType
+}
+	mop :: mopType
+	mod :: modType
 
-| it_stat        | value | trial_point_accepted | radius_changed |
-|----------------|-------|----------------------|----------------|
-| RESTORATION       | -3    | yes [^1]             | no [^2]        |
-| FILTER_FAIL       | -2    | no                   | yes            |
-| INACCEPTABLE      | -1    | no                   | yes            |
-| INITIALIZATION    | 0     | yes or no [^3]       | yes [^4]       |
-| FILTER_ADD_SHRINK | 1     | yes                  | yes            |
-| FILTER_ADD        | 2     | yes                  | no             |
-| ACCEPTABLE        | 3     | yes                  | yes            |
-| SUCCESSFUL        | 4     | yes                  | yes or no [^6] |
-| CRITICAL_LOOP		| 5		| yes or no			   | yes
+	scaler :: scalerType
 
-[^1]: We interpret the result of the restoration procedure as a trial point.
-[^2]: Radius change in restoration iterations is up for debate.
-[^3]: At initialization, the trial point is copied from the initial values.
-[^4]: We go from “no radius” to “initial radius” and trigger a model update.
-[^5]: In a `FILTER_ADD` iteration, the radius may be decreased if sufficient decrease fails.
-[^6]: We can only update up until the maximum allowed radius.
+	lin_cons :: lin_consType
+	scaled_cons :: scaled_consType
 
-Because of all these nuances, we rather use specific flags for acceptance and radius updates
-in the main loop.
-=#
+	vals :: valsType
+	vals_tmp :: valsType
+
+	mod_vals :: mod_valsType
+
+	filter :: filterType
+
+	step_cache :: step_cacheType
+	crit_cache :: crit_cacheType
+	trial_caches :: trial_cachesType
+
+	iteration_status :: iteration_statusType
+	iteration_scalars :: iteration_scalarsType
+
+	stop_crits :: stop_critsType
+end
 
 struct ReturnObject{X, V, S, M}
 	ξ0 :: X

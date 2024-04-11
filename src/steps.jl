@@ -16,7 +16,7 @@ end
 function do_normal_step!(
     step_cache::AbstractStepCache, step_vals,
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
-    it_index, log_level, indent::Int=0
+    log_level, indent::Int=0
 )
     if cached_theta(vals) > 0
         pad_str = lpad("", indent)
@@ -157,7 +157,7 @@ end
 
 function universal_copy!(trgt::SteepestDescentCache, src::SteepestDescentCache)
     for fn in (:fxn, :lb_tr, :ub_tr, :Axn, :Dgx_n)
-        universal_copy!(
+        custom_copy!(
             getfield(trgt, fn),
             getfield(src, fn)
         )
