@@ -24,7 +24,7 @@ macro ignoraise(ex, indent_ex=0)
 			)
 		end
 		$(if has_lhs
-			:($(lhs) = wrapped)
+			:($(lhs) = ret_val)
 		else
 			:(ret_val = nothing)
 		end)
@@ -57,7 +57,23 @@ macro ignorebreak(ex, indent_ex=0)
 	end
 end
 
+function _parse_ignoraise_expr(ex)
+	has_lhs = false
+	if Meta.isexpr(ex, :(=), 2)
+		lhs, rhs = esc.(ex.args)
+		has_lhs = true
+	else
+		lhs = nothing	# not really necessary
+		rhs = esc(ex)
+	end
+	return has_lhs, lhs, rhs
+end
 
+"""
+    @forward WrapperType.wrapped_obj fnname(arg1, fwarg::WrapperType, args...; kwargs...)
+
+Defines a new method for `fnname` forwarding to method dispatching on `wrapped_obj`.
+"""
 macro forward(type_ex, call_ex)
 	@assert Meta.isexpr(type_ex, :(.), 2)
 	type_name, wrapped_fn_name = type_ex.args

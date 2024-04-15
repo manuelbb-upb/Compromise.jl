@@ -1,4 +1,6 @@
-@with_kw struct StandardFilter{T}
+# The filter storing constraint violation values in vector `theta_vec` and objective 
+# maxima in `phi_vec`:
+Base.@kwdef struct StandardFilter{T}
 	gamma :: T = DEFAULT_FLOAT_TYPE(0.1) # envelope factor
 	theta_vec :: Vector{T} = T[]        # stores (1-γ)θᵢ
 	phi_vec :: Vector{T} = T[]          # stores Φᵢ - γθᵢ

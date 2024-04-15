@@ -34,7 +34,7 @@ function test_trial_point!(
         filter, x, xs, fx, fxs, fx_mod, fxs_mod, θx, θxs, Φx, Φxs,
         strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success;
     )
-    _log_trial_results(iteration_type, step_class; indent, log_level)
+    _log_trial_results(θxs, Φxs, iteration_type, step_class; indent, log_level)
 
     delta = iteration_scalars.delta
     @unpack gamma_grow, gamma_shrink, gamma_shrink_much, delta_max = algo_opts
@@ -44,7 +44,7 @@ function test_trial_point!(
 
     iteration_status.iteration_type = iteration_type
     iteration_status.step_class = step_class
-    iteration_status.radius_update = radius_update
+    iteration_status.radius_change = radius_update
     return delta_new
 end
 
@@ -82,7 +82,8 @@ function _test_trial_point!(
 
     it_type = INITIALIZATION
     step_class = INACCEPTABLE
-    it_type = if !fits_filter
+    
+    if !fits_filter
         FILTER_FAIL
     end
 
@@ -115,7 +116,7 @@ function _test_trial_point!(
     return it_type, step_class
 end
 
-function _log_trial_results(iteration_type, step_class; indent, log_level)
+function _log_trial_results(θxs, Φxs, iteration_type, step_class; indent, log_level)
     indent += 1
     pad_str = indent_str(indent)
     
@@ -124,7 +125,7 @@ function _log_trial_results(iteration_type, step_class; indent, log_level)
     return nothing
 end
 
-function _log_trial_results(delta, delta_new, radius_update; indent, log_level)
+function _log_radius_update(delta, delta_new, radius_update; indent, log_level)
     indent += 1
     pad_str = indent_str(indent)
     if Int8(radius_update) > 1
@@ -140,11 +141,11 @@ function _update_radius(
     gamma_grow, gamma_shrink, gamma_shrink_much, delta_max
 )
     if step_class == ACCEPTABLE
-        delta_new = gamma_shrink * Δ
+        delta_new = gamma_shrink * delta
         radius_update = SHRINK
     elseif step_class == SUCCESSFUL
-        if delta_new < delta_max
-            delta_new = min(gamma_grow * Δ, delta_max)
+        if delta < delta_max
+            delta_new = min(gamma_grow * delta, delta_max)
             radius_update = GROW
         else
             delta_new = delta

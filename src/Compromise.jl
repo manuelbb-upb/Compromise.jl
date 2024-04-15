@@ -4,7 +4,9 @@ module Compromise
 
 # ### External Dependencies
 # We use the macros in `Parameters` quite often, because of their convenience:
-import Parameters: @with_kw, @unpack
+import UnPack
+import UnPack: @unpack
+import Parameters: @with_kw
 # Everything in this module needs at least some linear algebra:
 import LinearAlgebra as LA
 # Automatically annotated docstrings:
@@ -20,12 +22,9 @@ import Reexport: @reexport
 # Make our types base equality on field value equality:
 import StructHelpers: @batteries
 
-# With the external dependencies available, we can include global type definitions and constants:
-include("macros.jl")
-include("value_caches.jl")
-include("types.jl")
-include("concurrent_locks.jl")
-include("utils.jl")
+import Accessors
+import Accessors: PropertyLens
+@reexport import Accessors: @set, @reset
 
 # #### Optimization Packages
 # At some point, the choice of solver is meant to be configurable, with different
@@ -39,19 +38,24 @@ const DEFAULT_QP_OPTIMIZER=HiGHS.Optimizer
 # configurable...
 import NLopt
 
+# With the external dependencies available, we can include global type definitions and constants:
+include("macros.jl")
+include("globals.jl")
+
 # ### Interfaces and Algorithm Types
 # Abstract types and interfaces to handle multi-objective optimization problems...
 include("mop.jl")
 # ... and how to model them:
 include("surrogate.jl")
 # The cache interface is defined separately:
-
+include("value_caches.jl")
 # Tools to scale and unscale variables:
-include("diagonal_scalers.jl")
+include("scaling.jl")
 # Implementations of Filter(s):
 include("filter.jl")
 # Types and methods to compute inexact normal steps and descent steps:
 include("steps.jl")
+include("steepest_descent.jl")
 # The restoration utilities:
 include("restoration.jl")
 # Trial point testing:
@@ -60,6 +64,11 @@ include("trial.jl")
 include("criticality_routine.jl")
 # Stopping criteria:
 include("stopping.jl")
+# Pseudo lock:
+include("concurrent_locks.jl")
+
+# Miscellaneous functions to be included when all types are defined (but before sub-modules)
+include("utils.jl")
 
 # ### Internal Dependencies or Extensions
 # Import operator types and interface definitions:
@@ -126,12 +135,10 @@ include("evaluators/ExactModels.jl")
 @reexport using .ExactModels
 
 # The helpers in `simple_mop.jl` depend on those model types:
-include("simple_mop.jl")
-export MutableMOP, add_objectives!, add_nl_ineq_constraints!, add_nl_eq_constraints!
+include("SimpleMOP/simple_mop.jl")
 
 # ## The Algorithm
 # (This still neads some re-factoring...)
-
 
 function optimize(
     MOP::AbstractMOP, ξ0::RVec;
@@ -187,7 +194,7 @@ function optimize_with_algo(
     MOP::AbstractMOP, algo_opts::AlgorithmOptions, ξ0; 
     @nospecialize(user_callback = NoUserCallback()),
 )
-    optimizer_caches = initialize_structs(MOP, ξ0, algo_opts)
+    optimizer_caches = initialize_structs(MOP, ξ0, algo_opts, user_callback)
     @unpack log_level = algo_opts
     if !(isa(optimizer_caches, AbstractStoppingCriterion))
         @unpack vals = optimizer_caches
@@ -212,6 +219,7 @@ end
 
 function initialize_structs( 
     MOP::AbstractMOP, ξ0::RVec, algo_opts :: AlgorithmOptions,
+    @nospecialize(user_callback)
 )
     @assert !isempty(ξ0) "Starting point array `x0` is empty."
     @assert dim_objectives(MOP) > 0 "Objective Vector dimension of problem is zero."
@@ -266,10 +274,10 @@ function initialize_structs(
     step_vals = init_step_vals(vals)
     step_cache = init_step_cache(algo_opts.step_config, vals, mod_vals)
 
-    crit_cache = CriticalityRoutineCache(
-        NaNT,
-        -1,
-        deepcopy(step_vals),
+    crit_cache = CriticalityRoutineCache(;
+        delta = NaNT,
+        num_crit_loops = -1,
+        step_vals = deepcopy(step_vals),
     )
 
     ## initialize empty filter
@@ -277,6 +285,8 @@ function initialize_structs(
 
     ## caches for trial point checking:
     trial_caches = TrialCaches{T}(;
+        delta=NaNT,
+        diff_x = array(T, dim_vars(mop)),
         diff_fx = array(T, dim_objectives(mop)),
         diff_fx_mod = array(T, dim_objectives(mop))
     )
@@ -296,9 +306,9 @@ function initialize_structs(
     ## prepare stopping
     stop_crits = stopping_criteria(algo_opts, user_callback)
 
-    return OptimizerCaches(
+    return OptimizerCaches(;
         mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp, mod_vals, filter, 
-        step_cache, crit_cache, trial_caches, iteration_status, iteration_scalars, 
+        step_vals, step_cache, crit_cache, trial_caches, iteration_status, iteration_scalars, 
         stop_crits
     )
 end
@@ -310,7 +320,7 @@ function do_iteration!(
 
     @unpack (
         mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp, mod_vals, filter, 
-        step_cache, crit_cache, trial_caches, iteration_status, iteration_scalars, 
+        step_vals, step_cache, crit_cache, trial_caches, iteration_status, iteration_scalars, 
         stop_crits, 
     ) = optimizer_caches
    
@@ -337,7 +347,7 @@ function do_iteration!(
     ## - the last iteration was a successfull restoration iteration.
     ## - if the point has not changed and the models do not depend on the radius or  
     ##   radius has not changed neither.
-    radius_has_changed = Int8(iteration_status.radius_update) > 1
+    radius_has_changed = Int8(iteration_status.radius_change) >= 0
     models_valid = (
         iteration_status.iteration_type == RESTORATION ||
         !_trial_point_accepted(iteration_status) && !(depends_on_radius(mod) && radius_has_changed)
@@ -346,7 +356,7 @@ function do_iteration!(
     if !models_valid
         @logmsg log_level "* Updating Surrogates."
         @ignoraise update_models!(mod, delta, scaler, vals, scaled_cons; log_level, indent) indent
-        @ignoraise eval_and_diff_mod!(mod_vals, mod, vals.x) indent
+        @ignoraise eval_and_diff_mod!(mod_vals, mod, cached_x(vals)) indent
     end
     @ignoraise do_normal_step!(
         step_cache, step_vals, delta, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
@@ -374,7 +384,7 @@ function do_iteration!(
         stop_crits, CheckPostDescentStep(), optimizer_caches, algo_opts) indent
  
     ## For the convergence analysis to work, we also have to have the Criticality Routine:
-    @ignoraise delta_new = criticality_routine(optimizer_caches, algo_opts; indent) indent
+    @ignoraise delta_new = criticality_routine!(optimizer_caches, algo_opts; indent) indent
     iteration_scalars.delta = delta_new
     delta = iteration_scalars.delta
     
@@ -453,4 +463,5 @@ end
 export optimize, AlgorithmOptions
 export opt_vars, opt_objectives, opt_nl_eq_constraints, opt_nl_ineq_constraints,
     opt_lin_eq_constraints, opt_lin_ineq_constraints, opt_constraint_violation, opt_stop_code
+export MutableMOP, add_objectives!, add_nl_ineq_constraints!, add_nl_eq_constraints!
 end

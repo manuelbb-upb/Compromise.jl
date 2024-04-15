@@ -1,5 +1,3 @@
-abstract type AbstractReadWriteLock end
-
 lock_write(::AbstractReadWriteLock)=nothing
 lock_write(@nospecialize(func), ::AbstractReadWriteLock)=func()
 unlock_write(::AbstractReadWriteLock)=nothing

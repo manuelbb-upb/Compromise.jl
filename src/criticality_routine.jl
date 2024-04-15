@@ -13,6 +13,7 @@ function criticality_routine!(optimizer_caches, algo_opts; indent=0)
     @unpack log_level, eps_theta, eps_crit, crit_M, crit_B, crit_alpha, 
         backtrack_in_crit_routine = algo_opts
     @unpack it_index = iteration_scalars
+    Δ = iteration_scalars.delta
 
     χ = step_vals.crit_ref[]
     θ = cached_theta(vals)
@@ -20,9 +21,9 @@ function criticality_routine!(optimizer_caches, algo_opts; indent=0)
     if θ < eps_theta && (χ < eps_crit && Δ > crit_M * χ )
         @logmsg log_level "$(pad_str)ITERATION $(it_index): CRITICALITY ROUTINE."
         ## init
-        Δ_init = iteration_scalars.delta
+        Δj = Δ_init = Δ
         j=0
-        Δj = Δ
+        Δj = Δ_init
         
         stop_code=nothing
         while Δ > crit_M * χ
@@ -43,7 +44,7 @@ function criticality_routine!(optimizer_caches, algo_opts; indent=0)
             
             if depends_on_radius(mod)
                 @ignorebreak stop_code = update_models!(mod, Δj, scaler, vals, scaled_cons; log_level, indent) indent
-                @ignorebreak stop_code = eval_and_diff_mod!(mod_vals, mod, vals.x) indent
+                @ignorebreak stop_code = eval_and_diff_mod!(mod_vals, mod, cached_x(vals)) indent
                 @ignorebreak stop_code = do_normal_step!(
                     step_cache, step_vals, Δj, mop, mod, scaler, lin_cons, scaled_cons, 
                     vals, mod_vals; 

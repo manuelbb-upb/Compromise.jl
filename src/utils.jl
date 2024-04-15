@@ -7,6 +7,50 @@ function ensure_float_type(arr::AbstractArray{F}, ::Type{T}) where {F,T}
 	return T.(arr)
 end
 
+function Accessors.set(
+	algo_opts::Union{AlgorithmOptions{F}, SteepestDescentConfig{F}}, ::PropertyLens{:float_type}, ::Type{F}
+) where F
+	return algo_opts
+end
+function Accessors.set(
+	algo_opts::Union{AlgorithmOptions{T}, SteepestDescentConfig{T}}, 
+	::PropertyLens{:float_type}, 
+	::Type{new_float_type}
+) where {T, new_float_type}
+	props = Accessors.getproperties(algo_opts)
+	fnames = keys(props)
+	patch = NamedTuple{fnames}(
+		map(
+			(k, v) -> change_float_type(v, PropertyLens(k), new_float_type), 
+			fnames,
+			props
+		)
+	)
+	return Accessors.setproperties(algo_opts, patch)
+end
+
+function Accessors.set(
+	algo_opts::Union{AlgorithmOptions{T}, SteepestDescentConfig{T}},
+	l::PropertyLens{field}, 
+	val
+) where {T, field}
+	return Accessors.setproperties(algo_opts, (; field => change_float_type(val, l, T)))
+end
+
+
+change_float_type(x, ::Type{new_float_type}) where new_float_type = x
+function change_float_type(x::F, ::Type{new_float_type}) where{F<:AbstractFloat, new_float_type}
+	return convert(new_float_type, x)
+end
+function change_float_type(x::Array{F, N}, ::Type{new_float_type}) where {F, N, new_float_type} 
+	return convert(Array{new_float_type, N}, x)
+end
+function change_float_type(::Type{T}, ::Type{new_float_type}) where{T<:AbstractFloat, new_float_type<:AbstractFloat}
+	return new_float_type
+end
+	
+change_float_type(x, proplens, new_float_type)=change_float_type(x, new_float_type)	
+
 function vec2str(x, max_entries=typemax(Int), digits=10)
 	x_end = min(length(x), max_entries)
 	_x = x[1:x_end]
@@ -24,91 +68,11 @@ function array(T::Type, size...)
   return Array{T}(undef, size...)
 end
 
-function _parse_ignoraise_expr(ex)
-	has_lhs = false
-	if Meta.isexpr(ex, :(=), 2)
-		lhs, rhs = esc.(ex.args)
-		has_lhs = true
-	else
-		lhs = nothing	# not really necessary
-		rhs = esc(ex)
-	end
-	return has_lhs, lhs, rhs
+function _trial_point_accepted(iteration_status)
+    return _trial_point_accepted(iteration_status.step_class)
 end
-
-"""
-	@ignoraise a, b, c = critical_function(args...) [indent=0]
-
-Evaluate the right-hand side.
-If it returns an `AbstractStoppingCriterion`, make sure it is wrapped and return it.
-Otherwise, unpack the returned values into the left-hand side.
-
-Also valid:
-```julia
-@ignoraise critical_function(args...)
-@ignoraise critical_function(args...) indent_var
-```
-The indent expression must evaluate to an `Int`.
-"""
-macro ignoraise(ex, indent_ex=0)
-	has_lhs, lhs, rhs = _parse_ignoraise_expr(ex)
-	
-	return quote
-		ret_val = $(rhs)
-		if ret_val isa AbstractStoppingCriterion
-			return wrap_stop_crit(
-				ret_val, $(QuoteNode(__source__)), $(esc(indent_ex))
-			)
-		end
-		$(if has_lhs
-			:($(lhs) = wrapped)
-		else
-			:(ret_val = nothing)
-		end)
-	end
-end
-
-"""
-	@ignorebreak ret_var = critical_function(args...)
-
-Similar to `@ignoraise`, but instead of returning if `critical_function` returns 
-an `AbstractStoppingCriterion`, we `break`.
-This allows for post-processing before eventually returning.
-`ret_var` is optional, but in constrast to `@ignoraise`, we unpack unconditionally,
-so length of return values should match length of left-hand side expression.
-"""
-macro ignorebreak(ex, indent_ex=0)
-	has_lhs, lhs, rhs = _parse_ignoraise_expr(ex)
-		
-	return quote
-		ret_val = $(rhs)
-		ret_val = wrap_stop_crit(
-			ret_val, $(QuoteNode(__source__)), $(esc(indent_ex)))
-		do_break = ret_val isa AbstractStoppingCriterion
-		$(if has_lhs
-			:($(lhs) = ret_val)
-		else
-			:(ret_val = nothing)
-		end)
-		do_break && break		
-	end
-end
-
-universal_copy!(trgt, src)=nothing
-function universal_copy!(trgt::AbstractArray{T, N}, src::AbstractArray{F, N}) where{T, F, N}
-	copyto!(trgt, src)
-	return nothing
-end
-function universal_copy!(trgt::Base.RefValue{T}, src::Base.RefValue{F}) where {T, F}
-	trgt[] = src[]
-	nothing
-end
-
-function custom_copy!(trgt, src)
-	if objectid(trgt) == objectid(src)
-		return nothing
-	end
-	return universal_copy!(trgt, src)
+function _trial_point_accepted(step_class::STEP_CLASS)
+	return Int8(step_class) > 0
 end
 
 """
@@ -168,7 +132,7 @@ const SUBSCRIPT_DICT = Base.ImmutableDict(
 )
 
 const INDENT_STRINGS = Base.ImmutableDict(
-	(i => lpad("", i) for i = 1:10)...
+	(i => lpad("", i) for i = 0:10)...
 )
 
 function indent_str(i)
@@ -203,3 +167,65 @@ function pretty_row_vec(
 	return repr_str
 end
 pretty_row_vec(x)=string(x)
+
+universal_copy!(trgt, src)=nothing
+function universal_copy!(trgt::AbstractArray{T, N}, src::AbstractArray{F, N}) where{T, F, N}
+	copyto!(trgt, src)
+	return nothing
+end
+function universal_copy!(trgt::Base.RefValue{T}, src::Base.RefValue{F}) where {T, F}
+	trgt[] = src[]
+	nothing
+end
+
+function custom_copy!(trgt, src)
+	if objectid(trgt) == objectid(src)
+		return nothing
+	end
+	return universal_copy!(trgt, src)
+end
+
+function universal_copy!(
+	step_vals_trgt::StepValueArrays, step_vals_src::StepValueArrays
+)
+	for fn in fieldnames(StepValueArrays)
+		trgt_fn = getfield(step_vals_trgt, fn)
+		universal_copy!(trgt_fn, getfield(step_vals_src, fn))
+	end
+	return nothing
+end
+
+function universal_copy!(::AbstractStepCache, ::AbstractStepCache)
+    error("`universal_copy!` not defined.")
+end
+
+function universal_copy!(trgt::SteepestDescentCache, src::SteepestDescentCache)
+    for fn in (:fxn, :lb_tr, :ub_tr, :Axn, :Dgx_n)
+        custom_copy!(
+            getfield(trgt, fn),
+            getfield(src, fn)
+        )
+    end
+end
+
+function universal_copy!(
+	scaled_cons::LinearConstraints, lin_cons::LinearConstraints)
+    for fn in fieldnames(LinearConstraints)
+        universal_copy!(
+            getfield(scaled_cons, fn), 
+            getfield(lin_cons, fn)
+        )
+    end
+    return nothing
+end
+
+function universal_copy!(
+	trgt::WrappedMOPCache, src::WrappedMOPCache
+)
+	for fn in fieldnames(WrappedMOPCache)
+		universal_copy!(
+			getfield(trgt, fn), 
+			getfield(src, fn)
+		)
+	end
+end

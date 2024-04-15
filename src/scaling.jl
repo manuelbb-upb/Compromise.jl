@@ -1,18 +1,20 @@
+# # Interface
 abstract type AbstractDiagonalScaler{F} <: AbstractAffineScaler end
-float_type(::AbstractDiagonalScaler{F}) where F=F
 
 abstract type AbstractScalingDirection end
 struct ForwardScaling <: AbstractScalingDirection end
 struct InverseScaling <: AbstractScalingDirection end
 
+abstract type AbstractScalerOffsetTrait end
+struct HasOffset <: AbstractScalerOffsetTrait end
+struct NoOffset <: AbstractScalerOffsetTrait end
+
+float_type(::AbstractDiagonalScaler{F}) where F=F
+
 toggle_scaling_dir(::ForwardScaling)=InverseScaling()
 toggle_scaling_dir(::InverseScaling)=ForwardScaling()
 
 supports_scaling_dir(::AbstractDiagonalScaler, ::AbstractScalingDirection)=Val(false)
-
-abstract type AbstractAutomaticScalingArray end
-struct IsAutomaticArray <: AbstractAutomaticScalingArray end
-struct IsDefinedArray <: AbstractAutomaticScalingArray end
 
 diag_matrix(::AbstractDiagonalScaler, ::AbstractScalingDirection)=error("define `diag_matrix`.")
 scaler_offset(::AbstractDiagonalScaler, ::AbstractScalingDirection)=error("define `diag_matrix`.")
@@ -45,10 +47,6 @@ function soffset(scaler::AbstractDiagonalScaler, sdir::AbstractScalingDirection,
     Sinv = smatrix(scaler, idir)
     return - Sinv * s
 end
-
-abstract type AbstractScalerOffsetTrait end
-struct HasOffset <: AbstractScalerOffsetTrait end
-struct NoOffset <: AbstractScalerOffsetTrait end
 
 offset_trait(::AbstractDiagonalScaler) = NoOffset()
 
@@ -89,21 +87,23 @@ function apply_scaling!(
     x .+= s
     return x
 end
+# # Implementations
 
+# ## IdentityScaler
 struct IdentityScaler{N, F} <: AbstractDiagonalScaler{F} end
-
 supports_scaling_dir(::IdentityScaler, ::AbstractScalingDirection)=Val(true)
 diag_matrix(::IdentityScaler{N}, ::Union{ForwardScaling, InverseScaling}) where N = LA.I(N)
 
+# ## DiagonalScaler (no offset)
 struct DiagonalScaler{F} <: AbstractDiagonalScaler{F}
     fmat :: LA.Diagonal{F, Vector{F}}
     imat :: LA.Diagonal{F, Vector{F}}
 end
-
 supports_scaling_dir(::DiagonalScaler, ::AbstractScalingDirection)=Val(true)
 diag_matrix(scaler::DiagonalScaler, ::ForwardScaling)=scaler.fmat
 diag_matrix(scaler::DiagonalScaler, ::InverseScaling)=scaler.imat
 
+# ## DiagonalScaler (with offset)
 struct DiagonalScalerWithOffset{F, W<:AbstractDiagonalScaler{F}} <: AbstractDiagonalScaler{F}
     wrapped :: W
     foff :: Vector{F}
@@ -117,12 +117,13 @@ offset_trait(::DiagonalScalerWithOffset) = HasOffset()
 scaler_offset(scaler::DiagonalScalerWithOffset, ::ForwardScaling)=scaler.foff
 scaler_offset(scaler::DiagonalScalerWithOffset, ::InverseScaling)=scaler.ioff
 
+# ## ViewScaler
+# This is a view into the sub-arrays defined by variable indices `i1:i2`:
 struct ViewScaler{F, W<:AbstractDiagonalScaler{F}} <: AbstractDiagonalScaler{F}
     i1 :: Int
     i2 :: Int
     wrapped :: W
 end
-
 function supports_scaling_dir(scaler::ViewScaler, sense::AbstractScalingDirection)
     return Val(true)
 end

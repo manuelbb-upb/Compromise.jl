@@ -1,9 +1,4 @@
-abstract type AbstractValueCache{F<:AbstractFloat} end
-abstract type AbstractMOPCache{F} <: AbstractValueCache{F} end
-abstract type AbstractMOPSurrogateCache{F} <: AbstractValueCache{F} end
-
 float_type(::AbstractValueCache{F}) where{F}=F
-
 
 ## suffix `_x` or `_ξ` must be fully mutable arrays 
 ## other suffixes:
@@ -40,7 +35,7 @@ dim_lin_eq_constraints(c::AbstractValueCache)=length(cached_Ex(c))
 dim_nl_ineq_constraints(c::AbstractValueCache)=length(cached_gx(c))
 dim_lin_ineq_constraints(c::AbstractValueCache)=length(cached_Ax(c))
 
-struct WrappedMOPCache{F, cacheType<:AbstractMOPCache{F}}
+struct WrappedMOPCache{F, cacheType<:AbstractMOPCache{F}}<:AbstractMOPCache{F}
 	cache :: cacheType
 	xhash :: Base.RefValue{UInt64}
 	theta_ref :: Base.RefValue{F}
@@ -56,6 +51,7 @@ function WrappedMOPCache(cache::AbstractMOPCache{F}) where F
     )
 end
 
+@forward WrappedMOPCache.cache float_type(wcache::WrappedMOPCache)
 @forward WrappedMOPCache.cache cached_x(wcache::WrappedMOPCache)
 @forward WrappedMOPCache.cache cached_fx(wcache::WrappedMOPCache)
 @forward WrappedMOPCache.cache cached_hx(wcache::WrappedMOPCache)
@@ -64,9 +60,15 @@ end
 @forward WrappedMOPCache.cache cached_Ax(wcache::WrappedMOPCache)
 @forward WrappedMOPCache.cache cached_Ex(wcache::WrappedMOPCache)
 @forward WrappedMOPCache.cache cached_Ax_min_b(wcache::WrappedMOPCache)
-@forward WrappedMOPCache.cache cached_EX_min_c(wcache::WrappedMOPCache)
+@forward WrappedMOPCache.cache cached_Ex_min_c(wcache::WrappedMOPCache)
+@forward WrappedMOPCache.cache dim_vars(wcache::WrappedMOPCache)
+@forward WrappedMOPCache.cache dim_objectives(wcache::WrappedMOPCache)
+@forward WrappedMOPCache.cache dim_nl_eq_constraints(wcache::WrappedMOPCache)
+@forward WrappedMOPCache.cache dim_nl_ineq_constraints(wcache::WrappedMOPCache)
+@forward WrappedMOPCache.cache dim_lin_eq_constraints(wcache::WrappedMOPCache)
+@forward WrappedMOPCache.cache dim_lin_ineq_constraints(wcache::WrappedMOPCache)
 
-function cached_theta(wcache::WrappedMOPCache)
+function cached_theta(wcache::WrappedMOPCache, step_down=true)
     cache = wcache.cache
     x = cached_x(cache)
     xhash = wcache.xhash[]
@@ -78,19 +80,21 @@ function cached_theta(wcache::WrappedMOPCache)
             cached_Ex_min_c(cache),
             cached_Ax_min_b(cache)
         )
+        step_down && cached_Phi(wcache, false)
         wcache.theta_ref[] = theta
         wcache.xhash[] = inhash
     end
     return wcache.theta_ref[]
 end
 
-function cached_Phi(wcache::WrappedMOPCache)
+function cached_Phi(wcache::WrappedMOPCache, step_down=true)
     cache = wcache.cache
     x = cached_x(cache)
     xhash = wcache.xhash[]
     inhash = hash(x)
     if xhash != inhash
         Phi = maximum(cached_fx(cache))
+        step_down && cached_theta(wcache, false)
         wcache.Phi_ref[] = Phi
         wcache.xhash[] = inhash
     end
