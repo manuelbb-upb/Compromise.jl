@@ -68,8 +68,10 @@ Base.@kwdef struct SteepestDescentCache{
     Axn :: Vector{F}    # Aξ + _A*n
     Dgx_n :: Vector{F}  # g(x) + ∇g(x) * n
 
-    qp_opt :: QPOPT
+    qp_opt :: Type{QPOPT}
 end
+
+qp_optimizer_type(::SteepestDescentCache{F, QPOPT}) where {F, QPOPT} = QPOPT
 
 function init_step_cache(
     cfg::SteepestDescentConfig, vals, mod_vals
@@ -93,7 +95,8 @@ function init_step_cache(
     return SteepestDescentCache(;
         backtracking_factor, rhs_factor, normalize_gradients, 
         strict_backtracking, descent_step_norm, normal_step_norm, 
-        fxn, fx_tmp, lb_tr, ub_tr, Axn, Dgx_n, qp_opt 
+        fxn, fx_tmp, lb_tr, ub_tr, Axn, Dgx_n, 
+        qp_opt
     )
 end
 
@@ -113,10 +116,9 @@ function compute_normal_step!(
     Dgx = cached_Dgx(mod_vals)
     hx = cached_hx(mod_vals)
     Dhx = cached_Dhx(mod_vals)
-    @unpack qp_opt = step_cache
     n = solve_normal_step_problem(
-        x, lb, ub, Eξ, _E, c, Aξ, _A, b, hx, Dhx, gx, Dgx;
-        qp_opt, step_norm = step_cache.normal_step_norm
+        x, lb, ub, Eξ, _E, c, Aξ, _A, b, hx, Dhx, gx, Dgx, qp_optimizer_type(step_cache);
+        step_norm = step_cache.normal_step_norm
     )
     Base.copyto!(step_vals.n, n)
     nothing 
@@ -146,10 +148,10 @@ function compute_descent_step!(
     _E = scaled_cons.E
     @unpack b, c = lin_cons
     Dhx = cached_Dhx(mod_vals)
-    @unpack normalize_gradients, qp_opt = step_cache
+    @unpack normalize_gradients = step_cache
     χ, _d = solve_steepest_descent_problem(
-        xn, Dfx, lb, ub, _E, Axn, _A, b, Dhx, Dgx_n, Dgx; 
-        normalize_gradients, qp_opt, ball_norm = step_cache.descent_step_norm
+        xn, Dfx, lb, ub, _E, Axn, _A, b, Dhx, Dgx_n, Dgx, qp_optimizer_type(step_cache);
+        normalize_gradients, ball_norm = step_cache.descent_step_norm
     )
     
     step_vals.d .= _d
@@ -201,8 +203,7 @@ function solve_normal_step_problem(
     Eξ::RVec, _E::Union{RMat, Nothing}, c::Union{RVec, Nothing},
     Aξ::RVec, _A::Union{RMat, Nothing}, b::Union{RVec, Nothing},
     hx::RVec, Dhx::RMat, gx::RVec, Dgx::RMat,
-    ;
-    qp_opt::Type{<:MOI.AbstractOptimizer},
+    qp_opt;
     step_norm::Real=2
 )
     n_vars = length(x)
@@ -286,14 +287,28 @@ function solve_steepest_descent_problem(
     _E::Union{RMat, Nothing},
     Axn::RVec, _A::Union{RMat, Nothing}, b::Union{RVec, Nothing},
     Dhx::RMat, Dgx_n::RVec, Dgx::RMat,
+    qp_opt, #::Type{<:MOI.AbstractOptimizer};
     ;
-    qp_opt::Type{<:MOI.AbstractOptimizer},
     ball_norm::Real,
     normalize_gradients::Bool
 )
-    n_vars = length(xn)
 
     opt = JuMP.Model(qp_opt)
+    β, d = setup_steepest_descent_problem!(
+        opt, xn, Dfx, lb, ub, _E, Axn, _A, b, Dhx, Dgx_n, Dgx; ball_norm, normalize_gradients)
+    JuMP.optimize!(opt)
+
+    if MOI.get(opt, MOI.TerminationStatus()) == MOI.INFEASIBLE
+        return 0, zero(xn)
+    end
+    χ = abs(JuMP.value(β))
+    return χ, JuMP.value.(d)
+end
+
+function setup_steepest_descent_problem!(
+    opt, xn, Dfx, lb, ub, _E, Axn, _A, b, Dhx, Dgx_n, Dgx; ball_norm, normalize_gradients
+)
+    n_vars = length(xn)
     JuMP.set_silent(opt)
 
     JuMP.@variable(opt, β <= 0)
@@ -329,14 +344,7 @@ function solve_steepest_descent_problem(
 
     JuMP.@constraint(opt, Dhx'd .== 0)
     JuMP.@constraint(opt, Dgx_n .+ Dgx'd .<= 0)
-
-    JuMP.optimize!(opt)
-
-    if MOI.get(opt, MOI.TerminationStatus()) == MOI.INFEASIBLE
-        return 0, zero(xn)
-    end
-    χ = abs(JuMP.value(β))
-    return χ, JuMP.value.(d)
+    return β, d
 end
 
 function backtrack!(

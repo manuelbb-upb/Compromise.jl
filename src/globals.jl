@@ -32,8 +32,8 @@ const RMatOrNothing = Union{RMat, Nothing}
 # The algorithm operates on `AbstractMOP`s, where MOP stands for multi-objective optimization
 # problem. It's interface is defined in "src/mop.jl".
 # An MOP is surrogated by an `AbstractMOPSurrogate`. The interface is defined in "src/model.jl".
-abstract type AbstractMOP end
-abstract type AbstractMOPSurrogate end
+abstract type AbstractMOP{F<:AbstractFloat} end
+abstract type AbstractMOPSurrogate{F<:AbstractFloat} end
 
 # The results of an MOP are stored in mutable caches:
 abstract type AbstractValueCache{F<:AbstractFloat} end
@@ -120,16 +120,13 @@ function StepValueArrays(n_vars, n_objfs, T)
 end
 
 struct LinearConstraints{
-	F<:Number,
-	LB<:Union{Nothing, <:AbstractVector{F}}, 
-	UB<:Union{Nothing, <:AbstractVector{F}},
-	AType<:Union{Nothing, <:AbstractMatrix{F}}, 
-	BType<:Union{Nothing, <:AbstractVector{F}}, 
-	EType<:Union{Nothing, <:AbstractMatrix{F}}, 
-	CType<:Union{Nothing, <:AbstractVector{F}}, 
+	LB<:Union{Nothing, <:AbstractVector}, 
+	UB<:Union{Nothing, <:AbstractVector},
+	AType<:Union{Nothing, <:AbstractMatrix}, 
+	BType<:Union{Nothing, <:AbstractVector}, 
+	EType<:Union{Nothing, <:AbstractMatrix}, 
+	CType<:Union{Nothing, <:AbstractVector}, 
 }
-	_F :: Type{F}
-	n_vars :: Int
     lb :: LB
     ub :: UB
     A :: AType
@@ -139,22 +136,29 @@ struct LinearConstraints{
 end
 float_type(::LinearConstraints{F}) where F=F
 
-function init_lin_cons(mop)
-	F = float_type(mop)
-    
-	lb = ensure_float_type(lower_var_bounds(mop), F)
-    ub = ensure_float_type(upper_var_bounds(mop), F)
-
-    if !var_bounds_valid(lb, ub)
+function init_lin_cons(mop :: AbstractMOP)
+	lb = lower_var_bounds(mop)
+	ub = upper_var_bounds(mop)
+	if !var_bounds_valid(lb, ub)
         error("Variable bounds inconsistent.")
     end
 
-    A = ensure_float_type(lin_ineq_constraints_matrix(mop), F)
-    b = ensure_float_type(lin_ineq_constraints_vector(mop), F)
-    E = ensure_float_type(lin_eq_constraints_matrix(mop), F)
-    c = ensure_float_type(lin_eq_constraints_vector(mop), F)
+	A = lin_ineq_constraints_matrix(mop)
+	E = lin_eq_constraints_matrix(mop)
+	b = lin_ineq_constraints_vector(mop)
+	c = lin_eq_constraints_vector(mop)
+	return init_lin_cons(float_type(mop), lb, ub, A, b, E, c)
+end
 
-    return LinearConstraints(F, dim_vars(mop), lb, ub, A, b, E, c)
+function init_lin_cons(::Type{F}, lb, ub, A, b, E, c) where F
+	return LinearConstraints(
+		ensure_float_type(lb, F),
+		ensure_float_type(ub, F),
+		ensure_float_type(A, F),
+		ensure_float_type(b, F),
+		ensure_float_type(E, F),
+		ensure_float_type(c, F),
+	)
 end
 
 @enum RADIUS_UPDATE :: Int8 begin

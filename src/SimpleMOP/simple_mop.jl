@@ -18,7 +18,7 @@
 # A `ScaledOperator` wraps some other `AbstractNonlinearOperator` and enables caching
 # of (un-)scaling results as well taking care of the chain rule for derivatives:
 
-import .CompromiseEvaluators: FuncCallCounter, AbstractNonlinearOperatorWrapper
+import .CompromiseEvaluators: FuncCallCounter, AbstractNonlinearOperatorWrapper, BudgetExhausted
 
 struct RecountedOperator{O} <: AbstractNonlinearOperatorWrapper
     op :: O
@@ -91,8 +91,9 @@ end
 
 # ## `SimpleMOP`
 # In this section, we will define two kinds of simple problem structures:
-abstract type SimpleMOP <: AbstractMOP end
+abstract type SimpleMOP{F} <: AbstractMOP{F} end
 
+stop_type(::SimpleMOP) = BudgetExhausted
 # A `MutableMOP` is meant to be initialized empty and built up iteratively.
 """
     MutableMOP(; num_vars, kwargs...)
@@ -118,7 +119,7 @@ Use the keyword-arguments `mcfg_objectives` to provide an `AbstractSurrogateMode
 to define how the objectives should be modelled.
 By default, we assume `ExactModelConfig()`, which requires differentiable objectives.
 """
-@with_kw mutable struct MutableMOP <: SimpleMOP
+@with_kw mutable struct MutableMOP <: SimpleMOP{Float64}
     objectives :: Union{Nothing, NonlinearFunction} = nothing
     nl_eq_constraints :: Union{Nothing, NonlinearFunction} = nothing
     nl_ineq_constraints :: Union{Nothing, NonlinearFunction} = nothing
@@ -156,7 +157,7 @@ struct TypedMOP{
     MTO, MTNLEC, MTNLIC,
     LB, UB, 
     EType, CType, AType, BType
-} <: SimpleMOP
+} <: SimpleMOP{Float64}
     objectives :: O
     nl_eq_constraints :: NLEC
     nl_ineq_constraints :: NLIC
@@ -366,10 +367,10 @@ lower_var_bounds(mop::SimpleMOP)=mop.lb
 upper_var_bounds(mop::SimpleMOP)=mop.ub
 
 # To access functions, retrieve the corresponding fields of the MOP:
-dim_vars(mop::SimpleMOP)=mop.num_vars
+dim_vars(mop::SimpleMOP)=mop.num_vars::Int
 for dim_func in (:dim_objectives, :dim_nl_eq_constraints, :dim_nl_ineq_constraints)
     @eval function $(dim_func)(mop::SimpleMOP)
-        return getfield(mop, $(Meta.quot(dim_func)))
+        return getfield(mop, $(Meta.quot(dim_func)))::Int
     end
 end
 
@@ -401,7 +402,7 @@ end
 # (Also, I am not sure if the scaler is available when the problem is initialized).
 struct SimpleMOPSurrogate{
     O, NLEC, NLIC, MO, MNLEC, MNLIC,
-} <: AbstractMOPSurrogate
+} <: AbstractMOPSurrogate{Float64}
     objectives :: O
     nl_eq_constraints :: NLEC
     nl_ineq_constraints :: NLIC

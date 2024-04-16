@@ -39,7 +39,13 @@ Alternatively (or additionally), an `AbstractAutoDiffBackend` can be passed to
 compute the derivatives if the relevant field `isnothing`.
 """
 @with_kw struct NonlinearParametricFunction{
-    F, G, H, FG, FGH, B, C<:Real
+    F <: Union{Nothing, Function}, 
+    G <: Union{Nothing, Function}, 
+    H <: Union{Nothing, Function}, 
+    FG <: Union{Nothing, Function}, 
+    FGH <: Union{Nothing, Function}, 
+    B <: AbstractAutoDiffBackend, 
+    C<:Real
 } <: CE.AbstractNonlinearOperator
     func :: F
     grads :: G = nothing

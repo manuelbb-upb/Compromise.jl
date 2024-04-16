@@ -38,7 +38,9 @@ initialize(mop::AbstractMOP)=mop
 
 # ## Meta-Data
 # The optional function `float_type` returns the type of result and derivative vectors:
-float_type(::AbstractMOP)::Type{<:AbstractFloat}=DEFAULT_FLOAT_TYPE
+float_type(::AbstractMOP{F}) where F = F
+
+#stop_type(::AbstractMOP) = Any
 
 # Below functions are used to query dimension information.
 dim_vars(::AbstractMOP)::Int=0 
@@ -78,12 +80,12 @@ end
 function dim_lin_eq_constraints(mop::AbstractMOP)
     A = lin_eq_constraints_matrix(mop)
     b = lin_eq_constraints_vector(mop)
-    return dim_lin_cons(A, b)
+    return dim_lin_cons(A, b) :: Int
 end
 function dim_lin_ineq_constraints(mop::AbstractMOP)
     A = lin_ineq_constraints_matrix(mop)
     b = lin_ineq_constraints_vector(mop)
-    return dim_lin_cons(A, b)
+    return dim_lin_cons(A, b) :: Int
 end
 
 # ## Evaluation

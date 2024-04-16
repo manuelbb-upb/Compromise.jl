@@ -1,5 +1,5 @@
 # # Interface
-abstract type AbstractDiagonalScaler{F} <: AbstractAffineScaler end
+abstract type AbstractDiagonalScaler <: AbstractAffineScaler end
 
 abstract type AbstractScalingDirection end
 struct ForwardScaling <: AbstractScalingDirection end
@@ -8,8 +8,6 @@ struct InverseScaling <: AbstractScalingDirection end
 abstract type AbstractScalerOffsetTrait end
 struct HasOffset <: AbstractScalerOffsetTrait end
 struct NoOffset <: AbstractScalerOffsetTrait end
-
-float_type(::AbstractDiagonalScaler{F}) where F=F
 
 toggle_scaling_dir(::ForwardScaling)=InverseScaling()
 toggle_scaling_dir(::InverseScaling)=ForwardScaling()
@@ -90,12 +88,16 @@ end
 # # Implementations
 
 # ## IdentityScaler
-struct IdentityScaler{N, F} <: AbstractDiagonalScaler{F} end
+struct IdentityScaler <: AbstractDiagonalScaler 
+    n_vars :: Int
+end
 supports_scaling_dir(::IdentityScaler, ::AbstractScalingDirection)=Val(true)
-diag_matrix(::IdentityScaler{N}, ::Union{ForwardScaling, InverseScaling}) where N = LA.I(N)
+function diag_matrix(scaler::IdentityScaler, ::Union{ForwardScaling, InverseScaling}) 
+    LA.I(scaler.n_vars)
+end
 
 # ## DiagonalScaler (no offset)
-struct DiagonalScaler{F} <: AbstractDiagonalScaler{F}
+struct DiagonalScaler{F} <: AbstractDiagonalScaler
     fmat :: LA.Diagonal{F, Vector{F}}
     imat :: LA.Diagonal{F, Vector{F}}
 end
@@ -104,7 +106,7 @@ diag_matrix(scaler::DiagonalScaler, ::ForwardScaling)=scaler.fmat
 diag_matrix(scaler::DiagonalScaler, ::InverseScaling)=scaler.imat
 
 # ## DiagonalScaler (with offset)
-struct DiagonalScalerWithOffset{F, W<:AbstractDiagonalScaler{F}} <: AbstractDiagonalScaler{F}
+struct DiagonalScalerWithOffset{F, W<:AbstractDiagonalScaler} <: AbstractDiagonalScaler
     wrapped :: W
     foff :: Vector{F}
     ioff :: Vector{F}
@@ -119,7 +121,7 @@ scaler_offset(scaler::DiagonalScalerWithOffset, ::InverseScaling)=scaler.ioff
 
 # ## ViewScaler
 # This is a view into the sub-arrays defined by variable indices `i1:i2`:
-struct ViewScaler{F, W<:AbstractDiagonalScaler{F}} <: AbstractDiagonalScaler{F}
+struct ViewScaler{F, W<:AbstractDiagonalScaler} <: AbstractDiagonalScaler
     i1 :: Int
     i2 :: Int
     wrapped :: W
@@ -243,11 +245,11 @@ function _scale_to_unit_length(
         if throw_error
             error("Infinite boundary values not allowd.")
         end
-        return IdentityScaler{n, F}(), is_inf
+        return IdentityScaler(n), is_inf
     end
 
     if all(is_inf)
-        return IdentityScaler{n, F}(), is_inf
+        return IdentityScaler(n), is_inf
     end
 
     w[is_inf] .= 1
@@ -263,9 +265,8 @@ function scale_to_zero_one(
     allow_inf::Bool=true, throw_error::Bool=false
 )
     wrapped, is_inf = _scale_to_unit_length(lb, ub; allow_inf, throw_error)
-    F = float_type(wrapped)
     foff = - wrapped.fmat * lb
-    ioff = F.(lb)
+    ioff = copy(lb)
     
     foff[is_inf] .= 0
     ioff[is_inf] .= 0
@@ -273,9 +274,10 @@ function scale_to_zero_one(
     return DiagonalScalerWithOffset(wrapped, foff, ioff)     
 end
 
-init_box_scaler(::Nothing, ub, N, F) = IdentityScaler{N,F}()
-init_box_scaler(lb, ::Nothing, N, F) = IdentityScaler{N,F}()
-init_box_scaler(::Nothing, ::Nothing, N, F) = IdentityScaler{N,F}()
-function init_box_scaler(lb, ub, N, F)
+init_box_scaler(lb::Nothing, ub, n_vars) = IdentityScaler(n_vars)
+init_box_scaler(lb, ub::Nothing, n_vars) = IdentityScaler(n_vars)
+init_box_scaler(lb::Nothing, ub::Nothing, n_vars) = IdentityScaler(n_vars)
+function init_box_scaler(lb, ub, n_vars)
+    @assert length(lb) == n_vars
     return scale_to_zero_one(lb, ub)
 end

@@ -5,7 +5,7 @@ function do_restoration(
     @unpack (
         mop, mod, scaler, lin_cons, scaled_cons,
         vals, vals_tmp, step_vals, mod_vals, filter, step_cache, 
-        stop_crits, iteration_scalars, iteration_status 
+        stop_crits, iteration_scalars, iteration_status, trial_caches 
     ) = optimizer_caches
     Δ = iteration_scalars.delta
     
@@ -71,7 +71,7 @@ function restoration_objective(mop, vals_tmp, scaler, scaled_cons)
     @unpack A, b, E, c = scaled_cons
     function objf(xr::Vector, grad::Vector)
         if !isempty(grad)
-            @error "Restoration only supports derivative-free NLopt algorithms."
+            error("Restoration only supports derivative-free NLopt algorithms.")
         end
 
         ξ = cached_ξ(vals_tmp)
@@ -136,7 +136,7 @@ function postproccess_restoration(
         ## make models valid at `x + r` and set model values
         ## also compute normal step based on models
         @ignoraise update_models!(mod, Δ, scaler, vals_tmp, scaled_cons; log_level, indent)
-        @ignoraise eval_and_diff_mod!(mod_vals, mod, vals_tmp.x)
+        @ignoraise eval_and_diff_mod!(mod_vals, mod, cached_x(vals_tmp))
 
         trial_caches.diff_fx_mod .-= cached_fx(mod_vals)
 
@@ -175,5 +175,5 @@ function postproccess_restoration(
         end
     end
     # if we have not returned here, then no compatible normal step was found :(
-    return InfeasibleStopping(indent)
+    return InfeasibleStopping()
 end

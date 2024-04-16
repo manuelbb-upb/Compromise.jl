@@ -326,11 +326,11 @@ end
 function check_usercallback(crit_container::DefaultStoppingCriteriaContainer, p, optimizer_caches, algo_opts)
     return check_usercallback(crit_container.user_callback, p, optimizer_caches, algo_opts)
 end
-function check_usercallback(@nospecialize(user_callback), p, optimizer_caches, algo_opts)
+function check_usercallback(user_callback, p, optimizer_caches, algo_opts)
     return check_stopping_criterion(user_callback, p, optimizer_caches, algo_opts)
 end
 
-function stopping_criteria(algo_opts, @nospecialize(user_callback))
+function stopping_criteria(algo_opts, user_callback)
     F = float_type(algo_opts)
     @unpack (
         max_iter, stop_delta_min, stop_xtol_rel, stop_xtol_abs, stop_ftol_rel, stop_ftol_abs,
@@ -343,7 +343,7 @@ function stopping_criteria(algo_opts, @nospecialize(user_callback))
 end
 function stopping_criteria(
     F, max_iter, stop_delta_min, stop_xtol_rel, stop_xtol_abs, stop_ftol_rel, stop_ftol_abs,
-    stop_crit_tol_abs, stop_theta_tol_abs, stop_max_crit_loops, @nospecialize(user_callback)
+    stop_crit_tol_abs, stop_theta_tol_abs, stop_max_crit_loops, user_callback
 )
     NaNF = F(NaN)
     default_crits = (

@@ -143,7 +143,7 @@ include("SimpleMOP/simple_mop.jl")
 function optimize(
     MOP::AbstractMOP, ξ0::RVec;
     algo_opts :: AlgorithmOptions = AlgorithmOptions(),
-    @nospecialize(user_callback = NoUserCallback()),
+    user_callback :: AbstractStoppingCriterion = NoUserCallback(),
 )   
     return optimize_with_algo(MOP, algo_opts, ξ0; user_callback)
 end
@@ -151,7 +151,7 @@ end
 function optimize(
     MOP::AbstractMOP;
     algo_opts :: AlgorithmOptions = AlgorithmOptions(),
-    @nospecialize(user_callback = NoUserCallback()),
+    user_callback :: AbstractStoppingCriterion = NoUserCallback(),
 )
     ξ0 = initial_vars(MOP)
     
@@ -162,7 +162,7 @@ end
 
 function optimize_with_algo(
     MOP::AbstractMOP, outer_opts::ThreadedOuterAlgorithmOptions, ξ0::RVecOrMat; 
-    @nospecialize(user_callback = NoUserCallback()),
+    user_callback :: AbstractStoppingCriterion = NoUserCallback(),
 )
     _ξ0 = ξ0 isa RVec ? reshape(ξ0, :, 1) : ξ0
 
@@ -192,25 +192,31 @@ end
 
 function optimize_with_algo(
     MOP::AbstractMOP, algo_opts::AlgorithmOptions, ξ0; 
-    @nospecialize(user_callback = NoUserCallback()),
+    user_callback :: AbstractStoppingCriterion = NoUserCallback(),
 )
     optimizer_caches = initialize_structs(MOP, ξ0, algo_opts, user_callback)
-    @unpack log_level = algo_opts
-    if !(isa(optimizer_caches, AbstractStoppingCriterion))
-        @unpack vals = optimizer_caches
-        
-        _ξ0 = copy(cached_ξ(vals))    # for final ReturnObject
+    return optimize!(optimizer_caches, algo_opts, ξ0)
+end
 
-        stop_code = nothing
-        while true
-            @ignorebreak stop_code = do_iteration!(optimizer_caches, algo_opts)
-        end
-        log_stop_code(stop_code, log_level)
-        return ReturnObject(_ξ0, vals, stop_code, mod)
-    else
-        log_stop_code(optimizer_caches, log_level)
-        return ReturnObject(ξ0, nothing, optimizer_caches, nothing)
+function optimize!(optimizer_caches::OptimizerCaches, algo_opts, ξ0)
+    @unpack vals = optimizer_caches
+     
+    _ξ0 = copy(cached_ξ(vals))    # for final ReturnObject
+
+    stop_code = nothing
+    while true
+        time_start = time()
+        @ignorebreak stop_code = do_iteration!(optimizer_caches, algo_opts)
+        time_stop = time()
+        @logmsg algo_opts.log_level "Iteration was $(time_stop - time_start) sec."
     end
+    log_stop_code(stop_code, algo_opts.log_level)
+    return ReturnObject(_ξ0, vals, stop_code, mod)
+end
+
+function optimize!(optimizer_caches::AbstractStoppingCriterion, algo_opts, ξ0)
+    log_stop_code(optimizer_caches, algo_opts.log_level)
+    return ReturnObject(ξ0, nothing, optimizer_caches, nothing)
 end
 
 function log_stop_code(crit, log_level)
@@ -218,31 +224,39 @@ function log_stop_code(crit, log_level)
 end
 
 function initialize_structs( 
-    MOP::AbstractMOP, ξ0::RVec, algo_opts :: AlgorithmOptions,
-    @nospecialize(user_callback)
-)
+    MOP::AbstractMOP{T}, ξ0::RVec, algo_opts::AlgorithmOptions,
+    user_callback :: AbstractStoppingCriterion = NoUserCallback(),
+) where T<:AbstractFloat
+
     @assert !isempty(ξ0) "Starting point array `x0` is empty."
     @assert dim_objectives(MOP) > 0 "Objective Vector dimension of problem is zero."
-    
-    @unpack log_level = algo_opts
-    
+     
     n_vars = length(ξ0)
-    if dim_vars(MOP) != n_vars
-        @error "`dim_vars(MOP)=$(dim_vars(mop))`, but `length(ξ0)=$(n_vars)`."
-    end
+    @assert dim_vars(MOP) == n_vars "Mismatch in number of variables."
 
     ## INITIALIZATION (Iteration 0)
-    mop = initialize(MOP)
-    T = float_type(mop)
+    stats = @timed begin
+        mop = initialize(MOP)
+        initialize_structs_from_mop(mop, ξ0, algo_opts, user_callback)
+    end
+    @logmsg algo_opts.log_level "Initialization complete after $(stats.time) sec."
+    return stats.value
+end
+function initialize_structs_from_mop(
+    mop::AbstractMOP{T}, ξ0::RVec, algo_opts::AlgorithmOptions,
+    user_callback :: AbstractStoppingCriterion = NoUserCallback(),
+) where T<:AbstractFloat
+    indent = 0
+    @unpack log_level = algo_opts
     NaNT = T(NaN)
-    
+    n_vars = Int(dim_vars(mop))     # Cthulhu tells me that `dim_vars` is unstable. TODO make a wrapper/safeguard
     ## struct holding constant linear constraint informaton (lb, ub, A_b, E_c)
     ## set these first, because they are needed to initialize a scaler 
     ## if `algo_opts.scaler_cfg==:box`:
     lin_cons = init_lin_cons(mop)
 
     ## initialize a scaler according to configuration
-    scaler = init_scaler(algo_opts.scaler_cfg, lin_cons)
+    scaler = init_scaler(algo_opts.scaler_cfg, lin_cons, n_vars)
     ## whenever the scaler changes, we have to re-scale the linear constraints
     scaled_cons = deepcopy(lin_cons)
     update_lin_cons!(scaled_cons, scaler, lin_cons)
@@ -407,25 +421,25 @@ function do_iteration!(
         ## accept trial point, mathematically ``xₖ₊₁ ← xₖ + sₖ``, pseudo-code `copyto!(vals, vals_tmp)`: 
         accept_trial_point!(vals, vals_tmp)
     end
-
+    
     return nothing
 end
 
 
-function init_scaler(scaler_cfg::Symbol, lin_cons)
-    return init_scaler(Val(scaler_cfg), lin_cons)
+function init_scaler(scaler_cfg::Symbol, lin_cons, n_vars)
+    return init_scaler(Val(scaler_cfg), lin_cons, n_vars)
 end
 
-function init_scaler(::Val, lin_cons)
-    N = lin_cons.n_vars
-    F = float_type(lin_cons)
-    return IdentityScaler{N,F}()
+function init_scaler(::Val, lin_cons, n_vars)
+    return IdentityScaler(n_vars)
 end
 
-function init_scaler(::Val{:box}, lin_cons)
-    @unpack n_vars, lb, ub = lin_cons
-    F = float_type(lin_cons)
-    return init_box_scaler(lb, ub, n_vars, F)
+function init_scaler(v::Val{:box}, lin_cons, n_vars)
+    @unpack lb, ub = lin_cons
+    return init_scaler(v, lb, ub, n_vars)
+end
+function init_scaler(::Val{:box}, lb, ub, n_vars)
+    return init_box_scaler(lb, ub, n_vars)
 end
 
 function update_lin_cons!(scaled_cons, scaler, lin_cons)

@@ -64,8 +64,14 @@ function vec2str(x, max_entries=typemax(Int), digits=10)
 	return x_str
 end
 
-function array(T::Type, size...)
-  return Array{T}(undef, size...)
+function array(::Type{T}, size::Integer) where T
+  return Array{T}(undef, size)::Array{T, 1}
+end
+function array(::Type{T}, size::NTuple{N, <:Any}) where {T, N}
+	return Array{T}(undef, size)::Array{T, N}
+end
+function array(T, size...)
+	return array(T, size)
 end
 
 function _trial_point_accepted(iteration_status)
