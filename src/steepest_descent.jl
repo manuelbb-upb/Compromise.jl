@@ -9,7 +9,7 @@ Base.@kwdef struct SteepestDescentConfig{F, QPTYPE} <: AbstractStepConfig
     descent_step_norm :: F = Inf
     normal_step_norm :: F = 2
 
-    qp_opt :: QPTYPE = DEFAULT_QP_OPTIMIZER
+    qp_opt :: Type{QPTYPE} = DEFAULT_QP_OPTIMIZER
 end
 #@batteries SteepestDescentConfig selfconstructor=false
 
@@ -21,7 +21,7 @@ function SteepestDescentConfig(
     strict_backtracking,
     descent_step_norm,
     normal_step_norm,
-    qp_opt::QPTYPE,
+    qp_opt::Type{QPTYPE},
 ) where {float_type, QPTYPE}
     @assert 0 < backtracking_factor < 1 "`backtracking_factor` must be in (0,1)."
     @assert 0 < rhs_factor < 1 "`rhs_factor` must be in (0,1)."
@@ -72,6 +72,7 @@ Base.@kwdef struct SteepestDescentCache{
 end
 
 qp_optimizer_type(::SteepestDescentCache{F, QPOPT}) where {F, QPOPT} = QPOPT
+qp_optimizer_type(::SteepestDescentConfig{F, QPOPT}) where {F, QPOPT} = QPOPT
 
 function init_step_cache(
     cfg::SteepestDescentConfig, vals, mod_vals
@@ -84,7 +85,7 @@ function init_step_cache(
     rhs_factor = F(cfg.rhs_factor)
 
     @unpack normalize_gradients, strict_backtracking, descent_step_norm, 
-        normal_step_norm, qp_opt = cfg
+        normal_step_norm = cfg
 
     lb_tr = array(F, dim_vars(vals))
     ub_tr = similar(lb_tr)
@@ -96,7 +97,7 @@ function init_step_cache(
         backtracking_factor, rhs_factor, normalize_gradients, 
         strict_backtracking, descent_step_norm, normal_step_norm, 
         fxn, fx_tmp, lb_tr, ub_tr, Axn, Dgx_n, 
-        qp_opt
+        qp_opt=qp_optimizer_type(cfg)
     )
 end
 

@@ -169,7 +169,9 @@ function constant_op(n_vars, n_out)
             grads = x -> zeros(n_vars, n_out),
             grads_iip = false,
             hessians = x -> zeros(n_vars, n_vars, n_out),
-            hessians_iip = false
+            hessians_iip = false,
+            dim_in = n_vars,
+            dim_out = n_out
         )
     end
 end
@@ -210,9 +212,6 @@ for (n_vars, n_objfs, n_nl_eq, n_nl_ineq, n_lin_eq, n_lin_ineq) in Iterators.pro
 
     mop = C.MutableMOP(;
         num_vars = n_vars,
-        dim_objectives = n_objfs,
-        dim_nl_eq_constraints = n_nl_eq,
-        dim_nl_ineq_constraints = n_nl_ineq,
         objectives = constant_op(n_vars, n_objfs),
         nl_eq_constraints = constant_op(n_vars, n_nl_eq),
         nl_ineq_constraints = constant_op(n_vars, n_nl_ineq),
@@ -237,9 +236,9 @@ for (n_vars, n_objfs, n_nl_eq, n_nl_ineq, n_lin_eq, n_lin_ineq) in Iterators.pro
     mop.x0 = x0
     mop.lb = lb
     mop.ub = ub
-    C.add_objectives!(mop, constant_op(n_vars, n_objfs), :rbf; dim_out=n_objfs)
-    C.add_nl_eq_constraints!(mop, constant_op(n_vars, n_nl_eq), :rbf; dim_out=n_nl_eq)
-    C.add_nl_ineq_constraints!(mop, constant_op(n_vars, n_nl_ineq), :rbf; dim_out=n_nl_ineq)
+    C.add_objectives!(mop, constant_op(n_vars, n_objfs), :rbf;)
+    C.add_nl_eq_constraints!(mop, constant_op(n_vars, n_nl_eq), :rbf;)
+    C.add_nl_ineq_constraints!(mop, constant_op(n_vars, n_nl_ineq), :rbf;)
     mop.A = A
     mop.b = b
     mop.E = E

@@ -5,7 +5,7 @@ struct CheckPreCritLoop <: AbstractStopPoint end
 struct CheckPostCritLoop <: AbstractStopPoint end
 #struct CheckPostRestoration <: AbstractStopPoint end
 
-stop_message(::AbstractStoppingCriterion)=nothing
+stop_message(crit::AbstractStoppingCriterion)=repr(crit)
 
 function check_stopping_criterion(
     crit::AbstractStoppingCriterion,

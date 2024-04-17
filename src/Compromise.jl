@@ -534,4 +534,5 @@ export opt_cache, opt_vars, opt_objectives, opt_nl_eq_constraints, opt_nl_ineq_c
     opt_lin_eq_constraints, opt_lin_ineq_constraints, opt_constraint_violation, opt_stop_code,
     opt_surrogate
 export MutableMOP, add_objectives!, add_nl_ineq_constraints!, add_nl_eq_constraints!
+export TypedMOP, NonlinearFunction
 end

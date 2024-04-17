@@ -33,6 +33,9 @@ abstract type AbstractNonlinearOperatorNoParams <: AbstractNonlinearOperator end
 operator_has_name(::AbstractNonlinearOperator)::Bool=false
 operator_name(::AbstractNonlinearOperator)=error("No name.")
 
+operator_dim_in(::AbstractNonlinearOperator)=-1
+operator_dim_out(::AbstractNonlinearOperator)=-1
+
 operator_chunk_size(::AbstractNonlinearOperator)::Integer=1
 operator_has_params(::AbstractNonlinearOperator)::Bool=false
 operator_can_partial(::AbstractNonlinearOperator)::Bool=false
@@ -445,41 +448,20 @@ depends_on_radius(::AbstractSurrogateModel)=true
 # A surrogate is initialized from its configuration and the operator it is meant to model:
 """
     init_surrogate(
-        model_config, nonlin_op, dim_in, dim_out, params, T
+        model_config, nonlin_op, params, T
     )
 
 Return a model subtyping `AbstractSurrogateModel`, as defined by 
 `model_config::AbstractSurrogateModelConfig`, for the nonlinear operator `nonlin_op`.
-The operator (and model) has input dimension `dim_in` and output dimension `dim_out`.
 `params` is the current parameter object for `nonlin_op` and is cached.
 `T` is a subtype of `AbstractFloat` to indicate float_type of cache arrays.
 """
 function init_surrogate(
-    ::AbstractSurrogateModelConfig, op, dim_in, dim_out, params, T;
+    ::AbstractSurrogateModelConfig, op, params, T;
     require_fully_linear::Bool=true, 
     delta_max::Union{Number, AbstractVector{<:Number}}=Inf,
 )::AbstractSurrogateModel
     return nothing
-end
-
-# A function to return a copy of a model. Should be implemented if 
-# `depends_on_radius` returns `true`.
-# Note, that the returned object does not have to be an “independent” copy, we allow 
-# for shared objects (like mutable database arrays or something of that sort)...
-universal_copy(mod::AbstractSurrogateModel)=mod
-
-# A function to copy parameters between source and target models, like `Base.copy!` or 
-# `Base.copyto!`. Relevant mostly for implicit trainable parameters.
-universal_copy!(mod_trgt::AbstractSurrogateModel, mod_src::AbstractSurrogateModel)=mod_trgt
-
-function universal_copy_model(mod)
-    depends_on_radius(mod) && return universal_copy(mod)
-    return mod
-end
-
-function universal_copy_model!(mod_trgt, mod_src)
-    depends_on_radius(mod_trgt) && return universal_copy!(mod_trgt, mod_src)
-    return mod_trgt
 end
 
 # Because parameters are implicit, updates are in-place operations:
@@ -524,6 +506,9 @@ operator_has_name(op::AbstractNonlinearOperatorWrapper)=operator_has_name(wrappe
 operator_name(op::AbstractNonlinearOperatorWrapper)=operator_name(wrapped_operator(op))
 func_call_counter(op::AbstractNonlinearOperatorWrapper, v::Val)=func_call_counter(wrapped_operator(op), v)
 max_num_calls(op::AbstractNonlinearOperatorWrapper, v::Val)=max_num_calls(wrapped_operator(op), v)
+
+operator_dim_in(op::AbstractNonlinearOperatorWrapper)=operator_dim_in(wrapped_operator(op))
+operator_dim_out(op::AbstractNonlinearOperatorWrapper)=operator_dim_out(wrapped_operator(op))
 
 preprocess_inputs(op::AbstractNonlinearOperator, x::RVec) = x
 preprocess_inputs(op::AbstractNonlinearOperator, x::RMat) = x

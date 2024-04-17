@@ -24,8 +24,8 @@ using Compromise
         return H
     end
 
-    op = Compromise.NonlinearFunction(;func, grads, hessians)
-    tp = Compromise.init_surrogate(tcfg, op, 2, 2, nothing, Float64)
+    op = Compromise.NonlinearFunction(;func, grads, hessians, dim_in=2, dim_out=2)
+    tp = Compromise.init_surrogate(tcfg, op, nothing, Float64)
 
     x = rand(2)
     y = zeros(2)
@@ -238,7 +238,7 @@ end
         ),
         user_callback = MyCallback()
     )
-    @test_broken opt_stop_code(ret) isa MyCallback
+    @test opt_stop_code(ret) isa MyCallback
 end
 
 @testset "Max Eval Stopping" begin

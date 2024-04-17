@@ -42,18 +42,6 @@ function process_trial_point!(mod::AbstractMOPSurrogate, vals_trial, iteration_s
     nothing
 end
 
-# If a model is radius-dependent, 
-# we also need a function to copy the parameters from a source model to a target model:
-universal_copy(mod::AbstractMOPSurrogate)=mod
-universal_copy!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=mod_trgt
-# These internal helpers are derived:
-function universal_copy_model(mod::AbstractMOPSurrogate)
-    depends_on_radius(mod) ? universal_copy(mod) : mod
-end
-function universal_copy_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)
-    depends_on_radius(mod_trgt) ? universal_copy!(mod_trgt, mod_src) : mod_trgt
-end
-
 # ## Evaluation
 
 # !!! note

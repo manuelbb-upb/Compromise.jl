@@ -46,6 +46,9 @@ CE.depends_on_radius(::RBFModel)=true
 CE.requires_grads(::RBFConfig)=false
 CE.requires_hessians(::RBFConfig)=false
 
+CE.operator_dim_in(rbf::RBFModel)=rbf.dim_x
+CE.operator_dim_out(rbf::RBFModel)=rbf.dim_y
+
 @views function prepare_eval_buffers(rbf, x)
     @unpack dim_x, dim_y, dim_π, poly_deg, kernel, params, buffers = rbf
     @unpack coeff_φ, coeff_π, x0, X = params
@@ -93,10 +96,12 @@ function CE.eval_grads!(Dy, rbf::RBFModel, x)
 end
 
 function CE.init_surrogate(
-    cfg::RBFConfig, op, dim_in, dim_out, params, T;
+    cfg::RBFConfig, op, params, T;
     require_fully_linear::Bool=true,
     delta_max::Number=T(Inf),
 )
+    dim_in = CE.operator_dim_in(op)
+    dim_out = CE.operator_dim_out(op)
     @unpack (
         kernel, search_factor, max_search_factor, th_qr, th_cholesky, max_points, 
         database, database_rwlock, database_size, database_chunk_size, enforce_fully_linear, poly_deg, 
@@ -122,7 +127,7 @@ function CE.update!(
         log_level, norm_p=Inf, indent
     )
 end
-
+#=
 function CE.universal_copy(rbf::RBFModel)
     @unpack dim_x, dim_y, dim_π, min_points, max_points, delta_max, poly_deg, kernel = rbf
     @unpack shape_parameter_function, enforce_fully_linear, search_factor = rbf
@@ -141,6 +146,7 @@ end
 function CE.universal_copy!(mod_trgt::RBFModel, mod_src::RBFModel)
     copyto!(mod_trgt.params, mod_src.params)
 end
+=#
 
 # TODO partial evaluation
 

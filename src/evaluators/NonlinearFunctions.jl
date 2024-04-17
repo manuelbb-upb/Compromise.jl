@@ -5,6 +5,7 @@ include("abstract_autodiff.jl")
 import ..Compromise: RVec, RMat, RVecOrMat, @ignoraise
 import ..Compromise.CompromiseEvaluators as CE
 import ..Compromise.CompromiseEvaluators: FuncCallCounter
+import ..Compromise: Accessors
 
 using Parameters: @with_kw
 
@@ -48,6 +49,9 @@ compute the derivatives if the relevant field `isnothing`.
     C<:Real
 } <: CE.AbstractNonlinearOperator
     func :: F
+    dim_in :: Int
+    dim_out :: Int
+
     grads :: G = nothing
     hessians :: H = nothing
     func_and_grads :: FG = nothing
@@ -85,6 +89,8 @@ CE.operator_can_partial(op::NonlinearParametricFunction)=false
 CE.operator_chunk_size(op::NonlinearParametricFunction)=op.chunk_size
 CE.operator_has_name(op::NonlinearParametricFunction)=!isnothing(op.name)
 CE.operator_name(op::NonlinearParametricFunction)=op.name
+CE.operator_dim_in(op::NonlinearParametricFunction)=op.dim_in
+CE.operator_dim_out(op::NonlinearParametricFunction)=op.dim_out
 
 function CE.provides_grads(op::NonlinearParametricFunction)
     !isnothing(op.backend) && return true
@@ -282,6 +288,8 @@ function NonlinearFunction(; kwargs...)
     end
     return NonlinearFunction(NonlinearParametricFunction(;new_kwargs...))
 end
+
+Accessors.set(op::NonlinearFunction, lens::Accessors.PropertyLens, val)=Accessors.set(op.wrapped_function, lens, val)
 
 export AbstractAutoDiffBackend, NoBackend
 export ad_grads!, ad_hessians!, ad_op_and_grads!, ad_op_and_grads_and_hessians!

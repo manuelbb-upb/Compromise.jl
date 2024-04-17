@@ -27,15 +27,18 @@ struct RecountedOperator{O} <: AbstractNonlinearOperatorWrapper
     num_hess_calls :: Union{FuncCallCounter, Nothing}
 end
 
-function RecountedOperator(op; replace_counters::Bool=false)
-    if !replace_counters
-        return RecountedOperator(op, nothing, nothing, nothing)
-    end
-    return RecountedOperator(op, FuncCallCounter(), FuncCallCounter(), FuncCallCounter())
+recount_operator(op::Nothing, ::Val{true}) = nothing
+recount_operator(op::Nothing, ::Val{false}) = nothing
+recount_operator(op, new_counters::Val{false})=RecountedOperator(op, nothing, nothing, nothing)
+function recount_operator(op, new_counters::Val{true})
+    RecountedOperator(op, FuncCallCounter(), FuncCallCounter(), FuncCallCounter())
 end
-
-recount_operator(op::Nothing; kwargs...) = nothing
-recount_operator(op; kwargs...)=RecountedOperator(op; kwargs...)
+function recount_operator(op::RecountedOperator, new_counters::Val{false})
+    return op
+end
+function recount_operator(op::RecountedOperator, new_counters::Val{true})
+    return recount_operator(op.op, new_counters)
+end
 
 CE.wrapped_operator(sop::RecountedOperator)=sop.op
 
@@ -94,6 +97,8 @@ end
 abstract type SimpleMOP <: AbstractMOP end
 
 stop_type(::SimpleMOP) = BudgetExhausted
+_reset_call_counters(::SimpleMOP) = Val{true}()
+
 # A `MutableMOP` is meant to be initialized empty and built up iteratively.
 """
     MutableMOP(; num_vars, kwargs...)
@@ -126,13 +131,9 @@ By default, we assume `ExactModelConfig()`, which requires differentiable object
 
     reset_call_counters :: Bool = true
 
-    num_vars :: Int
+    num_vars :: Int = -1
 
     x0 :: Union{Nothing, RVec, RMat} = nothing
-
-    dim_objectives :: Int = 0
-    dim_nl_eq_constraints :: Int = 0
-    dim_nl_ineq_constraints :: Int = 0
 
     mcfg_objectives :: AbstractSurrogateModelConfig = ExactModelConfig()
     mcfg_nl_eq_constraints :: AbstractSurrogateModelConfig = ExactModelConfig()
@@ -147,57 +148,56 @@ By default, we assume `ExactModelConfig()`, which requires differentiable object
     b :: Union{Nothing, Vector{Float64}} = nothing
 end
 MutableMOP(num_vars::Int)=MutableMOP(;num_vars)
+_reset_call_counters(mop::MutableMOP)=Val(mop.reset_call_counters)
 
 # The `TypedMOP` looks nearly the same, but is strongly typed and immutable.
 # We initialize a `TypedMOP` from a `MutableMOP` before optimization for 
 # performance reasons:
-struct TypedMOP{
-    O, NLEC,NLIC,
+Base.@kwdef struct TypedMOP{
+    O, NLEC, NLIC,
+    rccType,
     XType,
     MTO, MTNLEC, MTNLIC,
     LB, UB, 
     EType, CType, AType, BType
 } <: SimpleMOP
-    objectives :: O
-    nl_eq_constraints :: NLEC
-    nl_ineq_constraints :: NLIC
+    objectives :: O = nothing
+    nl_eq_constraints :: NLEC = nothing
+    nl_ineq_constraints :: NLIC = nothing
 
-    reset_call_counters :: Bool
+    reset_call_counters :: rccType = Val{true}()
 
-    num_vars :: Int
+    num_vars :: Int = -1
 
-    x0 :: XType
+    x0 :: XType = nothing
     
-    dim_objectives :: Int
-    dim_nl_eq_constraints :: Int
-    dim_nl_ineq_constraints :: Int
+    mcfg_objectives :: MTO = ExactModelConfig()
+    mcfg_nl_eq_constraints :: MTNLEC = ExactModelConfig()
+    mcfg_nl_ineq_constraints :: MTNLIC = ExactModelConfig()
 
-    mcfg_objectives :: MTO
-    mcfg_nl_eq_constraints :: MTNLEC
-    mcfg_nl_ineq_constraints :: MTNLIC 
+    lb :: LB = nothing
+    ub :: UB = nothing
 
-    lb :: LB
-    ub :: UB
-
-    E :: EType
-    c :: CType
-    A :: AType
-    b :: BType
+    E :: EType = nothing
+    c :: CType = nothing
+    A :: AType = nothing
+    b :: BType = nothing
 end
+_reset_call_counters(mop::TypedMOP) = mop.reset_call_counters
 
 # This initialization really is just a forwarding of all fields:
 function initialize(mop::SimpleMOP)
-    replace_counters = mop.reset_call_counters
+    replace_counters = _reset_call_counters(mop)
+    new_objectives = recount_operator(mop.objectives, replace_counters)
+    new_nl_eq_constraints = recount_operator(mop.nl_eq_constraints, replace_counters)
+    new_nl_ineq_constraints = recount_operator(mop.nl_ineq_constraints, replace_counters)
     return TypedMOP(
-        recount_operator(mop.objectives; replace_counters),
-        recount_operator(mop.nl_eq_constraints; replace_counters),
-        recount_operator(mop.nl_ineq_constraints; replace_counters), 
+        new_objectives,
+        new_nl_eq_constraints,
+        new_nl_ineq_constraints,
         mop.reset_call_counters,
         mop.num_vars,
         mop.x0,
-        mop.dim_objectives,
-        mop.dim_nl_eq_constraints,
-        mop.dim_nl_ineq_constraints,
         mop.mcfg_objectives,
         mop.mcfg_nl_eq_constraints,
         mop.mcfg_nl_ineq_constraints,
@@ -240,18 +240,18 @@ E.g., `add_function!(:objectives, mop, op, :rbf; dim_out=2)` adds `op`
 as the bi-valued objective to `mop`.
 """
 function add_function!(
-    func_field::Symbol, mop::MutableMOP, op::AbstractNonlinearOperator, 
+    field_val::Val{field}, mop::MutableMOP, op::AbstractNonlinearOperator, 
     model_cfg::Union{AbstractSurrogateModelConfig, Nothing, Symbol}=nothing;
-    dim_out::Int
-)
+) where field
 
-    setfield!(mop, func_field, op)
-    setfield!(mop, Symbol("dim_", func_field), dim_out)
-
-    mod = parse_mcfg(model_cfg)
-    setfield!(mop, Symbol("mcfg_", func_field), mod)
+    setproperty!(mop, field, op)
+    mod_cfg = parse_mcfg(model_cfg)
+    _mcfg_field!(mop, field_val, mod_cfg)
     return nothing
 end
+_mcfg_field!(mop::SimpleMOP, ::Val{:objectives}, cfg)= (mop.mcfg_objectives = cfg)
+_mcfg_field!(mop::SimpleMOP, ::Val{:nl_eq_constraints}, cfg) = (mop.mcfg_nl_eq_constraints = cfg)
+_mcfg_field!(mop::SimpleMOP, ::Val{:nl_ineq_constraints}, cfg) = (mop.mcfg_nl_ineq_constraints = cfg)
 
 # We now generate the derived helper functions `add_objectives!`,
 # `add_nl_ineq_constraints!` and `add_nl_eq_constraints!`.
@@ -268,10 +268,11 @@ for (fntype, typenoun) in (
     add_fn = Symbol("add_", fntype, "!")
     @eval begin
         function $(add_fn)(
-            mop::MutableMOP, op::NonlinearFunction, model_cfg=nothing; dim_out::Int)
-            return add_function!($(Meta.quot(fntype)), mop, op, model_cfg; dim_out)
+            mop::MutableMOP, op::NonlinearFunction, model_cfg=nothing,
+        )
+            return add_function!(Val($(Meta.quot(fntype))), mop, op, parse_mcfg(model_cfg))
         end#function
-        
+
         """
             $($(add_fn))(mop::MutableMOP, func, model_cfg=nothing; 
                 dim_out::Int, kwargs...)
@@ -281,10 +282,11 @@ for (fntype, typenoun) in (
         Can be `nothing`, a Symbol (`:exact`, `:rbf`, `taylor1`, `taylor2`), or an
         `AbstractSurrogateModelConfig` object.
 
-        All functions can be in-place, see keyword arguments `func_iip`.
+        All functions can be in-place, see keyword argument `func_iip`.
         
         Keyword argument `dim_out` is mandatory and corresponds to the length of the result
         vector.
+        If `dim_vars(mop) <= 0`, then `dim_in` is also mandatory.
         The other `kwargs...` are passed to the inner `AbstractNonlinearOperator` as is.
         For options and defaults see [`NonlinearParametricFunction`](@ref).
         """
@@ -292,8 +294,27 @@ for (fntype, typenoun) in (
             mop::MutableMOP, func::Function, model_cfg=nothing; dim_out::Int, kwargs...
         )
             if dim_out > 0
-                op = NonlinearFunction(; func, kwargs...)
-                return add_function!($(Meta.quot(fntype)), mop, op, model_cfg; dim_out)
+                dim_in = get(kwargs, :dim_in, nothing)
+                if isnothing(dim_in)
+                    dim_in_mop = dim_vars(mop)
+                    if dim_in_mop <= 0
+                        @warn "`dim_in` not specified, please give positive integer. Not adding function to problem."
+                        return nothing
+                    end
+                    dim_in = dim_in_mop
+                end
+                dim_in_mop = dim_vars(mop)
+                if dim_in != dim_in_mop
+                    if dim_in_mop <= 0
+                        mop.num_vars = dim_in
+                    else
+                        @warn "`mop` has $(dim_in_mop) variables, but function has `dim_in`=$(dim_in). Not adding function to problem."
+                        return nothing
+                    end
+                end
+
+                op = NonlinearFunction(; func, dim_out, kwargs..., dim_in)  # rightmost argument has precedence
+                return add_function!(Val($(Meta.quot(fntype))), mop, op, model_cfg)
             else
                 @warn "`dim_out` must be positive. Not adding function to problem."
                 return nothing
@@ -355,6 +376,40 @@ for (fntype, typenoun) in (
         end
     end#@eval
 end
+# #### “Mutable” TypedMOP
+function Accessors.set(
+    mop::TypedMOP, 
+    lens::Union{
+        PropertyLens{:objectives}, 
+        PropertyLens{:nl_eq_constraintss}, 
+        PropertyLens{:nl_ineq_constraints},
+    },
+    op::AbstractNonlinearOperator
+)
+    dim_in_op = CE.operator_dim_in(op)
+    patch = (;)
+    patch = Accessors.insert(patch, lens, op)
+    if dim_vars(mop) <= 0
+        patch = Accessors.insert(patch, PropertyLens{:num_vars}(), dim_in_op)
+    else
+        @assert dim_vars(mop) == CE.operator_dim_in(op)
+    end
+    return Accessors.setproperties(mop, patch)
+end
+
+function Accessors.set(
+    mop::TypedMOP, 
+    lens::Union{
+        PropertyLens{:mcfg_objectives}, 
+        PropertyLens{:mcfg_nl_eq_constraintss}, 
+        PropertyLens{:mcfg_nl_ineq_constraints},
+    },
+    mcfg::Union{Symbol, AbstractSurrogateModelConfig, Nothing}
+)
+    patch = (;)
+    patch = Accessors.insert(patch, lens, parse_mcfg(mcfg))
+    return Accessors.setproperties(mop, patch)
+end
 
 # ### Interface Implementation
 # Define the most basic Getters:
@@ -368,11 +423,11 @@ upper_var_bounds(mop::SimpleMOP)=mop.ub
 
 # To access functions, retrieve the corresponding fields of the MOP:
 dim_vars(mop::SimpleMOP)=mop.num_vars::Int
-for dim_func in (:dim_objectives, :dim_nl_eq_constraints, :dim_nl_ineq_constraints)
-    @eval function $(dim_func)(mop::SimpleMOP)
-        return getfield(mop, $(Meta.quot(dim_func)))::Int
-    end
-end
+dim_objectives(mop::SimpleMOP)=simple_op_dim_out(mop.objectives)::Int
+dim_nl_eq_constraints(mop::SimpleMOP)=simple_op_dim_out(mop.nl_eq_constraints)::Int
+dim_nl_ineq_constraints(mop::SimpleMOP)=simple_op_dim_out(mop.nl_ineq_constraints)::Int
+simple_op_dim_out(::Nothing)=0
+simple_op_dim_out(op)=CE.operator_dim_out(op)
 
 # Linear constraints are returned only if the matrix is not nothing.
 # If the offset vector is nothing, we return zeros:
@@ -408,10 +463,7 @@ struct SimpleMOPSurrogate{
     nl_ineq_constraints :: NLIC
     
     num_vars :: Int
-    dim_objectives :: Int
-    dim_nl_eq_constraints :: Int
-    dim_nl_ineq_constraints :: Int
-
+   
     mod_objectives :: MO
     mod_nl_eq_constraints :: MNLEC
     mod_nl_ineq_constraints :: MNLIC
@@ -421,21 +473,21 @@ end
 float_type(mod::SimpleMOPSurrogate)=Float64
 
 # Getters are generated automatically:
-dim_vars(mod::SimpleMOPSurrogate)=mod.num_vars
-for dim_func in (:dim_objectives, :dim_nl_eq_constraints, :dim_nl_ineq_constraints)
-    @eval function $(dim_func)(mod::SimpleMOPSurrogate)
-        return getfield(mod, $(Meta.quot(dim_func)))
-    end
-end
+dim_vars(mod::SimpleMOPSurrogate)=mod.num_vars::Int
+dim_objectives(mop::SimpleMOPSurrogate)=simple_op_dim_out(mop.objectives)::Int
+dim_nl_eq_constraints(mop::SimpleMOPSurrogate)=simple_op_dim_out(mop.nl_eq_constraints)::Int
+dim_nl_ineq_constraints(mop::SimpleMOPSurrogate)=simple_op_dim_out(mop.nl_ineq_constraints)::Int
 
 # The model container is dependent on the trust-region if any of the models is:
 function depends_on_radius(mod::SimpleMOPSurrogate)
     return (
-        (!isnothing(mod.mod_objectives) && CE.depends_on_radius(mod.mod_objectives)) ||
-        (!isnothing(mod.mod_nl_eq_constraints) && CE.depends_on_radius(mod.mod_nl_eq_constraints)) ||
-        (!isnothing(mod.mod_nl_ineq_constraints) && CE.depends_on_radius(mod.mod_nl_ineq_constraints))
+        simple_model_depends_on_radius(mod.mod_objectives) ||
+        simple_model_depends_on_radius(mod.nl_eq_constraints) ||
+        simple_model_depends_on_radius(mod.nl_ineq_constraints) 
     )
 end
+simple_model_depends_on_radius(::Nothing)=false
+simple_model_depends_on_radius(mod)=CE.depends_on_radius(mod)
 
 # At the moment, I have not yet thought about what we would need to change for dynamic scaling:
 supports_scaling(::Type{<:SimpleMOPSurrogate})=ConstantAffineScaling()
@@ -471,12 +523,13 @@ function eval_and_grads_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::SimpleMOPSu
 end
 # ### Initialization and Training
 # These helpers make an operator respect scaling by returning `ScaledOperator`:
-scale_wrap_op(scaler::IdentityScaler, op, mcfg, dim_in, dim_out, T)=op
+scale_wrap_op(scaler::IdentityScaler, op, mcfg, T)=op
 function scale_wrap_op(
-    scaler, op, mcfg, dim_in, dim_out, T;
+    scaler, op, mcfg, T;
 )
     isnothing(op) && return op
     op_cs = CE.operator_chunk_size(op)
+    dim_in = CE.operator_dim_in(op)
     if isinf(op_cs) || op_cs <= 0
         op_cs = dim_in + 1
     end
@@ -489,32 +542,34 @@ end
 # Modellers should always assume working in the scaled domain and not be bothered
 # with transformations...
 function init_models(mop::SimpleMOP, scaler; kwargs...)
-    d_objf = dim_objectives(mop)
-    d_nl_eq = dim_nl_eq_constraints(mop)
-    d_nl_ineq = dim_nl_ineq_constraints(mop)
-    d_in = mop.num_vars
-
     objf = scale_wrap_op(
-        scaler, mop.objectives, mop.mcfg_objectives, d_in, d_objf, Float64;
+        scaler, mop.objectives, mop.mcfg_objectives, Float64;
     )
     nl_eq = scale_wrap_op(
-        scaler, mop.nl_eq_constraints, mop.mcfg_nl_eq_constraints, d_in, d_nl_eq, Float64;
+        scaler, mop.nl_eq_constraints, mop.mcfg_nl_eq_constraints, Float64;
     )
     nl_ineq = scale_wrap_op(
-        scaler, mop.nl_ineq_constraints, mop.mcfg_nl_ineq_constraints, d_in, d_nl_ineq, Float64;
+        scaler, mop.nl_ineq_constraints, mop.mcfg_nl_ineq_constraints, Float64;
     )
 
-    mobjf = isnothing(objf) ? nothing : init_surrogate(
-        mop.mcfg_objectives, objf, d_in, d_objf, nothing, Float64; kwargs...)
-    mnl_eq = isnothing(nl_eq) ? nothing : init_surrogate(
-        mop.mcfg_nl_eq_constraints, nl_eq, d_in, d_nl_eq, nothing, Float64; kwargs...)
-    mnl_ineq = isnothing(nl_ineq) ? nothing : init_surrogate(
-        mop.mcfg_nl_ineq_constraints, nl_ineq, d_in, d_nl_ineq, nothing, Float64; kwargs...)
+    mobjf = init_simple_surrogate(objf, mop.mcfg_objectives; kwargs...)
+    mnl_eq = init_simple_surrogate(nl_eq, mop.mcfg_nl_eq_constraints; kwargs...)
+    mnl_ineq = init_simple_surrogate(nl_ineq, mop.mcfg_nl_ineq_constraints; kwargs...)
 
     return SimpleMOPSurrogate(
-        objf, nl_eq, nl_ineq, d_in, d_objf, d_nl_eq, d_nl_ineq, mobjf, mnl_eq, mnl_ineq)
+        objf, 
+        nl_eq, 
+        nl_ineq, 
+        mop.num_vars, 
+        mobjf, 
+        mnl_eq, 
+        mnl_ineq
+    )
 end
-
+init_simple_surrogate(op::Nothing, cfg; kwargs...)=nothing
+function init_simple_surrogate(op, cfg; kwargs...) 
+    return init_surrogate(cfg, op, nothing, Float64; kwargs...)
+end
 # The sub-models are trained separately:
 function update_models!(
     mod::SimpleMOPSurrogate, Δ, scaler, vals, scaled_cons;
@@ -535,39 +590,6 @@ function update_models!(
             mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, cached_gx(vals), lb, ub; log_level, indent)
     end
     return nothing
-end
-
-function universal_copy(mod::SimpleMOPSurrogate)
-    mobjf = isnothing(mod.mod_objectives) ? nothing : CE.universal_copy_model(mod.mod_objectives)
-    mnleq = isnothing(mod.nl_eq_constraints) ? nothing :  CE.universal_copy_model(mod.mod_nl_eq_constraints)
-    mnlineq = isnothing(mod.nl_ineq_constraints) ? nothing : CE.universal_copy_model(mod.mod_nl_ineq_constraints)
-    return SimpleMOPSurrogate(
-        mod.objectives,
-        mod.nl_eq_constraints,
-        mod.nl_ineq_constraints,
-        mod.num_vars,
-        mod.dim_objectives,
-        mod.dim_nl_eq_constraints,
-        mod.dim_nl_ineq_constraints,
-        mobjf,
-        mnleq,
-        mnlineq,
-    )
-end
-
-function universal_copy!(
-    mod_trgt::SimpleMOPSurrogate, mod_src::SimpleMOPSurrogate
-)
-    if !isnothing(mod_trgt.mod_objectives)
-        CE.universal_copy_model!(mod_trgt.mod_objectives, mod_src.mod_objectives)
-    end
-    if !isnothing(mod_trgt.mod_nl_eq_constraints)
-        CE.universal_copy_model!(mod_trgt.mod_nl_eq_constraints, mod_src.mod_nl_eq_constraints)
-    end
-    if !isnothing(mod_trgt.mod_nl_ineq_constraints)
-        CE.universal_copy_model!(mod_trgt.mod_nl_ineq_constraints, mod_src.mod_nl_ineq_constraints)
-    end
-    return mod_trgt
 end
 
 function process_trial_point!(mod::SimpleMOPSurrogate, vals_trial, iteration_status)

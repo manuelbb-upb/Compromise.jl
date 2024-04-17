@@ -139,6 +139,13 @@ end
     end
 end
 
+struct RBFDummyOp <: C.CE.AbstractNonlinearOperator
+    dim_in :: Int
+    dim_out :: Int
+end
+C.CE.operator_dim_in(op::RBFDummyOp) = op.dim_in
+C.CE.operator_dim_out(op::RBFDummyOp) = op.dim_out
+
 @testset "RBFConfig" begin
     cfg = R.RBFConfig()
     @test cfg.kernel isa R.CubicKernel
@@ -155,8 +162,9 @@ end
 
     dim_x = 2
     dim_y = 3
+    op = RBFDummyOp(dim_x, dim_y)
     rbf = C.init_surrogate(
-        cfg, nothing, dim_x, dim_y, nothing, Float64;
+        cfg, op, nothing, Float64;
         delta_max = Inf,
     )
     @test rbf.dim_x == dim_x
@@ -256,7 +264,7 @@ end
     @test ix == 5
     =#
 
-    op = C.NonlinearFunction(; func = x -> [x; sum(x)], func_iip=false)
+    op = C.NonlinearFunction(; func = x -> [x; sum(x)], func_iip=false, dim_in=2, dim_out=3)
     R.evaluate!(dat, op)
     for j=6:11
         y = dat.y[:, j]
@@ -280,17 +288,21 @@ end
             end
             nothing
         end,
-        func_iip=true
+        func_iip=true,
+        dim_in=-1,
+        dim_out=-1
     )
     poly_deg = 1   # TODO 0, nothing
     for kernel in (R.GaussianKernel(), R.InverseMultiQuadricKernel(), R.CubicKernel())
         for dim_x in (1, 2, 4, 10, 50)
         for dim_y in (1, 2, 4, 10)
         for max_points in (dim_x+1, 2*(dim_x + 1))
+            C.@reset op.dim_in = dim_x
+            C.@reset op.dim_out = dim_y
 
             Δ = .1
             cfg = R.RBFConfig(; kernel, poly_deg, max_points)
-            rbf = C.init_surrogate(cfg, nothing, dim_x, dim_y, nothing, Float64; delta_max = Δ)
+            rbf = C.init_surrogate(cfg, op, nothing, Float64; delta_max = Δ)
             @test val(rbf.params.is_fully_linear_ref) == false
             x0 = rand(dim_x)
             fx0 = zeros(dim_y)
@@ -369,7 +381,7 @@ end
                 isapprox(fx0, yi; rtol=1e-6)
             end
 
-            _rbf = C.init_surrogate(cfg, nothing, dim_x, dim_y, nothing, Real)
+            _rbf = C.init_surrogate(cfg, op, nothing, Real)
             copyto!(_rbf.params, rbf.params)
             copyto!(_rbf.buffers, rbf.buffers)
             Dy = zeros(dim_x, dim_y)
