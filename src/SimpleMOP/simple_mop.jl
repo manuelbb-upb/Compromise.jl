@@ -257,13 +257,13 @@ _mcfg_field!(mop::SimpleMOP, ::Val{:nl_ineq_constraints}, cfg) = (mop.mcfg_nl_in
 # `add_nl_ineq_constraints!` and `add_nl_eq_constraints!`.
 # Here, we additionally allow for `Function`s to be used instead of `NonlinearFunction`s.
 function add_objectives!(mop, args...; kwargs...) 
-    error("`add_objectives!` fallback.") 
+    @warn("`add_objectives!` fallback.") 
 end
 function add_nl_eq_constraints!(mop, args...; kwargs...)
-    error("`add_nl_eq_constraints!` fallback.") 
+    @warn("`add_nl_eq_constraints!` fallback.") 
 end
 function add_nl_ineq_constraints!(mop, args...; kwargs...)
-    error("`add_nl_ineq_constraints!` fallback.") 
+    @warn("`add_nl_ineq_constraints!` fallback.") 
 end
 
 for (fntype, typenoun) in (
