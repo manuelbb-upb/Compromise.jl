@@ -256,9 +256,15 @@ _mcfg_field!(mop::SimpleMOP, ::Val{:nl_ineq_constraints}, cfg) = (mop.mcfg_nl_in
 # We now generate the derived helper functions `add_objectives!`,
 # `add_nl_ineq_constraints!` and `add_nl_eq_constraints!`.
 # Here, we additionally allow for `Function`s to be used instead of `NonlinearFunction`s.
-function add_objectives!(mop, args...; kwargs...) end
-function add_nl_eq_constraints!(mop, args...; kwargs...) end
-function add_nl_ineq_constraints!(mop, args...; kwargs...) end
+function add_objectives!(mop, args...; kwargs...) 
+    error("`add_objectives!` fallback.") 
+end
+function add_nl_eq_constraints!(mop, args...; kwargs...)
+    error("`add_nl_eq_constraints!` fallback.") 
+end
+function add_nl_ineq_constraints!(mop, args...; kwargs...)
+    error("`add_nl_ineq_constraints!` fallback.") 
+end
 
 for (fntype, typenoun) in (
     (:objectives, "objectives"),
@@ -482,8 +488,8 @@ dim_nl_ineq_constraints(mop::SimpleMOPSurrogate)=simple_op_dim_out(mop.nl_ineq_c
 function depends_on_radius(mod::SimpleMOPSurrogate)
     return (
         simple_model_depends_on_radius(mod.mod_objectives) ||
-        simple_model_depends_on_radius(mod.nl_eq_constraints) ||
-        simple_model_depends_on_radius(mod.nl_ineq_constraints) 
+        simple_model_depends_on_radius(mod.mod_nl_eq_constraints) ||
+        simple_model_depends_on_radius(mod.mod_nl_ineq_constraints) 
     )
 end
 simple_model_depends_on_radius(::Nothing)=false

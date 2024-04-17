@@ -6,7 +6,10 @@ end
 
 opt_initial_vars(r::ReturnObject) = r.ξ0
 opt_cache(r::ReturnObject) = r.cache
-opt_vals(r::ReturnObject) = opt_cache(r).vals
+
+opt_vals(r::ReturnObject) = opt_vals(opt_cache(r))
+opt_vals(c::OptimizerCaches) = c.vals
+opt_vals(::Nothing)=nothing
 opt_surrogate(r::ReturnObject) = opt_cache(r).mod
 
 opt_vars(r::ReturnObject)=opt_vars(opt_vals(r))

@@ -26,6 +26,18 @@ constraints are violated.
 I don't really keep up a consistent versioning scheme.
 But the changes in this section have been significant enough to warrant some comments.
 
+#### Version 0.2.0
+* We import and re-export `@set` and `@reset` from Accessors.jl.
+* `AlgorithmOptions` is no immutable and type-stable.  
+  `@set algo_opts.float_type` will trigger cnoversion and setting of type-dependent defaults.
+* Likewise, `RBFConfig` is no longer mutable and has concrete types.
+* `TypedMOP` supports `@set` and `@reset` for `objectives`, `nl_eq_constraints` and  
+  `nl_eq_constraints`.
+* The `AbstractNonlinearOperator` interface now requires `CompromiseEvaluators.operator_dim_in`  
+  and `CompromiseEvaluators.operator_dim_out`.
+* The `ReturnObject` now references the whole cache (basically a NamedTuple of internal structs.)
+* `SimpleMOP` reset call counters by default.
+
 #### Version 0.1.0
 This release is breaking, because the the RBF database is no longer thread-safe by default.
 Instead, `ConcurrentUtils` is a weak dependency and no longer mandatory.
@@ -249,7 +261,8 @@ rets = Compromise.optimize_with_algo(mop, opts, X0)
 # Likewise, `max_grad_calls` restricts the number of gradient calls, 
 # `max_hess_calls` limits Hessian computations.
 # 
-# For historic reasons, the count is kept between runs.
+# ~~For historic reasons, the count is kept between runs.~~
+# The count is now reset between runs by default.
 # To reset the count between runs (sequential or parallel), indicate it when setting up 
 # the MOP.
 mop = MutableMOP(; num_vars=2, reset_call_counters=false)   # default
