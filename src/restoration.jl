@@ -1,12 +1,10 @@
 function do_restoration(
-    optimizer_caches, algo_opts
+    mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+    mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+    iteration_status, iteration_scalars, stop_crits,
+    algo_opts
 )
     indent = 1
-    @unpack (
-        mop, mod, scaler, lin_cons, scaled_cons,
-        vals, vals_tmp, step_vals, mod_vals, filter, step_cache, 
-        stop_crits, iteration_scalars, iteration_status, trial_caches 
-    ) = optimizer_caches
     Δ = iteration_scalars.delta
     
     indent += 1
@@ -62,7 +60,13 @@ function do_restoration(
     
     # If we are here, then restoration was successfull and `trial_caches` are set
     iteration_scalars.delta = Δ
-    @ignoraise check_stopping_criterion(stop_crits, CheckPostIteration(), optimizer_caches, algo_opts) indent
+    @ignoraise check_stopping_criterion(
+        stop_crits, CheckPostIteration(), 
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+        mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+        iteration_status, iteration_scalars, stop_crits,
+        algo_opts
+    ) indent
     accept_trial_point!(vals, vals_tmp)
     return nothing
 end

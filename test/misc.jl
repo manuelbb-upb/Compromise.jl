@@ -211,9 +211,10 @@ end
             
     function Compromise.check_stopping_criterion(
         crit::MyCallback, ::Compromise.CheckPreIteration,
-        mop, scaler, lin_cons, scaled_cons,
-        vals, filter, algo_opts;
-        indent::Int, it_index::Int, delta::Real
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+        mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+        iteration_status, iteration_scalars, stop_crits,
+        algo_opts
     )
         if Compromise.cached_x(vals) ≈ [π, -ℯ]
             return crit

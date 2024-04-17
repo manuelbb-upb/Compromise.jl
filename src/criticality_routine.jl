@@ -1,12 +1,11 @@
-function criticality_routine!(optimizer_caches, algo_opts; indent=0)
+function criticality_routine!(
+    mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+    mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+    iteration_status, iteration_scalars, stop_crits,
+    algo_opts;
+    indent=0
+)
    
-    @unpack (
-        mod, step_vals, mod_vals, step_cache, crit_cache,
-        ## not modified
-        mop, scaler, lin_cons, scaled_cons, vals, vals_tmp, stop_crits,
-        iteration_scalars
-    ) = optimizer_caches
-
     indent += 1
     pad_str = indent_str(indent)
 
@@ -35,7 +34,11 @@ function criticality_routine!(optimizer_caches, algo_opts; indent=0)
             universal_copy!(crit_cache.step_vals, step_vals)
 
             @ignorebreak stop_code =  check_stopping_criterion(
-                stop_crits, CheckPreCritLoop(), optimizer_caches, algo_opts
+                stop_crits, CheckPreCritLoop(), 
+                mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+                mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+                iteration_status, iteration_scalars, stop_crits,
+                algo_opts
             ) indent
             
             @logmsg log_level "$(pad_str) CRITICALITY LOOP $(j+1), Δ=$Δj > Mχ=$(crit_M * χ)."
@@ -63,7 +66,11 @@ function criticality_routine!(optimizer_caches, algo_opts; indent=0)
             Δ = Δj
            
             @ignorebreak stop_code =  check_stopping_criterion(
-                stop_crits, CheckPreCritLoop(), optimizer_caches, algo_opts
+                stop_crits, CheckPreCritLoop(), 
+                mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+                mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+                iteration_status, iteration_scalars, stop_crits,
+                algo_opts
             ) indent
 
             j+=1

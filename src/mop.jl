@@ -38,9 +38,9 @@ initialize(mop::AbstractMOP)=mop
 
 # ## Meta-Data
 # The optional function `float_type` returns the type of result and derivative vectors:
-float_type(::AbstractMOP{F}) where F = F
+float_type(::AbstractMOP)::Type{<:AbstractFloat}=DEFAULT_FLOAT_TYPE
 
-#stop_type(::AbstractMOP) = Any
+stop_type(::AbstractMOP) = Any
 
 # Below functions are used to query dimension information.
 dim_vars(::AbstractMOP)::Int=0 

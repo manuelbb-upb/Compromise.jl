@@ -7,8 +7,8 @@
 # ## Meta-Data
 # For convenience, we'd like to have the same meta information available 
 # as for the original MOP:
-float_type(::AbstractMOPSurrogate{F}) where {F}=F
-#stop_type(::AbstractMOPSurrogate) = Any
+float_type(::AbstractMOPSurrogate)::Type{<:AbstractFloat}=DEFAULT_FLOAT_TYPE
+stop_type(::AbstractMOPSurrogate) = Any
 dim_vars(::AbstractMOPSurrogate)::Int=-1
 dim_objectives(::AbstractMOPSurrogate)::Int=-1            # mandatory
 dim_nl_eq_constraints(::AbstractMOPSurrogate)::Int=0     # optional

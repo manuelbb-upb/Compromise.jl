@@ -56,8 +56,8 @@ cached_Dfx(simple_cache::SimpleSurrogateValueCache)=simple_cache.Dfx
 cached_Dhx(simple_cache::SimpleSurrogateValueCache)=simple_cache.Dhx
 cached_Dgx(simple_cache::SimpleSurrogateValueCache)=simple_cache.Dgx
 
-function init_value_caches(mop::SimpleMOP{T}) where T
-    
+function init_value_caches(mop::SimpleMOP)
+    T = float_type(mop)    
     ## initialize unscaled and scaled variables
     nx = dim_vars(mop) :: Int
     nfx = dim_objectives(mop) :: Int

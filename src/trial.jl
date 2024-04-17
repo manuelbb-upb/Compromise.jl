@@ -1,22 +1,11 @@
-function test_trial_point!(optimizer_caches, algo_opts; indent=0)
-    @unpack (
-        iteration_status, trial_caches, vals, vals_tmp, mod_vals, step_vals,
-        iteration_scalars, mop, scaler, filter
-    ) = optimizer_caches 
-    return test_trial_point!(
-        iteration_status, trial_caches, vals, vals_tmp, mod_vals, step_vals,
-        iteration_scalars, mop, scaler, filter, algo_opts;
-        indent
-    )   
-end
-
 function test_trial_point!(
-    iteration_status, trial_caches, 
-    vals, vals_tmp, mod_vals, step_vals,
-    # not modified:
-    iteration_scalars, mop, scaler, filter, algo_opts;
+    mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+    mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+    iteration_status, iteration_scalars, stop_crits,
+    algo_opts;
     indent::Int=0
 )
+   
     @unpack log_level = algo_opts
     @logmsg log_level "$(indent_str(indent))* Checking trial point."
 

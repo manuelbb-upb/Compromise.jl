@@ -37,7 +37,6 @@ function Accessors.set(
 	return Accessors.setproperties(algo_opts, (; field => change_float_type(val, l, T)))
 end
 
-
 change_float_type(x, ::Type{new_float_type}) where new_float_type = x
 function change_float_type(x::F, ::Type{new_float_type}) where{F<:AbstractFloat, new_float_type}
 	return convert(new_float_type, x)
@@ -234,4 +233,62 @@ function universal_copy!(
 			getfield(src, fn)
 		)
 	end
+end
+
+function gridded_mop(
+	mop :: AbstractMOP,
+	lb = nothing,
+	ub = nothing;
+	res = 20
+)
+	lb = scatter_mop_lb(mop, lb)	
+	ub = scatter_mop_ub(mop, ub)
+	@assert all( ub .>= lb ) "Lower bounds exceed upper bounds."
+
+	n = dim_vars(mop)
+	@assert length(lb) == length(ub) == n 
+	
+	if length(res) == 1 && n > 1
+		res = fill(only(res), n)
+	end
+
+	ax_args = [LinRange(lb[i], ub[i], res[i]) for i=1:n]
+	tmp = init_value_caches(mop)
+	fx = cached_fx(tmp)
+
+	objf = (arg_vec) -> begin 
+		_fx = similar(fx)
+		objectives!(_fx, mop, arg_vec)
+		return _fx
+	end
+	points = mapreduce(collect, hcat, Iterators.product(ax_args...))
+	_Z = [objf(arg_vec) for arg_vec in eachcol(points)]
+	K = dim_objectives(mop)
+	Z = [[z[l] for z in _Z] for l=1:K]
+	return ax_args, points, Z
+end
+
+function scatter_mop_lb(mop, lb)
+	if isnothing(lb)
+		lb = lower_var_bounds(mop)
+	end
+	if isnothing(lb)
+		error("Provide non-nothing lower variable bounds `lb`.")
+	end
+	if any(isinf.(lb))
+		error("Provide finite lower variable bounds `lb`.")
+	end
+	return lb
+end
+function scatter_mop_ub(mop, ub)
+	if isnothing(ub)
+		ub = upper_var_bounds(mop)
+	end
+	if isnothing(ub)
+		error("Provide non-nothing upper variable bounds `ub`.")
+	end
+	if any(isinf.(ub))
+		error("Provide finite upper variable bounds `ub`.")
+	end
+	return ub
 end

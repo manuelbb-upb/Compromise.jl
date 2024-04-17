@@ -198,25 +198,49 @@ function optimize_with_algo(
     return optimize!(optimizer_caches, algo_opts, ξ0)
 end
 
+function optimize!(optimizer_caches::AbstractStoppingCriterion, algo_opts, ξ0)
+    log_stop_code(optimizer_caches, algo_opts.log_level)
+    return ReturnObject(ξ0, nothing, optimizer_caches)
+end
+
 function optimize!(optimizer_caches::OptimizerCaches, algo_opts, ξ0)
-    @unpack vals = optimizer_caches
+    @unpack (
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+        mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+        iteration_status, iteration_scalars, stop_crits
+    ) = optimizer_caches
+    _ξ0, stop_code = optimize!(
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+        mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+        iteration_status, iteration_scalars, stop_crits,
+        algo_opts
+    )
+    return ReturnObject(_ξ0, optimizer_caches, stop_code)
+end
+
+function optimize!(
+    mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+    mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+    iteration_status, iteration_scalars, stop_crits,
+    algo_opts
+)
      
     _ξ0 = copy(cached_ξ(vals))    # for final ReturnObject
 
     stop_code = nothing
     while true
         time_start = time()
-        @ignorebreak stop_code = do_iteration!(optimizer_caches, algo_opts)
+        @ignorebreak stop_code = do_iteration!(
+            mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+            mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+            iteration_status, iteration_scalars, stop_crits,
+            algo_opts
+        )
         time_stop = time()
         @logmsg algo_opts.log_level "Iteration was $(time_stop - time_start) sec."
     end
     log_stop_code(stop_code, algo_opts.log_level)
-    return ReturnObject(_ξ0, vals, stop_code, mod)
-end
-
-function optimize!(optimizer_caches::AbstractStoppingCriterion, algo_opts, ξ0)
-    log_stop_code(optimizer_caches, algo_opts.log_level)
-    return ReturnObject(ξ0, nothing, optimizer_caches, nothing)
+    return _ξ0, stop_code
 end
 
 function log_stop_code(crit, log_level)
@@ -224,9 +248,9 @@ function log_stop_code(crit, log_level)
 end
 
 function initialize_structs( 
-    MOP::AbstractMOP{T}, ξ0::RVec, algo_opts::AlgorithmOptions,
+    MOP::AbstractMOP, ξ0::RVec, algo_opts::AlgorithmOptions,
     user_callback :: AbstractStoppingCriterion = NoUserCallback(),
-) where T<:AbstractFloat
+)
 
     @assert !isempty(ξ0) "Starting point array `x0` is empty."
     @assert dim_objectives(MOP) > 0 "Objective Vector dimension of problem is zero."
@@ -242,13 +266,16 @@ function initialize_structs(
     @logmsg algo_opts.log_level "Initialization complete after $(stats.time) sec."
     return stats.value
 end
+
 function initialize_structs_from_mop(
-    mop::AbstractMOP{T}, ξ0::RVec, algo_opts::AlgorithmOptions,
+    mop::AbstractMOP, ξ0::RVec, algo_opts::AlgorithmOptions,
     user_callback :: AbstractStoppingCriterion = NoUserCallback(),
-) where T<:AbstractFloat
+)
     indent = 0
+    T = float_type(mop)
     @unpack log_level = algo_opts
     NaNT = T(NaN)
+
     n_vars = Int(dim_vars(mop))     # Cthulhu tells me that `dim_vars` is unstable. TODO make a wrapper/safeguard
     ## struct holding constant linear constraint informaton (lb, ub, A_b, E_c)
     ## set these first, because they are needed to initialize a scaler 
@@ -328,23 +355,25 @@ function initialize_structs_from_mop(
 end
 
 function do_iteration!(
-    optimizer_caches, algo_opts
+    mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+    mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+    iteration_status, iteration_scalars, stop_crits,
+    algo_opts
 )
     indent = 0
 
-    @unpack (
-        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp, mod_vals, filter, 
-        step_vals, step_cache, crit_cache, trial_caches, iteration_status, iteration_scalars, 
-        stop_crits, 
-    ) = optimizer_caches
-   
     @unpack log_level = algo_opts
     
     iteration_scalars.it_index += 1
     @unpack it_index, delta = iteration_scalars
 
     @ignoraise check_stopping_criterion(
-        stop_crits, CheckPreIteration(), optimizer_caches, algo_opts) indent
+        stop_crits, CheckPreIteration(),
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+        mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+        iteration_status, iteration_scalars, stop_crits,
+        algo_opts
+    ) indent
 
     @logmsg log_level """\n
     ###########################
@@ -383,7 +412,12 @@ function do_iteration!(
         ## Try to do a restoration
         @logmsg log_level "* Normal step incompatible. Trying restoration."
         add_to_filter!(filter, cached_theta(vals), cached_Phi(vals))
-        @ignoraise do_restoration(optimizer_caches, algo_opts) indent
+        @ignoraise do_restoration(
+            mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+            mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+            iteration_status, iteration_scalars, stop_crits,
+            algo_opts
+        ) indent
     end
 
     @logmsg log_level "* Computing a descent step."
@@ -395,20 +429,41 @@ function do_iteration!(
     @logmsg log_level " - Criticality χ=$(step_vals.crit_ref[]), ‖d‖₂=$(LA.norm(step_vals.d)), ‖s‖₂=$(LA.norm(step_vals.s))."
 
     @ignoraise check_stopping_criterion(
-        stop_crits, CheckPostDescentStep(), optimizer_caches, algo_opts) indent
- 
+        stop_crits, CheckPostDescentStep(), 
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+        mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+        iteration_status, iteration_scalars, stop_crits,
+        algo_opts
+    ) indent
     ## For the convergence analysis to work, we also have to have the Criticality Routine:
-    @ignoraise delta_new = criticality_routine!(optimizer_caches, algo_opts; indent) indent
+    @ignoraise delta_new = criticality_routine!(
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+        mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+        iteration_status, iteration_scalars, stop_crits,
+        algo_opts;
+        indent
+    ) indent
     iteration_scalars.delta = delta_new
     delta = iteration_scalars.delta
     
     ## test if trial point is acceptable
-    @ignoraise delta_new = test_trial_point!(optimizer_caches, algo_opts; indent) indent
+    @ignoraise delta_new = test_trial_point!(
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+        mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+        iteration_status, iteration_scalars, stop_crits,
+        algo_opts;
+        indent
+    ) indent
     iteration_scalars.delta = delta_new
     delta = iteration_scalars.delta
     
     @ignoraise check_stopping_criterion(
-        stop_crits, CheckPostIteration(), optimizer_caches, algo_opts) indent
+        stop_crits, CheckPostIteration(),
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+        mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+        iteration_status, iteration_scalars, stop_crits,
+        algo_opts
+    ) indent
 
     @ignoraise process_trial_point!(mod, vals_tmp, iteration_status) indent
 
@@ -475,7 +530,8 @@ function accept_trial_point!(vals, vals_tmp)
 end
 
 export optimize, AlgorithmOptions
-export opt_vars, opt_objectives, opt_nl_eq_constraints, opt_nl_ineq_constraints,
-    opt_lin_eq_constraints, opt_lin_ineq_constraints, opt_constraint_violation, opt_stop_code
+export opt_cache, opt_vars, opt_objectives, opt_nl_eq_constraints, opt_nl_ineq_constraints,
+    opt_lin_eq_constraints, opt_lin_ineq_constraints, opt_constraint_violation, opt_stop_code,
+    opt_surrogate
 export MutableMOP, add_objectives!, add_nl_ineq_constraints!, add_nl_eq_constraints!
 end

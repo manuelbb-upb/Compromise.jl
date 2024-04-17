@@ -32,8 +32,8 @@ const RMatOrNothing = Union{RMat, Nothing}
 # The algorithm operates on `AbstractMOP`s, where MOP stands for multi-objective optimization
 # problem. It's interface is defined in "src/mop.jl".
 # An MOP is surrogated by an `AbstractMOPSurrogate`. The interface is defined in "src/model.jl".
-abstract type AbstractMOP{F<:AbstractFloat} end
-abstract type AbstractMOPSurrogate{F<:AbstractFloat} end
+abstract type AbstractMOP end
+abstract type AbstractMOPSurrogate end
 
 # The results of an MOP are stored in mutable caches:
 abstract type AbstractValueCache{F<:AbstractFloat} end
@@ -251,54 +251,4 @@ Base.@kwdef struct OptimizerCaches{
 	stop_crits :: stop_critsType
 end
 
-struct ReturnObject{X, V, S, M}
-	ξ0 :: X
-	vals :: V
-	stop_code :: S
-	mod :: M
-end
-
-opt_surrogate(r::ReturnObject) = r.mod
-opt_initial_vars(r::ReturnObject) = r.ξ0
-
-opt_vars(r::ReturnObject)=opt_vars(r.vals)
-opt_vars(::Nothing) = missing
-opt_vars(v::AbstractMOPCache)=cached_ξ(v)
-
-opt_objectives(r::ReturnObject)=opt_objectives(r.vals)
-opt_objectives(::Nothing)=missing
-opt_objectives(v::AbstractMOPCache)=cached_fx(v)
-
-opt_nl_eq_constraints(r::ReturnObject)=opt_nl_eq_constraints(r.vals)
-opt_nl_eq_constraints(::Nothing)=missing
-opt_nl_eq_constraints(v::AbstractMOPCache)=cached_hx(v)
-
-opt_nl_ineq_constraints(r::ReturnObject)=opt_nl_ineq_constraints(r.vals)
-opt_nl_ineq_constraints(::Nothing)=missing
-opt_nl_ineq_constraints(v::AbstractMOPCache)=cached_gx(v)
-
-opt_lin_eq_constraints(r::ReturnObject)=opt_lin_eq_constraints(r.vals)
-opt_lin_eq_constraints(::Nothing)=missing
-opt_lin_eq_constraints(v::AbstractMOPCache)=cached_Ex_min_c(v)
-
-opt_lin_ineq_constraints(r::ReturnObject)=opt_lin_ineq_constraints(r.vals)
-opt_lin_ineq_constraints(::Nothing)=missing
-opt_lin_ineq_constraints(v::AbstractMOPCache)=cached_Ax_min_b(v)
-
-opt_constraint_violation(r::ReturnObject)=opt_constraint_violation(r.vals)
-opt_constraint_violation(::Nothing)=missing
-opt_constraint_violation(v::AbstractMOPCache)=cached_theta(v)
-
-function opt_stop_code(r::ReturnObject)
-    return unwrap_stop_crit(r.stop_code)
-end
-
-function Base.show(io::IO, ret::ReturnObject)
-	print(io, """
-	ReturnObject
-	x0   = $(pretty_row_vec(opt_initial_vars(ret)))
-	x*   = $(pretty_row_vec(opt_vars(ret)))
-	f(x*)= $(pretty_row_vec(opt_objectives(ret)))
-	code = $(opt_stop_code(ret))"""
-	)
-end
+include("return_object.jl")

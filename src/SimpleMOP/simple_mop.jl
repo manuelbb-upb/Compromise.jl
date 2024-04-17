@@ -91,7 +91,7 @@ end
 
 # ## `SimpleMOP`
 # In this section, we will define two kinds of simple problem structures:
-abstract type SimpleMOP{F} <: AbstractMOP{F} end
+abstract type SimpleMOP <: AbstractMOP end
 
 stop_type(::SimpleMOP) = BudgetExhausted
 # A `MutableMOP` is meant to be initialized empty and built up iteratively.
@@ -119,7 +119,7 @@ Use the keyword-arguments `mcfg_objectives` to provide an `AbstractSurrogateMode
 to define how the objectives should be modelled.
 By default, we assume `ExactModelConfig()`, which requires differentiable objectives.
 """
-@with_kw mutable struct MutableMOP <: SimpleMOP{Float64}
+@with_kw mutable struct MutableMOP <: SimpleMOP
     objectives :: Union{Nothing, NonlinearFunction} = nothing
     nl_eq_constraints :: Union{Nothing, NonlinearFunction} = nothing
     nl_ineq_constraints :: Union{Nothing, NonlinearFunction} = nothing
@@ -157,7 +157,7 @@ struct TypedMOP{
     MTO, MTNLEC, MTNLIC,
     LB, UB, 
     EType, CType, AType, BType
-} <: SimpleMOP{Float64}
+} <: SimpleMOP
     objectives :: O
     nl_eq_constraints :: NLEC
     nl_ineq_constraints :: NLIC
@@ -402,7 +402,7 @@ end
 # (Also, I am not sure if the scaler is available when the problem is initialized).
 struct SimpleMOPSurrogate{
     O, NLEC, NLIC, MO, MNLEC, MNLIC,
-} <: AbstractMOPSurrogate{Float64}
+} <: AbstractMOPSurrogate
     objectives :: O
     nl_eq_constraints :: NLEC
     nl_ineq_constraints :: NLIC
