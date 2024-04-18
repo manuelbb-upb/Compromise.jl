@@ -107,14 +107,14 @@ function eval_nl_ineq_constraints!(y::RVec, mop::M, x::RVec) where {M<:AbstractM
 end
 
 # To ensure they only get called if needed, we wrap them and assign shorter names:
-function objectives!(y::RVec, mop::AbstractMOP, x::RVec)
+function objectives!(y::RVecOrNothing, mop::AbstractMOP, x::RVec)
     eval_objectives!(y, mop, x)
 end
-function nl_eq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)
+function nl_eq_constraints!(y::RVecOrNothing, mop::AbstractMOP, x::RVec)
     dim_nl_eq_constraints(mop) <= 0 && return nothing
     eval_nl_eq_constraints!(y, mop, x)
 end
-function nl_ineq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)
+function nl_ineq_constraints!(y::RVecOrNothing, mop::AbstractMOP, x::RVec)
     dim_nl_ineq_constraints(mop) <= 0 && return nothing
     eval_nl_ineq_constraints!(y, mop, x)
 end

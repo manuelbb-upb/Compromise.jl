@@ -68,19 +68,23 @@ import LazyArrays: BroadcastArray
 
 import .CheetahViews: cheetah_vcat, cheetah_blockcat
 
-Base.@kwdef function RestorationValueCache{F, wrappedType} <: AbstractValueCache{F}
-    wrapped :: wrappedType
-    t :: Base.RefValue{F} = Ref(float_type(wrapped)(NaN))
-    const_empty_vec :: Vector{F} = array(float_type(wrapped), 0)
-end
-
 Base.@kwdef struct RestorationMOP{
-    F, MOPType, MODType, LB<:AbstractVector{F}, UB<:AbstractVector{F},
-    AType, BType, ValsType, SType
+    F <: AbstractFloat, 
+    mopType, 
+    modType, 
+    valsType,
+    mod_valsType,
+    LB<:AbstractVector{F}, 
+     UB<:AbstractVector{F},
+    AType, BType, ValsType, SType,
+    scaled_consType
 } <: AbstractMOP
 
-    mop :: MOPType
-    mod :: MODType
+    mop :: mopType
+    mod :: modType
+
+    vals :: valsType
+    mod_vals :: mod_valsType
     
     dim_vars :: Int
     dim_nl_ineq_constraints :: Int
@@ -93,6 +97,7 @@ Base.@kwdef struct RestorationMOP{
 
     vals :: ValsType
     scaler :: SType
+    scaled_cons :: scaled_consType
 end
 
 float_type(::RestorationMOP{F}) where{F} = F
@@ -104,6 +109,24 @@ upper_var_bounds(rmop::RestorationMOP) = rmop.ub
 
 lin_ineq_constraints_matrix(rmop::RestorationMOP) = rmop.A
 lin_ineq_constraints_vector(rmop::RestorationMOP) = rmop.b
+
+struct RestorationCache{
+    F<:AbstractFloat,
+    valsType
+} <: AbstractMOPCache{F}
+    tx :: Vector{F}
+    gx :: Vector{F}
+end
+
+function cached_x(cache::RestorationCache)
+    cache.tx
+end
+function cached_fx(cache::RestorationCache)
+    return view(cache.tx, [1])
+end
+function cached_gx(cache::RestorationCache)
+    return cache.gx    
+end
 
 function RestorationMOP(mop, mod, theta_k, scaler, vals, scaled_lin_cons)
     lb = _restoration_lower_var_bounds(mop, scaled_lin_cons)    
@@ -119,54 +142,6 @@ function RestorationMOP(mop, mod, theta_k, scaler, vals, scaled_lin_cons)
         scaler
     )
 end
-#=
-
-struct RestorationScaler{F, W<:AbstractDiagonalScaler} <: AbstractDiagonalScaler
-    f :: F
-    i :: F
-    wrapped :: W
-end
-
-_restoration_scaler_constant(rscaler, ::ForwardScaling)=rscaler.f
-_restoration_scaler_constant(rscaler, ::InverseScaling)=rscaler.i
-
-function _restoration_scaler(theta_k, scaler)
-    f = theta_k
-    i = 1/theta_k
-    return RestorationScaler(f, i, scaler)
-end
-
-function supports_scaling_dir(::RestorationScaler, ::AbstractScalingDirection)
-    return Val(true)
-end
-
-function offset_trait(rscaler::RestorationScaler)
-    return offset_trait(rscaler.wrapped)
-end
-
-function diag_matrix(rscaler::RestorationScaler, sense::AbstractScalingDirection)
-    # this is allocating, but should not be called anywhere, as we are also specializing
-    # `apply_scaling`...
-    return LA.Diagonal(
-        cat(
-            _restoration_scaler_constant(rscaler, sense), 
-            smatrix(rscaler.wrapped, sense);
-            dims=(1,2)
-        )
-    )
-end
-
-function scaler_offset(rscaler::RestorationScaler, sense::AbstractScalingDirection)
-    return vcat(0, soffset(rscaler.wrapped, sense))
-end
-
-function apply_scaling!(x, rscaler::RestorationScaler, sense::AbstractScalingDirection)
-    c = _restoration_scaler_constant(rscaler, sense)
-    x[1] *= c
-    apply_scaling!(@view(x[2:end]), rscaler.wrapped, sense)
-    return x
-end
-=#
 
 function _restoration_lower_var_bounds(mop, scaled_lin_cons)
     return _restoration_lower_var_bounds(
@@ -246,76 +221,189 @@ function _combine_constraint_arrays(E, A)
     return cheetah_vcat(E, _E, A)
 end
 
-function eval_objectives!(y::RVec, rmop::RestorationMOP, x::RVec)
-    y[1] = x[1]
+# ## Evaluation of RestorationMOP
+# When these functions are called, the input `tξ` is from the unscaled domain of
+# the inner algorithm.
+# At times, we redirect to calls of the MOP from the outer algorithm.
+# The outer MOP expects arguments that are unscaled in the outer domain, i.e.,
+# with respect to `rmop.scaler`.
+# We thus have to unscale further and use a buffer from the outer algo to do so.
+function eval_objectives!(y::RVec, rmop::RestorationMOP, tξ::RVec)
+    y[1] = tξ[1]
     return nothing
 end
 
 function eval_nl_ineq_constraints!(y::RVec, rmop::RestorationMOP, tx::RVec)
-    @unpack ξ, scaler, mop = rmop
+    @unpack ξ, scaler, mop, vals = rmop
     t = tx[1]
-    @views ξ .= tx[2:end]
-    apply_scaling!(ξ, scaler, InverseScaling())
-
-    i = 1
     
-    ## |h(x)| ≤ t ⇔ -t ≤ h(x) ≤ t ⇔ 
-    ## (i)   h(x)-t ≤ 0
-    ## (ii) -h(x)-t ≤ 0
-    _j = dim_nl_eq_constraints(mop)
-    if _j > 0
-        j = i + _j - 1
-        yh = @view(y[i:j])
-        @ignoraise nl_eq_constraints!(yh, mop,ξx)
-        
-        i = j + 1
-        j = i + _j - 1
-        _yh = @view(y[i:j])
-        _yh .= -yh
-        
-        yh .-= t
-        _yh .-= t
+    @views _ξ .= tx[2:end]
+    ξ = cached_ξ(vals)
+    unscale!(ξ, scaler, _ξ)    
 
-        i = j + 1
-    end
+    @ignoraise gx, hx = prepare_restoration_gx_hx!(vals, mop, ξ)
+    return restoration_nl_ineq_constraints!(y, gx, hx, t)
+end
 
-    # g(x) - t ≤ 0
-    _j = dim_nl_ineq_constraints(mop) 
-    if _j > 0
-        j = i + _j - 1
-        yg = @view(y[i:j])
-        @ignoraise nl_ineq_constraints!(yg, mop, ξ)
-        yg .-= t
-        i = j + 1
-    end
-
+function prepare_restoration_gx_hx!(vals, evaluator, ξ)
+    gx = cached_gx(vals)
+    @ignoraise nl_ineq_constraints!(gx, evaluator, ξ)
+    hx = cached_hx(vals)
+    @ignoraise nl_eq_constraints!(hx, evaluator, ξ)
     return nothing
 end
 
-struct RestorationSurrogate{M} <: AbstractMOPSurrogate 
-    mop :: M
+function restoration_nl_ineq_constraints!(y, gx, hx, t)
+    i = 1
+    # -t + g(x) ≤ 0
+    _j = length(gx)
+    if _j > 0
+        j = i + _j - 1
+        ygx = @view(y[i:j])
+        ygx .= gx
+        i = j + 1
+    end
+    
+    ## |h(x)| ≤ t ⇔ -t ≤ h(x) ≤ t ⇔ 
+    ## (i)   -t -h(x) ≤ 0
+    ## (ii)  -t +h(x) ≤ 0
+    _j = length(hx)
+    if _j > 0
+        j = i + _j - 1
+        yhx = @view(y[i:j])
+
+        yhx .= -hx
+        
+        i = j + 1
+        j = i + _j - 1
+        yhx = @view(y[i:j])
+        yhx .= hx
+
+        i = j + 1
+    end
+
+    y .-= t
+    return nothing
+end
+
+struct RestorationSurrogate{rmopType, inner_scalerType, txType} <: AbstractMOPSurrogate 
+    rmop :: rmopType
+    inner_scaler :: inner_scalerType
+    tx :: txType
 end
 
 function init_models(
-    mop::RestorationMOP, scaler; 
+    rmop::RestorationMOP, scaler; 
     kwargs...
 )
-    return RestorationSurrogate(mop)
+    tx = array(float_type(rmop), dim_vars(rmop))
+    return RestorationSurrogate(rmop, inner_scaler, tx)
 end
 
-@forward RestorationSurrogate.mop float_type(mod::RestorationSurrogate)
-@forward RestorationSurrogate.mop dim_vars(mod::RestorationSurrogate)
-@forward RestorationSurrogate.mop dim_objectives(mod::RestorationSurrogate)
-@forward RestorationSurrogate.mop dim_nl_ineq_constraints(mod::RestorationSurrogate)
-# TODO prealloc with views
+struct RestorationSurrogateCache{
+    F<:AbstractFloat,
+    mod_valsType
+} <: AbstractMOPCache{F}
+    tx :: Vector{F}
+    gx :: Vector{F}
+    mod_vals :: valsType
+end
+
+@forward RestorationSurrogate.rmop float_type(mod::RestorationSurrogate)
+@forward RestorationSurrogate.rmop dim_vars(mod::RestorationSurrogate)
+@forward RestorationSurrogate.rmop dim_objectives(mod::RestorationSurrogate)
+@forward RestorationSurrogate.rmop dim_nl_ineq_constraints(mod::RestorationSurrogate)
+
+function depends_on_radius(rmod)
+    @unpack rmop = rmod
+    @unpack mod = rmop
+    return depends_on_radius(mod)
+end
 
 function update_models!(
-    mod::RestorationSurrogate, Δ, scaler, vals, scaled_cons;
+    rmod::RestorationSurrogate, Δ, scaler, vals, scaled_cons;
     log_level, indent::Int
 )
-    @unpack mop = mod
-    @unpack x = mop.vals
-    @unpack scaler = mop
-    #apply_scaling
+    @assert scaler isa IdentityScaler
+    @unpack rmop = rmod
+    @ignoraise update_models!(
+        rmop.mod, Δ, rmop.scaler, rmop.vals, rmop.scaled_cons; log_level, indent
+    )
+    return nothing
 end
     
+# ## Evaluation of RestorationSurrogate
+# Unlike the outer MOP, the outer surrogate expects variables that are 
+# scaled in the outer domain.
+# `tx` is scaled in the inner domain. so we unscale before.
+# (for now, `inner_scaler` is the IdentityScaler anyways).
+function eval_objectives!(y::RVec, rmop::RestorationSurrogate, tx::RVec)
+    y[1] = tx[1]
+    return nothing
+end
+function grads_objectives!(Dy::RMat, rmop::RestorationSurrogate, tx::RVec)
+    Dy[1,1] = 1
+end
+
+function eval_nl_ineq_constraints!(y::RVec, rmod::RestorationSurrogate, _tx::RVec)
+    @unpack rmop = rmod
+    @unpack mod, mod_vals = rmop
+
+    t = tx[1]
+    @views x .= tx[2:end]
+
+    @ignoraise gx, hx = prepare_restoration_gx_hx!(mod_vals, mod, ξ)
+    return restoration_nl_ineq_constraints!(y, gx, hx, t)
+end
+
+function grads_nl_ineq_constraints!(Dy::RMat, rmod::RestorationSurrogate, tx::RVec)
+end
+
+#=
+
+struct RestorationScaler{F, W<:AbstractDiagonalScaler} <: AbstractDiagonalScaler
+    f :: F
+    i :: F
+    wrapped :: W
+end
+
+_restoration_scaler_constant(rscaler, ::ForwardScaling)=rscaler.f
+_restoration_scaler_constant(rscaler, ::InverseScaling)=rscaler.i
+
+function _restoration_scaler(theta_k, scaler)
+    f = theta_k
+    i = 1/theta_k
+    return RestorationScaler(f, i, scaler)
+end
+
+function supports_scaling_dir(::RestorationScaler, ::AbstractScalingDirection)
+    return Val(true)
+end
+
+function offset_trait(rscaler::RestorationScaler)
+    return offset_trait(rscaler.wrapped)
+end
+
+function diag_matrix(rscaler::RestorationScaler, sense::AbstractScalingDirection)
+    # this is allocating, but should not be called anywhere, as we are also specializing
+    # `apply_scaling`...
+    return LA.Diagonal(
+        cat(
+            _restoration_scaler_constant(rscaler, sense), 
+            smatrix(rscaler.wrapped, sense);
+            dims=(1,2)
+        )
+    )
+end
+
+function scaler_offset(rscaler::RestorationScaler, sense::AbstractScalingDirection)
+    return vcat(0, soffset(rscaler.wrapped, sense))
+end
+
+function apply_scaling!(x, rscaler::RestorationScaler, sense::AbstractScalingDirection)
+    c = _restoration_scaler_constant(rscaler, sense)
+    x[1] *= c
+    apply_scaling!(@view(x[2:end]), rscaler.wrapped, sense)
+    return x
+end
+=#

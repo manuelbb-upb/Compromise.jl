@@ -24,6 +24,7 @@ const RMat = AbstractMatrix{<:Real}
 const RVecOrMat = Union{RVec, RMat}
 const RVecOrNothing = Union{RVec, Nothing}
 const RMatOrNothing = Union{RMat, Nothing}
+const RVecOrRMatOrNothing = Union{RVecOrMat, Nothing}
 
 # ### Abstract Types
 # When we want the algorithm to be customized, we offer abstract super types.

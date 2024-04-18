@@ -263,7 +263,7 @@ function add_nl_eq_constraints!(mop, args...; kwargs...)
     @warn("`add_nl_eq_constraints!` fallback.") 
 end
 function add_nl_ineq_constraints!(mop, args...; kwargs...)
-    @warn("`add_nl_ineq_constraints!` fallback.") 
+    @warn("`add_nl_ineq_constraints!` fallback.")
 end
 
 for (fntype, typenoun) in (
@@ -494,9 +494,6 @@ function depends_on_radius(mod::SimpleMOPSurrogate)
 end
 simple_model_depends_on_radius(::Nothing)=false
 simple_model_depends_on_radius(mod)=CE.depends_on_radius(mod)
-
-# At the moment, I have not yet thought about what we would need to change for dynamic scaling:
-supports_scaling(::Type{<:SimpleMOPSurrogate})=ConstantAffineScaling()
 
 # Evaluation redirects to evaluation of the surrogates:
 function eval_objectives!(y::RVec, mod::SimpleMOPSurrogate, x::RVec)

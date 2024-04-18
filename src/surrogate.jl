@@ -48,8 +48,7 @@ end
 #     Methods are in-place, return values are ignored, except for `AbstractStoppingCriterion`.
 
 # Evaluation of nonlinear objective models requires the following method.
-# `x` will be from the scaled domain, but if a model does not support scaling, 
-# then internally the `IdentityScaler()` is used:
+# `x` will be from the scaled domain.
 function eval_objectives!(y::RVec, mod::M, x::RVec) where {M<:AbstractMOPSurrogate}
     error("`eval_objectives!(y, mod, x) not implemented for mod of type $(M).")
 end
@@ -62,40 +61,16 @@ function eval_nl_ineq_constraints!(y::RVec, mod::M, x::RVec) where {M<:AbstractM
 end
 
 # As before, we use shorter function names in the algorithm.
-function objectives!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+function objectives!(y::RVecOrNothing, mop::AbstractMOPSurrogate, x::RVec)
     eval_objectives!(y, mop, x)
 end
-function nl_eq_constraints!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+function nl_eq_constraints!(y::RVecOrNothing, mop::AbstractMOPSurrogate, x::RVec)
     dim_nl_eq_constraints(mop) <= 0 && return nothing
     eval_nl_eq_constraints!(y, mop, x) 
 end
-function nl_ineq_constraints!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+function nl_ineq_constraints!(y::RVecOrNothing, mop::AbstractMOPSurrogate, x::RVec)
     dim_nl_ineq_constraints(mop) <= 0 && return nothing
     eval_nl_ineq_constraints!(y, mop, x)
-end
-
-# ## Pre-Allocation
-# The preallocation functions look the same as for `AbstractMOP`:
-for (dim_func, func_suffix) in (
-    (:dim_objectives, :objectives_vector),
-    (:dim_nl_eq_constraints, :nl_eq_constraints_vector),
-    (:dim_nl_ineq_constraints, :nl_ineq_constraints_vector),
-)
-    func_name = Symbol("prealloc_", func_suffix)
-    yoink_name = Symbol("yoink_", func_suffix)
-    @eval begin 
-        function $(func_name)(mop::AbstractMOPSurrogate)
-            dim = $(dim_func)(mop) 
-            T = float_type(mop)
-            return Vector{T}(undef, dim)
-        end
-
-        function $(yoink_name)(mop::AbstractMOPSurrogate)
-            y = $(func_name)(mop) :: RVec
-            @assert eltype(y) == float_type(mop) "Vector eltype does not match problem float type."
-            return y
-        end
-    end
 end
 
 # ## Differentiation
@@ -113,12 +88,14 @@ function grads_nl_ineq_constraints!(Dy::RMat, mod::M, x::RVec) where {M<:Abstrac
 end
 
 # Here, the names of the wrapper functions start with “diff“.
-diff_objectives!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=grads_objectives!(Dy, mod, x)
-function diff_nl_eq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+function diff_objectives!(Dy::RMatOrNothing, mod::AbstractMOPSurrogate, x::RVec)
+    return grads_objectives!(Dy, mod, x)
+end
+function diff_nl_eq_constraints!(Dy::RMatOrNothing, mod::AbstractMOPSurrogate, x::RVec)
     dim_nl_eq_constraints(mod) <= 0 && return nothing
     return grads_nl_eq_constraints!(Dy, mod, x)
 end
-function diff_nl_ineq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+function diff_nl_ineq_constraints!(Dy::RMatOrNothing, mod::AbstractMOPSurrogate, x::RVec)
     dim_nl_ineq_constraints(mod) <= 0 && return nothing
     return grads_nl_ineq_constraints!(Dy, mod, x)
 end
@@ -140,14 +117,14 @@ function eval_grads_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::M, x::RVec) whe
     return nothing
 end
 # Wrappers for use in the algorithm:
-function vals_diff_objectives!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+function vals_diff_objectives!(y::RVecOrNothing, Dy::RMatOrNothing, mod::AbstractMOPSurrogate, x::RVec)
     eval_and_grads_objectives!(y, Dy, mod, x)
 end
-function vals_diff_nl_eq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+function vals_diff_nl_eq_constraints!(y::RVecOrNothing, Dy::RMatOrNothing, mod::AbstractMOPSurrogate, x::RVec)
     dim_nl_eq_constraints(mod) <= 0 && return nothing
     eval_and_grads_nl_eq_constraints!(y, Dy, mod, x)
 end
-function vals_diff_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+function vals_diff_nl_ineq_constraints!(y::RVecOrNothing, Dy::RMatOrNothing, mod::AbstractMOPSurrogate, x::RVec)
     dim_nl_ineq_constraints(mod) <= 0 && return nothing
     eval_and_grads_nl_ineq_constraints!(y, Dy, mod, x)
 end
