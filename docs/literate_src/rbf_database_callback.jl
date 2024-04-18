@@ -14,7 +14,7 @@ end
 # Its logic is to snatch that reference before the first iteration takes place …
 Compromise.check_pre_iteration(crit::ModelCapturer)=crit.active
 # … or copy the model parameters to the model `mod` in use, if a reference is already stored:
-function Compromise.evaluate_stopping_criterion(
+function Compromise.check_stopping_criterion(
     crit::ModelCapturer,
     Δ, mop, mod, scaler, lin_cons, scaled_cons,
     vals, vals_tmp, step_vals, mod_vals, filter, iter_meta, step_cache, algo_opts;

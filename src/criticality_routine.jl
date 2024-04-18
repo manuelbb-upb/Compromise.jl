@@ -1,99 +1,89 @@
-function criticality_routine(
-    ## possibly modified
-    Δ, 
-    mod, step_vals, mod_vals, step_cache, crit_cache,
-    ## not modified
-    mop, scaler, lin_cons, scaled_cons, vals, vals_tmp, stop_crits, algo_opts,
-    user_callback;
-    it_index, indent::Int=0
+function criticality_routine!(
+    mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+    mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+    iteration_status, iteration_scalars, stop_crits,
+    algo_opts;
+    indent=0
 )
+   
     indent += 1
-    pad_str = lpad("", indent)
+    pad_str = indent_str(indent)
 
     @unpack log_level, eps_theta, eps_crit, crit_M, crit_B, crit_alpha, 
         backtrack_in_crit_routine = algo_opts
-        
+    @unpack it_index = iteration_scalars
+    Δ = iteration_scalars.delta
+
     χ = step_vals.crit_ref[]
     θ = cached_theta(vals)
-    Δ_init = Δ
     stop_code = nothing
     if θ < eps_theta && (χ < eps_crit && Δ > crit_M * χ )
         @logmsg log_level "$(pad_str)ITERATION $(it_index): CRITICALITY ROUTINE."
         ## init
+        Δj = Δ_init = Δ
         j=0
-        Δj = Δ
-        modj = crit_cache.mod
-        step_cachej = crit_cache.step_cache
-        step_valsj = crit_cache.step_vals
-        mod_valsj = crit_cache.mod_vals
-        universal_copy!(step_cachej, step_cache)
-        universal_copy!(step_valsj, step_vals)
-        universal_copy!(mod_valsj, mod_vals)
-        universal_copy_model!(modj, mod)
-
+        Δj = Δ_init
+        
+        stop_code=nothing
         while Δ > crit_M * χ
-            stop_code=nothing
+            # sync `crit_cache` with local vars for stopping criteria
+            crit_cache.num_crit_loops = j
+            crit_cache.delta = Δj
+            # at this point, `step_vals` have a compatible normal step and descent step
+            # we sync this in case we cannot find a normal step for smaller radius `Δj`
+            universal_copy!(crit_cache.step_vals, step_vals)
 
-            @ignorebreak stop_code = check_stopping_criteria(
-                stop_crits, CheckPreCritLoop(),
-                mop, mod, scaler, lin_cons, scaled_cons,
-                vals, mod_vals, step_vals, filter, algo_opts;
-                it_index, delta=Δ, num_crit_loops=j, indent
-            )
-            @ignorebreak stop_code = check_stopping_criterion(
-                user_callback, CheckPreCritLoop(),
-                mop, mod, scaler, lin_cons, scaled_cons,
-                vals, mod_vals, step_vals, filter, algo_opts;
-                it_index, delta=Δ, num_crit_loops=j, indent
-            )
+            @ignorebreak stop_code =  check_stopping_criterion(
+                stop_crits, CheckPreCritLoop(), 
+                mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+                mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+                iteration_status, iteration_scalars, stop_crits,
+                algo_opts
+            ) indent
             
             @logmsg log_level "$(pad_str) CRITICALITY LOOP $(j+1), Δ=$Δj > Mχ=$(crit_M * χ)."
             
             Δj *= crit_alpha 
             
-            if depends_on_radius(modj)
-                @ignorebreak stop_code = update_models!(modj, Δj, mop, scaler, vals, scaled_cons, algo_opts; indent)
-                @ignorebreak stop_code = eval_and_diff_mod!(mod_valsj, modj, cached_x(vals))
+            if depends_on_radius(mod)
+                @ignorebreak stop_code = update_models!(mod, Δj, scaler, vals, scaled_cons; log_level, indent) indent
+                @ignorebreak stop_code = eval_and_diff_mod!(mod_vals, mod, cached_x(vals)) indent
                 @ignorebreak stop_code = do_normal_step!(
-                    step_cachej, step_valsj, Δj, mop, modj, scaler, lin_cons, scaled_cons, 
-                    vals, mod_valsj; log_level, it_index, indent
-                )
+                    step_cache, step_vals, Δj, mop, mod, scaler, lin_cons, scaled_cons, 
+                    vals, mod_vals; 
+                    log_level, indent
+                ) indent
             end
-            if !compatibility_test(step_valsj.n, algo_opts, Δj)
+            if !compatibility_test(step_vals.n, algo_opts, Δj)
                 break
             end
             @ignorebreak stop_code = do_descent_step!(
-                step_cachej, step_valsj, Δj, mop, modj, scaler, lin_cons, scaled_cons, vals,
-                mod_valsj; log_level, finalize=backtrack_in_crit_routine
-            )
+                step_cache, step_vals, Δj, mop, mod, scaler, lin_cons, scaled_cons, vals,
+                mod_vals; log_level, finalize=backtrack_in_crit_routine
+            ) indent
             
-            χ = step_valsj.crit_ref[]
+            χ = step_vals.crit_ref[]
             Δ = Δj
-            universal_copy!(step_cache, step_cachej)
-            universal_copy!(step_vals, step_valsj)
-            universal_copy!(mod_vals, mod_valsj)
-            universal_copy_model!(mod, modj)
-            
-            @ignorebreak stop_code = check_stopping_criteria(
-                stop_crits, CheckPostCritLoop(),
-                mop, mod, scaler, lin_cons, scaled_cons,
-                vals, mod_vals, step_vals, filter, algo_opts;
-                it_index, delta=Δ, num_crit_loops=j, indent
-            )
-            @ignorebreak stop_code = check_stopping_criterion(
-                user_callback, CheckPostCritLoop(),
-                mop, mod, scaler, lin_cons, scaled_cons,
-                vals, mod_vals, step_vals, filter, algo_opts;
-                it_index, delta=Δ, num_crit_loops=j, indent
-            )
+           
+            @ignorebreak stop_code =  check_stopping_criterion(
+                stop_crits, CheckPreCritLoop(), 
+                mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+                mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+                iteration_status, iteration_scalars, stop_crits,
+                algo_opts
+            ) indent
 
             j+=1
         end       
-        _Δ = Δ
-        Δ = min(max(Δ, algo_opts.crit_B*χ), Δ_init)
+        _Δ = Δ  # storred for logging only
+        Δ = min(max(_Δ, algo_opts.crit_B*χ), Δ_init)
+
+        # make sure we have compatible steps
+        universal_copy!(step_vals, crit_cache.step_vals)
+
         if !backtrack_in_crit_routine
             @ignoraise finalize_step_vals!(
-                step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals; log_level)
+                step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals; log_level) indent
         end
         @logmsg log_level """
             $(pad_str) Finished after $j criticality loop(s), 

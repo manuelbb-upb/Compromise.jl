@@ -1,15 +1,17 @@
 function do_restoration(
-    mop, Δ, mod, scaler, lin_cons, scaled_cons,
-    vals, vals_tmp, step_vals, mod_vals, filter, step_cache, update_results, 
-    stop_crits, 
-    user_callback, 
-    algo_opts;
-    it_index, indent
+    mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+    mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+    iteration_status, iteration_scalars, stop_crits,
+    algo_opts
 )
+    indent = 1
+    Δ = iteration_scalars.delta
+    
     indent += 1
     pad_str = lpad("", indent)
     @logmsg algo_opts.log_level "$(pad_str)Starting restoration."
-    update_results.it_stat = RESTORATION
+    
+    iteration_status.iteration_type = RESTORATION
 
     ret = :TODO
     if !any(isnan.(step_vals.n))
@@ -25,8 +27,8 @@ function do_restoration(
 
     if ret != :SUCCESS
         if (
-            ret == :TODO ||
-            (dim_nl_eq_constraints(mop) > 0 || dim_nl_ineq_constraints(mop) > 0)
+            (dim_nl_eq_constraints(mop) > 0 || dim_nl_ineq_constraints(mop) > 0) ||
+            ret == :TODO
         )
             @logmsg algo_opts.log_level "$(pad_str) Trying to solve nonlinear subproblem"
             x0 = ret == :NONAN ? step_vals.xn : cached_x(vals)
@@ -38,6 +40,7 @@ function do_restoration(
             ret = :SUCCESS
         end
     end
+    
     if ret in (
         :SUCCESS, 
         :STOPVAL_REACHED, 
@@ -47,20 +50,23 @@ function do_restoration(
 		:MAXTIME_REACHED
     )
         @ignoraise postproccess_restoration(
-            xr_opt, Δ, update_results, mop, mod, scaler, lin_cons, scaled_cons,
+            xr_opt, Δ, trial_caches, mop, mod, scaler, lin_cons, scaled_cons,
             vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
-            it_index, indent
-        )
+            indent
+        ) indent
     else
         return InfeasibleStopping(indent)
     end
-    @ignoraise finish_iteration(
-        stop_crits, user_callback,
-        update_results, mop, mod, scaler, lin_cons, scaled_cons,
-        mod_vals, vals, vals_tmp, step_vals, filter, algo_opts;
-        it_index, indent
-    )
     
+    # If we are here, then restoration was successfull and `trial_caches` are set
+    iteration_scalars.delta = Δ
+    @ignoraise check_stopping_criterion(
+        stop_crits, CheckPostIteration(), 
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+        mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+        iteration_status, iteration_scalars, stop_crits,
+        algo_opts
+    ) indent
     accept_trial_point!(vals, vals_tmp)
     return nothing
 end
@@ -69,7 +75,7 @@ function restoration_objective(mop, vals_tmp, scaler, scaled_cons)
     @unpack A, b, E, c = scaled_cons
     function objf(xr::Vector, grad::Vector)
         if !isempty(grad)
-            @error "Restoration only supports derivative-free NLopt algorithms."
+            error("Restoration only supports derivative-free NLopt algorithms.")
         end
 
         ξ = cached_ξ(vals_tmp)
@@ -115,9 +121,9 @@ function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, nl_opt
 end
 
 function postproccess_restoration(
-    xr_opt, Δ, update_results, mop, mod, scaler, lin_cons, scaled_cons,
+    xr_opt, Δ, trial_caches, mop, mod, scaler, lin_cons, scaled_cons,
     vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
-    it_index, indent
+    indent
 )
     @unpack log_level = algo_opts
     ## the nonlinear problem was solved successfully.
@@ -125,22 +131,22 @@ function postproccess_restoration(
     copyto!(cached_x(vals_tmp), xr_opt)
     @ignoraise eval_mop!(vals_tmp, mop, scaler)
 
-    update_results.diff_x .= cached_x(vals) .- cached_x(vals_tmp)
-    update_results.diff_fx .= cached_fx(vals) .- cached_fx(vals_tmp)
-    update_results.diff_fx_mod .= cached_fx(mod_vals)
+    trial_caches.diff_x .= cached_x(vals) .- cached_x(vals_tmp)
+    trial_caches.diff_fx .= cached_fx(vals) .- cached_fx(vals_tmp)
+    trial_caches.diff_fx_mod .= cached_fx(mod_vals)
 
     ## the next point should be acceptable for the filter:
     if is_acceptable(filter, cached_theta(vals_tmp), cached_Phi(vals_tmp))
         ## make models valid at `x + r` and set model values
         ## also compute normal step based on models
-        @ignoraise update_models!(mod, Δ, mop, scaler, vals_tmp, scaled_cons, algo_opts; indent)
+        @ignoraise update_models!(mod, Δ, scaler, vals_tmp, scaled_cons; log_level, indent)
         @ignoraise eval_and_diff_mod!(mod_vals, mod, cached_x(vals_tmp))
 
-        update_results.diff_fx_mod .-= cached_fx(mod_vals)
+        trial_caches.diff_fx_mod .-= cached_fx(mod_vals)
 
         @ignoraise do_normal_step!(
             step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals_tmp, mod_vals;
-            it_index, log_level, indent
+            log_level, indent
         )
 
         @unpack c_delta, c_mu, mu, delta_max = algo_opts
@@ -165,8 +171,6 @@ function postproccess_restoration(
             end                
         end
         if n_is_compatible
-            finalize_update_results!(update_results, _Δ, RESTORATION, true)
-            
             step_vals.n .= cached_x(vals_tmp) .- cached_x(vals)
             @. step_vals.d = 0
             @. step_vals.s = step_vals.n
@@ -174,5 +178,6 @@ function postproccess_restoration(
             return nothing
         end
     end
-    return InfeasibleStopping(indent)
+    # if we have not returned here, then no compatible normal step was found :(
+    return InfeasibleStopping()
 end

@@ -40,8 +40,7 @@ initialize(mop::AbstractMOP)=mop
 # The optional function `float_type` returns the type of result and derivative vectors:
 float_type(::AbstractMOP)::Type{<:AbstractFloat}=DEFAULT_FLOAT_TYPE
 
-# We would also like to deterministically query the expected surrogate model types:
-model_type(::AbstractMOP)::Type{<:AbstractMOPSurrogate}=AbstractMOPSurrogate
+stop_type(::AbstractMOP) = Any
 
 # Below functions are used to query dimension information.
 dim_vars(::AbstractMOP)::Int=0 
@@ -81,12 +80,12 @@ end
 function dim_lin_eq_constraints(mop::AbstractMOP)
     A = lin_eq_constraints_matrix(mop)
     b = lin_eq_constraints_vector(mop)
-    return dim_lin_cons(A, b)
+    return dim_lin_cons(A, b) :: Int
 end
 function dim_lin_ineq_constraints(mop::AbstractMOP)
     A = lin_ineq_constraints_matrix(mop)
     b = lin_ineq_constraints_vector(mop)
-    return dim_lin_cons(A, b)
+    return dim_lin_cons(A, b) :: Int
 end
 
 # ## Evaluation
@@ -94,7 +93,6 @@ end
 # !!! note
 #     All evaluation and differentiation methods that you see below should always 
 #     return `nothing`, **unless** you want to stop early.
-#     Then return something else, for example a string.
 
 # Evaluation of nonlinear objective functions requires the following method:
 function eval_objectives!(y::RVec, mop::M, x::RVec) where {M<:AbstractMOP}
@@ -109,14 +107,14 @@ function eval_nl_ineq_constraints!(y::RVec, mop::M, x::RVec) where {M<:AbstractM
 end
 
 # To ensure they only get called if needed, we wrap them and assign shorter names:
-function objectives!(y::RVec, mop::AbstractMOP, x::RVec)
+function objectives!(y::RVecOrNothing, mop::AbstractMOP, x::RVec)
     eval_objectives!(y, mop, x)
 end
-function nl_eq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)
+function nl_eq_constraints!(y::RVecOrNothing, mop::AbstractMOP, x::RVec)
     dim_nl_eq_constraints(mop) <= 0 && return nothing
     eval_nl_eq_constraints!(y, mop, x)
 end
-function nl_ineq_constraints!(y::RVec, mop::AbstractMOP, x::RVec)
+function nl_ineq_constraints!(y::RVecOrNothing, mop::AbstractMOP, x::RVec)
     dim_nl_ineq_constraints(mop) <= 0 && return nothing
     eval_nl_ineq_constraints!(y, mop, x)
 end
@@ -149,8 +147,6 @@ end
 # `cached_fx(mop_cache)` to retrieve the objective values for example.
 # Note, that the getter calls should return arrays, and we want to modify 
 # these array.
-# When scalar values are expected (`cached_theta`, `cached_Phi`), 
-# then the cache should implement setters (`cached_theta!`, `cached_Phi!`).
 
 function init_value_caches(::AbstractMOP)::AbstractMOPCache
     return nothing
@@ -184,8 +180,6 @@ function eval_mop!(mop_cache, mop)
         cached_Ax(mop_cache), 
         mop, ξ
     )
-    cached_theta!(mop_cache, θ)
-    cached_Phi!(mop_cache, Φ)
     return nothing
 end
 

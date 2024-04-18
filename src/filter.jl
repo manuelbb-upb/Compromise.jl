@@ -1,7 +1,12 @@
-@with_kw struct StandardFilter{T}
+# The filter storing constraint violation values in vector `theta_vec` and objective 
+# maxima in `phi_vec`:
+Base.@kwdef struct StandardFilter{T}
 	gamma :: T = DEFAULT_FLOAT_TYPE(0.1) # envelope factor
 	theta_vec :: Vector{T} = T[]        # stores (1-γ)θᵢ
 	phi_vec :: Vector{T} = T[]          # stores Φᵢ - γθᵢ
+
+    min_phi :: Base.RefValue{T} = Ref(T(Inf))
+    min_theta :: Base.RefValue{T} = Ref(T(Inf))
 end
 
 num_entries(filter::StandardFilter) = length(filter.theta_vec)
@@ -25,10 +30,26 @@ function add_to_filter!(filter::StandardFilter, θ, Φ)
     deleteat!(filter.phi_vec,delete_entry)
     push!(filter.theta_vec, _θ)
     push!(filter.phi_vec, _Φ)
+
+    if _θ < filter.min_theta[]
+        filter.min_theta[] = _θ
+    end
+    if _Φ < filter.min_phi[]
+        filter.min_phi[] = _Φ
+    end
     return num_entries(filter)
 end
 
 function is_acceptable(filter::StandardFilter, θ, Φ)
+    θmin = filter.min_theta[]
+    Φmin = filter.min_phi[]
+    if θ <= θmin 
+        return true
+    end
+    if Φ <= Φmin
+        return true
+    end
+
     n_entries = num_entries(filter)
     for j=1:n_entries
         θj = filter.theta_vec[j]

@@ -1,3 +1,55 @@
+ensure_float_type(::Nothing, ::Type)=nothing
+function ensure_float_type(arr::AbstractArray{F}, ::Type{F}) where F
+	return arr
+end
+
+function ensure_float_type(arr::AbstractArray{F}, ::Type{T}) where {F,T}
+	return T.(arr)
+end
+
+function Accessors.set(
+	algo_opts::Union{AlgorithmOptions{F}, SteepestDescentConfig{F}}, ::PropertyLens{:float_type}, ::Type{F}
+) where F
+	return algo_opts
+end
+function Accessors.set(
+	algo_opts::Union{AlgorithmOptions{T}, SteepestDescentConfig{T}}, 
+	::PropertyLens{:float_type}, 
+	::Type{new_float_type}
+) where {T, new_float_type}
+	props = Accessors.getproperties(algo_opts)
+	fnames = keys(props)
+	patch = NamedTuple{fnames}(
+		map(
+			(k, v) -> change_float_type(v, PropertyLens(k), new_float_type), 
+			fnames,
+			props
+		)
+	)
+	return Accessors.setproperties(algo_opts, patch)
+end
+
+function Accessors.set(
+	algo_opts::Union{AlgorithmOptions{T}, SteepestDescentConfig{T}},
+	l::PropertyLens{field}, 
+	val
+) where {T, field}
+	return Accessors.setproperties(algo_opts, (; field => change_float_type(val, l, T)))
+end
+
+change_float_type(x, ::Type{new_float_type}) where new_float_type = x
+function change_float_type(x::F, ::Type{new_float_type}) where{F<:AbstractFloat, new_float_type}
+	return convert(new_float_type, x)
+end
+function change_float_type(x::Array{F, N}, ::Type{new_float_type}) where {F, N, new_float_type} 
+	return convert(Array{new_float_type, N}, x)
+end
+function change_float_type(::Type{T}, ::Type{new_float_type}) where{T<:AbstractFloat, new_float_type<:AbstractFloat}
+	return new_float_type
+end
+	
+change_float_type(x, proplens, new_float_type)=change_float_type(x, new_float_type)	
+
 function vec2str(x, max_entries=typemax(Int), digits=10)
 	x_end = min(length(x), max_entries)
 	_x = x[1:x_end]
@@ -11,93 +63,21 @@ function vec2str(x, max_entries=typemax(Int), digits=10)
 	return x_str
 end
 
-function array(T::Type, size...)
-  return Array{T}(undef, size...)
+function array(::Type{T}, size::Integer) where T
+  return Array{T}(undef, size)::Array{T, 1}
+end
+function array(::Type{T}, size::NTuple{N, <:Any}) where {T, N}
+	return Array{T}(undef, size)::Array{T, N}
+end
+function array(T, size...)
+	return array(T, size)
 end
 
-promote_modulo_nothing(T1, ::Type{Nothing})=T1
-promote_modulo_nothing(T1, T2)=Base.promote_type(T1, eltype(T2))
-macro ignoraise(ex, loglevelex=nothing)
-	has_lhs = false
-	if Meta.isexpr(ex, :(=), 2)
-		lhs, rhs = esc.(ex.args)
-		has_lhs = true
-	else
-		rhs = esc(ex)
-	end
-	
-	return quote
-		ret_val = $(rhs)
-		if isa(ret_val, AbstractStoppingCriterion)
-			wrapped = if !isa(ret_val, WrappedStoppingCriterion)
-				WrappedStoppingCriterion(ret_val, $(QuoteNode(__source__)), false)
-			else
-				ret_val
-			end
-			$(if !isnothing(loglevelex)
-				quote
-					if !wrapped.has_logged
-						stop_msg = stop_message(wrapped.crit)
-						if !isnothing(stop_msg)
-							@logmsg $(esc(loglevelex)) stop_msg
-						end
-						wrapped.has_logged = true
-					end
-				end
-			end)
-			return wrapped
-		end
-		$(if has_lhs
-			:($(lhs) = ret_val)
-		else
-			:(ret_val = nothing)
-		end)
-	end
+function _trial_point_accepted(iteration_status)
+    return _trial_point_accepted(iteration_status.step_class)
 end
-
-macro ignorebreak(ex, loglevelex=nothing)
-	has_lhs = false
-	if Meta.isexpr(ex, :(=), 2)
-		lhs, rhs = esc.(ex.args)
-		has_lhs = true
-	else
-		rhs = esc(ex)
-	end
-	
-	return quote
-		ret_val = $(rhs)
-		do_break = isa(ret_val, AbstractStoppingCriterion)
-		$(if !isnothing(loglevelex)
-			quote
-				if ret_val isa WrappedStoppingCriterion
-					wrapped = ret_val
-					if !wrapped.has_logged
-						stop_msg = stop_message(wrapped.crit)
-						if !isnothing(stop_msg)
-							@logmsg $(esc(loglevelex)) stop_msg
-						end
-						wrapped.has_logged = true
-					end
-				end
-			end
-		end)
-		$(if has_lhs
-			:($(lhs) = ret_val)
-		else
-			:(ret_val = nothing)
-		end)
-		do_break && break		
-	end
-end
-
-universal_copy!(trgt, src)=nothing
-function universal_copy!(trgt::AbstractArray{T, N}, src::AbstractArray{F, N}) where{T, F, N}
-	copyto!(trgt, src)
-	return nothing
-end
-function universal_copy!(trgt::Base.RefValue{T}, src::Base.RefValue{F}) where {T, F}
-	trgt[] = src[]
-	nothing
+function _trial_point_accepted(step_class::STEP_CLASS)
+	return Int8(step_class) > 0
 end
 
 """
@@ -156,6 +136,14 @@ const SUBSCRIPT_DICT = Base.ImmutableDict(
 	9 => "₉"
 )
 
+const INDENT_STRINGS = Base.ImmutableDict(
+	(i => lpad("", i) for i = 0:10)...
+)
+
+function indent_str(i)
+	return INDENT_STRINGS[i]
+end
+
 function supscript(num::Integer)
 	return join((SUPERSCRIPT_DICT[i] for i in reverse(digits(num))), "")
 end
@@ -184,3 +172,123 @@ function pretty_row_vec(
 	return repr_str
 end
 pretty_row_vec(x)=string(x)
+
+universal_copy!(trgt, src)=nothing
+function universal_copy!(trgt::AbstractArray{T, N}, src::AbstractArray{F, N}) where{T, F, N}
+	copyto!(trgt, src)
+	return nothing
+end
+function universal_copy!(trgt::Base.RefValue{T}, src::Base.RefValue{F}) where {T, F}
+	trgt[] = src[]
+	nothing
+end
+
+function custom_copy!(trgt, src)
+	if objectid(trgt) == objectid(src)
+		return nothing
+	end
+	return universal_copy!(trgt, src)
+end
+
+function universal_copy!(
+	step_vals_trgt::StepValueArrays, step_vals_src::StepValueArrays
+)
+	for fn in fieldnames(StepValueArrays)
+		trgt_fn = getfield(step_vals_trgt, fn)
+		universal_copy!(trgt_fn, getfield(step_vals_src, fn))
+	end
+	return nothing
+end
+
+function universal_copy!(::AbstractStepCache, ::AbstractStepCache)
+    error("`universal_copy!` not defined.")
+end
+
+function universal_copy!(trgt::SteepestDescentCache, src::SteepestDescentCache)
+    for fn in (:fxn, :lb_tr, :ub_tr, :Axn, :Dgx_n)
+        custom_copy!(
+            getfield(trgt, fn),
+            getfield(src, fn)
+        )
+    end
+end
+
+function universal_copy!(
+	scaled_cons::LinearConstraints, lin_cons::LinearConstraints)
+    for fn in fieldnames(LinearConstraints)
+        universal_copy!(
+            getfield(scaled_cons, fn), 
+            getfield(lin_cons, fn)
+        )
+    end
+    return nothing
+end
+
+function universal_copy!(
+	trgt::WrappedMOPCache, src::WrappedMOPCache
+)
+	for fn in fieldnames(WrappedMOPCache)
+		universal_copy!(
+			getfield(trgt, fn), 
+			getfield(src, fn)
+		)
+	end
+end
+
+function gridded_mop(
+	mop :: AbstractMOP,
+	lb = nothing,
+	ub = nothing;
+	res = 20
+)
+	lb = scatter_mop_lb(mop, lb)	
+	ub = scatter_mop_ub(mop, ub)
+	@assert all( ub .>= lb ) "Lower bounds exceed upper bounds."
+
+	n = dim_vars(mop)
+	@assert length(lb) == length(ub) == n 
+	
+	if length(res) == 1 && n > 1
+		res = fill(only(res), n)
+	end
+
+	ax_args = [LinRange(lb[i], ub[i], res[i]) for i=1:n]
+	tmp = init_value_caches(mop)
+	fx = cached_fx(tmp)
+
+	objf = (arg_vec) -> begin 
+		_fx = similar(fx)
+		objectives!(_fx, mop, arg_vec)
+		return _fx
+	end
+	points = mapreduce(collect, hcat, Iterators.product(ax_args...))
+	_Z = [objf(arg_vec) for arg_vec in eachcol(points)]
+	K = dim_objectives(mop)
+	Z = [[z[l] for z in _Z] for l=1:K]
+	return ax_args, points, Z
+end
+
+function scatter_mop_lb(mop, lb)
+	if isnothing(lb)
+		lb = lower_var_bounds(mop)
+	end
+	if isnothing(lb)
+		error("Provide non-nothing lower variable bounds `lb`.")
+	end
+	if any(isinf.(lb))
+		error("Provide finite lower variable bounds `lb`.")
+	end
+	return lb
+end
+function scatter_mop_ub(mop, ub)
+	if isnothing(ub)
+		ub = upper_var_bounds(mop)
+	end
+	if isnothing(ub)
+		error("Provide non-nothing upper variable bounds `ub`.")
+	end
+	if any(isinf.(ub))
+		error("Provide finite upper variable bounds `ub`.")
+	end
+	return ub
+end

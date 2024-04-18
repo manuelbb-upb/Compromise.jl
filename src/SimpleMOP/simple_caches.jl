@@ -51,42 +51,35 @@ cached_Ax(simple_cache::SimpleValueCache)=simple_cache.Ax
 cached_Ex_min_c(simple_cache::SimpleValueCache)=simple_cache.Ex_min_c
 cached_Ax_min_b(simple_cache::SimpleValueCache)=simple_cache.Ax_min_b
 
-cached_theta(simple_cache::SimpleValueCache)=simple_cache.theta_ref[]
-cached_Phi(simple_cache::SimpleValueCache)=simple_cache.phi_ref[]
-
-function cached_theta!(
-    simple_cache::SimpleValueCache, val
-)
-    simple_cache.theta_ref[]=val
-    return true
-end
-function cached_Phi!(
-    simple_cache::SimpleValueCache, val
-)
-    simple_cache.phi_ref[]=val
-    return true
-end
-
 cached_Dx(simple_cache::SimpleSurrogateValueCache)=simple_cache.Dx
 cached_Dfx(simple_cache::SimpleSurrogateValueCache)=simple_cache.Dfx
 cached_Dhx(simple_cache::SimpleSurrogateValueCache)=simple_cache.Dhx
 cached_Dgx(simple_cache::SimpleSurrogateValueCache)=simple_cache.Dgx
 
 function init_value_caches(mop::SimpleMOP)
-    T = float_type(mop)
-    
+    T = float_type(mop)    
     ## initialize unscaled and scaled variables
-    n_vars = dim_vars(mop)
-    ξ = array(T, n_vars)
+    nx = dim_vars(mop) :: Int
+    nfx = dim_objectives(mop) :: Int
+    nhx = dim_nl_eq_constraints(mop) :: Int
+    ngx = dim_nl_ineq_constraints(mop) :: Int
+    nE = dim_lin_eq_constraints(mop) :: Int
+    nA = dim_lin_ineq_constraints(mop) :: Int
+
+    return init_simple_value_caches_for_mop(T, nx, nfx, nhx, ngx, nE, nA)
+end
+    
+function init_simple_value_caches_for_mop(T, nx, nfx, nhx, ngx, nE, nA)
+    ξ = array(T, nx)
     x = similar(ξ)
 
     ## pre-allocate value arrays
-    fx = array(T, dim_objectives(mop))
-    hx = array(T, dim_nl_eq_constraints(mop))
-    gx = array(T, dim_nl_ineq_constraints(mop))
+    fx = array(T, nfx)
+    hx = array(T, nhx)
+    gx = array(T, ngx)
     
-    Ex = array(T, dim_lin_eq_constraints(mop))
-    Ax = array(T, dim_lin_ineq_constraints(mop))
+    Ex = array(T, nE)
+    Ax = array(T, nA)
     Ax_min_b = similar(Ax)
     Ex_min_c = similar(Ex)
 
@@ -104,18 +97,25 @@ end
 function init_value_caches(mod::SimpleMOPSurrogate)
     T = float_type(mod)
     
-    n_vars = dim_vars(mod)
-    x = array(T, n_vars)
+    nx = dim_vars(mod) :: Int
+    nfx = dim_objectives(mod) :: Int
+    nhx = dim_nl_eq_constraints(mod) :: Int
+    ngx = dim_nl_ineq_constraints(mod) :: Int
+    return init_simple_value_caches_for_mod(T, nx, nfx, nhx, ngx)
+end
+
+function init_simple_value_caches_for_mod(T, nx, nfx, nhx, ngx)
+    x = array(T, nx)
     Dx = similar(x)
 
     ## pre-allocate value arrays
-    fx = array(T, dim_objectives(mod))
-    hx = array(T, dim_nl_eq_constraints(mod))
-    gx = array(T, dim_nl_ineq_constraints(mod))
+    fx = array(T, nfx)
+    hx = array(T, nhx)
+    gx = array(T, ngx)
 
-    Dfx = array(T, n_vars, dim_objectives(mod))
-    Dhx = array(T, n_vars, dim_nl_eq_constraints(mod))
-    Dgx = array(T, n_vars, dim_nl_ineq_constraints(mod))
+    Dfx = array(T, nx, nfx)
+    Dhx = array(T, nx, nhx)
+    Dgx = array(T, nx, ngx)
 
    return SimpleSurrogateValueCache(Dx, x, fx, hx, gx, Dfx, Dhx, Dgx)
 end
@@ -126,7 +126,7 @@ function universal_copy!(
 )
 	for fn in fieldnames(typeof(mod_vals_trgt))
 		trgt_fn = getfield(mod_vals_trgt, fn)
-		universal_copy!(trgt_fn, getfield(mod_vals_src, fn))
+		custom_copy!(trgt_fn, getfield(mod_vals_src, fn))
 	end
 	return nothing
 end

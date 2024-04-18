@@ -21,14 +21,20 @@
 * `th_cholesky::Real=1e-7`: Threshold for accepting additional points based on the Cholesky 
   factors.
 """
-@with_kw mutable struct RBFConfig <: AbstractSurrogateModelConfig
-    kernel :: AbstractRBFKernel = CubicKernel()
+@with_kw struct RBFConfig{
+  T<:AbstractFloat,
+  kernelType <: AbstractRBFKernel,
+  databaseType <: Union{Nothing, RBFDatabase},
+  shape_parameter_functionType,
+  database_rwlockType <: Union{Nothing, AbstractReadWriteLock},
+} <: AbstractSurrogateModelConfig
+    kernel :: kernelType = CubicKernel()
     poly_deg :: Union{Int, Nothing}=1
-    shape_parameter_function :: Any = nothing
+    shape_parameter_function :: shape_parameter_functionType = nothing
     max_points :: Union{Int, Nothing} = nothing
 
-    database :: Union{Nothing, RBFDatabase} = nothing
-    database_rwlock :: Union{Nothing, AbstractReadWriteLock}=nothing
+    database :: databaseType = nothing
+    database_rwlock :: database_rwlockType =nothing
     database_size :: Union{Int, Nothing} = nothing
     database_chunk_size :: Union{Int, Nothing} = nothing
 
@@ -36,18 +42,18 @@
     enforce_fully_linear :: Bool = true
 
     "Enlargement factor for trust region to look for affinely independent points in."
-    search_factor :: Real = 2
-    sampling_factor :: Real = 1
+    search_factor :: T = 2.0
+    sampling_factor :: T = 1.0
     
     "Enlargement factor for maximum trust region to look for affinely independent points in."
-    max_search_factor :: Real = search_factor
-    max_sampling_factor :: Real = sampling_factor
+    max_search_factor :: T = search_factor
+    max_sampling_factor :: T = sampling_factor
 
     "Pivoting threshold to determine a poised interpolation set."
-    th_qr :: Real = 1/(2*search_factor)
+    th_qr :: T = 1/(2*search_factor)
 
     "Threshold for accepting additional points based on the Cholesky factors."
-    th_cholesky :: Real = 1e-7
+    th_cholesky :: T = 1e-7
 
     ## TODO `max_evals` (soft limit on maximum number of evaluations)
     @assert isnothing(poly_deg) || poly_deg in (0,1)

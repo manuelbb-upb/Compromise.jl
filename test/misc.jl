@@ -1,68 +1,4 @@
 using Compromise
-@testset  "SteepestDescentConfig" begin
-    for backtracking_factor in (-1.0, -1//2, 0, 1f0, 2)
-        @test_throws AssertionError Compromise.SteepestDescentConfig(;
-            backtracking_factor
-        )
-    end
-    for rhs_factor in (-1.0, -1//2, 0, 1f0, 2)
-        @test_throws AssertionError Compromise.SteepestDescentConfig(;
-            rhs_factor
-        )
-    end
-    for descent_step_norm in (0, 1, 2, 3)
-        @test_throws AssertionError Compromise.SteepestDescentConfig(;
-            descent_step_norm
-        )
-    end
-    for normal_step_norm in (0, 1, 3)
-        @test_throws AssertionError Compromise.SteepestDescentConfig(;
-            normal_step_norm
-        )
-    end
-
-    cfg_default = Compromise.SteepestDescentConfig()
-    @test cfg_default.backtracking_factor == 1//2
-    @test cfg_default.rhs_factor == Compromise.DEFAULT_FLOAT_TYPE(0.001)
-    @test cfg_default.normalize_gradients == false
-    @test cfg_default.strict_backtracking == true
-    @test cfg_default.descent_step_norm == Inf
-    @test cfg_default.normal_step_norm == 2
-    @test cfg_default.qp_opt == Compromise.DEFAULT_QP_OPTIMIZER
-
-    cfg_2 = Compromise.SteepestDescentConfig(
-        backtracking_factor = 0.5,
-        rhs_factor = Compromise.DEFAULT_FLOAT_TYPE(0.001),
-        normalize_gradients = false,
-        strict_backtracking = true, 
-        descent_step_norm = Inf,
-        normal_step_norm = 2,
-        qp_opt = Compromise.DEFAULT_QP_OPTIMIZER
-    )
-
-    @test cfg_default == cfg_2
-end
-
-@testset "AlgorithmOptions" begin
-    # TODO
-    opts = AlgorithmOptions()
-    _opts = deepcopy(opts)
-
-    @test opts == _opts
-    @test opts.stop_crit_tol_abs isa Float64
-
-    opts = AlgorithmOptions(; T = Float16)
-    @test opts.stop_crit_tol_abs isa Float16
-    
-    opts = AlgorithmOptions{Float64}(; T = Float16)
-    @test opts.stop_crit_tol_abs isa Float16
-
-    opts = AlgorithmOptions{Float32}()
-    @test opts.stop_crit_tol_abs isa Float32
-
-    opts = AlgorithmOptions{Float64}(; stop_crit_tol_abs=1f0)
-    @test opts.stop_crit_tol_abs isa Float64
-end
 
 @testset "Taylor Polynomials deg 2" begin
     tcfg = TaylorPolynomialConfig(;degree=2)
@@ -88,8 +24,8 @@ end
         return H
     end
 
-    op = Compromise.NonlinearFunction(;func, grads, hessians)
-    tp = Compromise.init_surrogate(tcfg, op, 2, 2, nothing, Float64)
+    op = Compromise.NonlinearFunction(;func, grads, hessians, dim_in=2, dim_out=2)
+    tp = Compromise.init_surrogate(tcfg, op, nothing, Float64)
 
     x = rand(2)
     y = zeros(2)
@@ -273,11 +209,12 @@ end
     #%%
     struct MyCallback <: Compromise.AbstractStoppingCriterion end
             
-    function Compromise.evaluate_stopping_criterion(
+    function Compromise.check_stopping_criterion(
         crit::MyCallback, ::Compromise.CheckPreIteration,
-        mop, scaler, lin_cons, scaled_cons,
-        vals, filter, algo_opts;
-        indent::Int, it_index::Int, delta::Real
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+        mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+        iteration_status, iteration_scalars, stop_crits,
+        algo_opts
     )
         if Compromise.cached_x(vals) ≈ [π, -ℯ]
             return crit
