@@ -110,7 +110,7 @@ function _log_trial_results(θxs, Φxs, iteration_type, step_class; indent, log_
     pad_str = indent_str(indent)
     
     @logmsg log_level "$(pad_str)Trial point with (θ, Φ) = $((θxs, Φxs)) does$(iteration_type == FILTER_FAIL ? " not" : "") fit filter."
-    @logmsg log_level "$(pad_str)The trial point is$(Int8(step_class) < 1 ? " not" : "") accepted."
+    @logmsg log_level "$(pad_str)$(step_class): The trial point is$(Int8(step_class) < 1 ? " not" : "") accepted."
     return nothing
 end
 
