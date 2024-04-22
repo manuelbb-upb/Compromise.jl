@@ -191,6 +191,71 @@ function optimize_with_algo(
 end
 
 function optimize_with_algo(
+    MOP::AbstractMOP, outer_opts::SequentialOuterAlgorithmOptions, ξ0::RVecOrMat; 
+    user_callback :: AbstractStoppingCriterion = NoUserCallback(),
+)
+    _ξ0 = ξ0 isa RVec ? reshape(ξ0, :, 1) : ξ0
+
+    algo_opts = outer_opts.inner_opts
+    log_level = algo_opts.log_level
+
+    num_sites = size(_ξ0, 2)
+    all_optimizer_caches = Any[]
+
+    @logmsg log_level "Initializing all $num_sites cache objects."
+    algo_opts = outer_opts.inner_opts
+    for ξ0 in eachcol(_ξ0)
+        optimizer_caches = initialize_structs(MOP, ξ0, algo_opts, user_callback)
+        push!(all_optimizer_caches, optimizer_caches)
+    end
+
+    @logmsg log_level "Starting sequential optimization of columns."
+    is_running = ones(Bool, num_sites)
+    all_return_objects = Vector{Any}(undef, num_sites)
+
+    for (i, ocache) in enumerate(all_optimizer_caches)
+        if ocache isa AbstractStoppingCriterion
+            is_running[i] = false
+            ret = ReturnObject(copy(_ξ0[:, i]), nothing, ocache)
+            all_return_objects[i] = ret
+        end
+    end
+    
+    while any(is_running)
+        for (i, ξ0_i) in enumerate(eachcol(_ξ0))
+            !is_running[i] && continue
+            @logmsg log_level """\n
+            #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!
+            # COLUMN $(i).
+            #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!"""
+            stop_code = do_inner_iteration!(all_optimizer_caches[i], algo_opts)
+            if stop_code isa AbstractStoppingCriterion
+                is_running[i] = false
+            
+                ret = ReturnObject(ξ0_i, all_optimizer_caches[i], stop_code)
+                all_return_objects[i] = ret
+            end 
+        end
+    end
+
+    return all_return_objects
+end
+
+function do_inner_iteration!(optimizer_caches, algo_opts)
+    @unpack (
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+        mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+        iteration_status, iteration_scalars, stop_crits,
+    ) = optimizer_caches
+    return do_iteration!(
+        mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
+        mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
+        iteration_status, iteration_scalars, stop_crits,
+        algo_opts
+    )        
+end
+
+function optimize_with_algo(
     MOP::AbstractMOP, algo_opts::AlgorithmOptions, ξ0; 
     user_callback :: AbstractStoppingCriterion = NoUserCallback(),
 )
@@ -480,7 +545,6 @@ function do_iteration!(
     return nothing
 end
 
-
 function init_scaler(scaler_cfg::Symbol, lin_cons, n_vars)
     return init_scaler(Val(scaler_cfg), lin_cons, n_vars)
 end
@@ -529,7 +593,8 @@ function accept_trial_point!(vals, vals_tmp)
     return universal_copy!(vals, vals_tmp)
 end
 
-export optimize, AlgorithmOptions
+export optimize, optimize_with_algo, 
+    AlgorithmOptions, ThreadedOuterAlgorithmOptions, SequentialOuterAlgorithmOptions
 export opt_cache, opt_vars, opt_objectives, opt_nl_eq_constraints, opt_nl_ineq_constraints,
     opt_lin_eq_constraints, opt_lin_ineq_constraints, opt_constraint_violation, opt_stop_code,
     opt_surrogate

@@ -206,3 +206,7 @@ unpack_property(p::NumberWithDefault)=p.val
 Base.@kwdef struct ThreadedOuterAlgorithmOptions{A}
 	inner_opts :: A = AlgorithmOptions()
 end
+
+Base.@kwdef struct SequentialOuterAlgorithmOptions{A}
+	inner_opts :: A = AlgorithmOptions()
+end
