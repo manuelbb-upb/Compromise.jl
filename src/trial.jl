@@ -117,10 +117,10 @@ end
 function _log_radius_update(delta, delta_new, radius_update; indent, log_level)
     indent += 1
     pad_str = indent_str(indent)
-    if Int8(radius_update) > 1
+    if Int8(radius_update) > 0
         @logmsg log_level "$(pad_str)Radius will be changed from $(delta) to $(delta_new)."
     else
-        @logmsg log_level "$(pad_str)Radius will stay it $(delta)."
+        @logmsg log_level "$(pad_str)Radius will stay at $(delta)."
     end
     return nothing
 end

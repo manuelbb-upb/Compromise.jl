@@ -231,6 +231,12 @@ function optimize_with_algo(
             stop_code = do_inner_iteration!(all_optimizer_caches[i], algo_opts)
             if stop_code isa AbstractStoppingCriterion
                 is_running[i] = false
+
+                @logmsg log_level """\n
+                    #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!
+                    # FINISHED COLUMN $(i):
+                    # $(stop_message(stop_code))
+                    #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!"""
             
                 ret = ReturnObject(ξ0_i, all_optimizer_caches[i], stop_code)
                 all_return_objects[i] = ret

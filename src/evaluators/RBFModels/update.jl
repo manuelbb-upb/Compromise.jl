@@ -32,11 +32,18 @@ function update_rbf_model!(
     @unpack rwlock = database
     
     lock_read(rwlock)
-        if (
-            !force_rebuild && 
-            x0 == params.x0 && Δ == val(params.delta_ref) &&
-            was_fully_linear && 
-            last_db_state == db_state(database)
+        # we need to update if
+        # we are force by `force_rebuild` OR
+        # if `x0` changed or the radius changed OR
+        # the previous model was not fully linear and there is new points in the database
+
+        if (    # we do not need to update if …
+            !force_rebuild &&                                   # … we are not forced 
+            x0 == params.x0 && Δ == val(params.delta_ref) &&    # … did the center or radius change nor
+            !(
+                was_fully_linear &&                             # … if the previous model can be improved
+                last_db_state != db_state(database)             # … with new points from the database
+            )
         )
             @logmsg log_level "$(pad_str)RBFModel: No need to update."
             unlock_read(rwlock)
@@ -147,60 +154,96 @@ end
 function eval_missing_values!(rbf, op, x0, n_X)
     @unpack buffers, params = rbf
     @unpack X = params
-    @unpack not_db_flags, db_index, FX, = buffers
+    @unpack db_flags, db_index, FX, xZ, fxZ = buffers
 
-    return eval_missing_values!(FX, not_db_flags, db_index, n_X, op, X, x0)
+    return eval_missing_values!(X, FX, db_flags, xZ, fxZ, db_index, n_X, op, x0)
 end
 
-@views function eval_missing_values!(FX, not_db_flags, db_index, n_X, op, X, x0)
-    flags = not_db_flags[1:n_X]
-    flags .= false
-    for i = 1:n_X
-        flags[i] = (db_index[i] <= 0)
-    end
-    
-    _X = X[:, 1:n_X][:, flags][:, 2:end]
-    _Y = FX[:, 1:n_X][:, flags][:, 2:end]
-    
-    _X .+= x0
-    _Y[1, :] .= NaN
-    @ignoraise op_code = func_vals!(_Y, op, _X)
-    
-    _X .-= x0
+@views function eval_missing_values!(X, FX, db_flags, xtmp, fxtmp, db_index, n_X, op, x0)
 
-    ## sort the columns in X, FX, and flags to have valid entries first
-    ## (there probably is a cool recursive way to do this)
-    nan_check_has_completed = false
-    i_start = 2
-    i_end = n_X
-    while !nan_check_has_completed
-        nan_check_has_completed = true
-        for i=i_start:i_end
-            #if flags[i]
-            if isnan(FX[1, i])
-                i_start = i
-                i_end -= 1
-                for j=i:i_end
-                    X[:, j] .= X[:, j+1]
-                    FX[:, j] .= FX[:, j+1]
-                    flags[j] = flags[j+1]
-                end
-                nan_check_has_completed = false
-                break
+    # `presort_eval_arrays!` will sort columns in `X`, `FX` and `db_flags` such that
+    # indices `1:i0` have database values already.
+    i0 = presort_eval_arrays!(X, FX, db_flags, xtmp, fxtmp, db_index, n_X)
+    
+    # indices `i0+1:n_X` need evaluation still
+    i0 += 1
+    _X = X[:, i0:n_X] 
+    _FX = FX[:, i0:n_X]
+    
+    _X .+= x0       # for evaluation, undo shift
+    _FX .= NaN
+    @ignoraise func_vals!(_FX, op, _X)
+    _X .-= x0       # and re-do shift afterwards    # TODO extra buffer to avoid these additions?
+
+    # sort arrays so that valid entries are first, in columns `1:n_X`
+    n_X = postsort_eval_arrays!(X, FX, db_flags, xtmp, fxtmp, n_X; i0)
+    return n_X
+end
+
+function presort_eval_arrays!(
+    X, FX, db_flags, xtmp, fxtmp,
+    db_index, n_X
+)
+    make_presort_flags!(db_flags, db_index, n_X)
+    return sort_with_flags!(X, FX, db_flags, xtmp, fxtmp, n_X)
+end
+
+function make_presort_flags!(db_flags, db_index, n_X)
+    for i = 1:n_X
+        db_flags[i] = (db_index[i] > 0)
+    end
+    return nothing
+end
+
+function postsort_eval_arrays!(X, FX, db_flags, xtmp, fxtmp, n_X; i0=1)
+    make_postsort_flags!(db_flags, FX, n_X; i0)
+    return sort_with_flags!(X, FX, db_flags, xtmp, fxtmp, n_X; i0)
+end
+
+function make_postsort_flags!(db_flags, FX, n_X; i0=1)
+    for i = i0:n_X 
+        db_flags[i] = !isnan(FX[1, i])
+    end
+    return nothing
+end
+
+function sort_with_flags!(X, FX, db_flags, xtmp, fxtmp, n_X; i0=1)
+    j=i0-1 # index of last entry with db flag
+    for i=i0:n_X
+        has_db = db_flags[i]
+       
+        if has_db
+            xtmp .= X[:, i]
+            fxtmp .= FX[:, i]
+            
+            # sub-arrays with 1:i-1 are sorted
+            # columns 1:j have entries with database flag 
+            # make current column `i` the new column `j`
+            
+            jr = j + 1
+            if j>0
+                # shift all entries after `j` one to the right
+                il = i - 1
+                db_flags[jr:i] .= db_flags[j:il] 
+                X[:, jr:i] .= X[:, j:il]
+                FX[:, jr:i] .= FX[:, j:il]
             end
-            #end
+            # then place entries with index `i` into correct spot
+            j = jr
+            db_flags[j] = has_db
+            X[:, j] .= xtmp
+            FX[:, j] .= fxtmp
         end
     end
-    n_X = i_end
-    return n_X
+    return j
 end
 
 @views function put_new_evals_into_db!(rbf, x0, n_X, xZ)
     @unpack buffers, database, params = rbf
-    @unpack not_db_flags, FX = buffers
+    @unpack db_flags, FX = buffers
     @unpack X = params
     for i=1:n_X
-        if not_db_flags[i]
+        if !db_flags[i]
             xZ .= X[:, i]
             xZ .+= x0
             y = FX[:, i]
@@ -208,16 +251,16 @@ end
         end
     end
 end
-
+#=
 function evaluate_and_update_db!(rbf, op, x0, n_X)
     @unpack database, buffers, params = rbf
     @unpack X = params
-    @unpack not_db_flags, db_index, FX, lb, ub = buffers
+    @unpack db_flags, db_index, FX, lb, ub = buffers
 
     ix1 = 1
     ix2 = n_X
     return evaluate_and_update_db!(
-        not_db_flags, db_index, FX, database,
+        db_flags, db_index, FX, database,
         op, X, x0, lb, ub; 
         ix1, ix2
     )
@@ -260,6 +303,7 @@ end
     end
     return n_X
 end
+=#
 
 function affine_sampling!(
     rbf::RBFModel, Δ, x0, fx0, global_lb=nothing, global_ub=nothing; 
