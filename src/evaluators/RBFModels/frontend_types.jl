@@ -206,7 +206,7 @@ end
 
 function Base.copyto!(dst::RBFTrainingBuffers, src::RBFTrainingBuffers)
   for fn in (
-    :lb, :ub, :FX, :xZ, :fxZ, :db_index, :not_db_flags, :Φ, :Q, :R, :Qj, :Rj, #src :Π
+    :lb, :ub, :FX, :xZ, :fxZ, :db_index, :db_flags, :Φ, :Q, :R, :Qj, :Rj, #src :Π
     :NΦ, :NΦN, :L, :Linv, :v1, :v2
   )
     copyto!(getfield(dst, fn), getfield(src, fn))
