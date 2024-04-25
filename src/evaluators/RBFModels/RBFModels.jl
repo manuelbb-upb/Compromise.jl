@@ -124,7 +124,7 @@ function CE.update!(
 )
     return update_rbf_model!(
         rbf, op, Δ, x, fx, global_lb, global_ub; 
-        log_level, norm_p=Inf, indent
+        log_level, norm_p=Inf, indent, kwargs...
     )
 end
 #=

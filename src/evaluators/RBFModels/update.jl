@@ -33,17 +33,14 @@ function update_rbf_model!(
     
     lock_read(rwlock)
         # we need to update if
-        # we are force by `force_rebuild` OR
+        # we are forced by `force_rebuild` OR
         # if `x0` changed or the radius changed OR
         # the previous model was not fully linear and there is new points in the database
 
-        if (    # we do not need to update if …
-            !force_rebuild &&                                   # … we are not forced 
-            x0 == params.x0 && Δ == val(params.delta_ref) &&    # … did the center or radius change nor
-            !(
-                was_fully_linear &&                             # … if the previous model can be improved
-                last_db_state != db_state(database)             # … with new points from the database
-            )
+        if !(
+            force_rebuild ||
+            (x0 != params.x0 || Δ != val(params.delta_ref)) ||
+            (!was_fully_linear && last_db_state != db_state(database))
         )
             @logmsg log_level "$(pad_str)RBFModel: No need to update."
             unlock_read(rwlock)
@@ -106,205 +103,6 @@ function update_rbf_model!(
     return nothing
 end
 
-function model_shape_parameter(rbf::RBFModel, Δ)
-    if rbf.shape_parameter_function isa Function
-        ε = 0 
-        try 
-            ε = rbf.shape_parameter_function(Δ)
-        catch err
-            @error "Could not compute shape parameter." exception=(err, catch_backtrace())
-        end
-        if ε > 0
-            return ε
-        end
-    end
-    if rbf.shape_parameter_function isa Number
-        ε = rbf.shape_parameter_function
-        if ε > 0
-            return ε
-        end
-    end
-    return _shape_parameter(rbf.kernel)
-end
-
-# Suppose, `filter_flags` has been used to create a view into `_X` via
-# `X = @view(X[:, filter_flags])`.
-# From `X`, certain columns are chosen, these have integer indices `chosen_index`.
-# The function `unfilter_index!` modifies `chosen_index` to contain indices
-# with respect to `_X` instead of `X`.
-# It is equivalent to `chosen_index = findall(filter_flags)[chosen_index]`
-function unfilter_index!(
-    chosen_index, filter_flags; ix1=2, ix2=length(chosen_index)
-)
-    j = 0
-    for (i, is) = enumerate(filter_flags)
-        if is
-            j += 1  # flag `i` is the `j`-th true flag
-            for l = ix1:ix2
-                ci = chosen_index[l]
-                if ci == j
-                    chosen_index[l] = i
-                    break
-                end
-            end
-        end
-    end
-end
-
-function eval_missing_values!(rbf, op, x0, n_X)
-    @unpack buffers, params = rbf
-    @unpack X = params
-    @unpack db_flags, db_index, FX, xZ, fxZ = buffers
-
-    return eval_missing_values!(X, FX, db_flags, xZ, fxZ, db_index, n_X, op, x0)
-end
-
-@views function eval_missing_values!(X, FX, db_flags, xtmp, fxtmp, db_index, n_X, op, x0)
-
-    # `presort_eval_arrays!` will sort columns in `X`, `FX` and `db_flags` such that
-    # indices `1:i0` have database values already.
-    i0 = presort_eval_arrays!(X, FX, db_flags, xtmp, fxtmp, db_index, n_X)
-    
-    # indices `i0+1:n_X` need evaluation still
-    i0 += 1
-    _X = X[:, i0:n_X] 
-    _FX = FX[:, i0:n_X]
-    
-    _X .+= x0       # for evaluation, undo shift
-    _FX .= NaN
-    @ignoraise func_vals!(_FX, op, _X)
-    _X .-= x0       # and re-do shift afterwards    # TODO extra buffer to avoid these additions?
-
-    # sort arrays so that valid entries are first, in columns `1:n_X`
-    n_X = postsort_eval_arrays!(X, FX, db_flags, xtmp, fxtmp, n_X; i0)
-    return n_X
-end
-
-function presort_eval_arrays!(
-    X, FX, db_flags, xtmp, fxtmp,
-    db_index, n_X
-)
-    make_presort_flags!(db_flags, db_index, n_X)
-    return sort_with_flags!(X, FX, db_flags, xtmp, fxtmp, n_X)
-end
-
-function make_presort_flags!(db_flags, db_index, n_X)
-    for i = 1:n_X
-        db_flags[i] = (db_index[i] > 0)
-    end
-    return nothing
-end
-
-function postsort_eval_arrays!(X, FX, db_flags, xtmp, fxtmp, n_X; i0=1)
-    make_postsort_flags!(db_flags, FX, n_X; i0)
-    return sort_with_flags!(X, FX, db_flags, xtmp, fxtmp, n_X; i0)
-end
-
-function make_postsort_flags!(db_flags, FX, n_X; i0=1)
-    for i = i0:n_X 
-        db_flags[i] = !isnan(FX[1, i])
-    end
-    return nothing
-end
-
-function sort_with_flags!(X, FX, db_flags, xtmp, fxtmp, n_X; i0=1)
-    j=i0-1 # index of last entry with db flag
-    for i=i0:n_X
-        has_db = db_flags[i]
-       
-        if has_db
-            xtmp .= X[:, i]
-            fxtmp .= FX[:, i]
-            
-            # sub-arrays with 1:i-1 are sorted
-            # columns 1:j have entries with database flag 
-            # make current column `i` the new column `j`
-            
-            jr = j + 1
-            if j>0
-                # shift all entries after `j` one to the right
-                il = i - 1
-                db_flags[jr:i] .= db_flags[j:il] 
-                X[:, jr:i] .= X[:, j:il]
-                FX[:, jr:i] .= FX[:, j:il]
-            end
-            # then place entries with index `i` into correct spot
-            j = jr
-            db_flags[j] = has_db
-            X[:, j] .= xtmp
-            FX[:, j] .= fxtmp
-        end
-    end
-    return j
-end
-
-@views function put_new_evals_into_db!(rbf, x0, n_X, xZ)
-    @unpack buffers, database, params = rbf
-    @unpack db_flags, FX = buffers
-    @unpack X = params
-    for i=1:n_X
-        if !db_flags[i]
-            xZ .= X[:, i]
-            xZ .+= x0
-            y = FX[:, i]
-            add_to_database!(database, xZ, y)
-        end
-    end
-end
-#=
-function evaluate_and_update_db!(rbf, op, x0, n_X)
-    @unpack database, buffers, params = rbf
-    @unpack X = params
-    @unpack db_flags, db_index, FX, lb, ub = buffers
-
-    ix1 = 1
-    ix2 = n_X
-    return evaluate_and_update_db!(
-        db_flags, db_index, FX, database,
-        op, X, x0, lb, ub; 
-        ix1, ix2
-    )
-end
-
-@views function evaluate_and_update_db!(
-    not_db_flags, db_index, FX, database,
-    op, X, x0, lb, ub; 
-    ix1, ix2,
-)
-    @assert ix1==1
-
-    for i = ix1:ix2
-        not_db_flags[i] = db_index[i] <= 0
-    end
-    _X = X[:, ix1:ix2][:, not_db_flags[ix1:ix2]]
-    _Y = FX[:, ix1:ix2][:, not_db_flags[ix1:ix2]]
-    _Y[1, :] .= NaN
-    _X .+= x0
-    @ignoraise op_code = func_vals!(_Y, op, _X)
-
-    use_col_flags = not_db_flags
-    n_X = 0
-
-    for i=ix1:ix2
-        if use_col_flags[i]
-            xi = X[:, i]
-            project_into_box!(xi, lb, ub)
-            if isnan(FX[1, i])
-                use_col_flags[i] = false
-            else
-                add_to_database!(database, xi, FX[:, i])
-                n_X += 1
-            end
-            xi .-= x0
-        else
-            use_col_flags[i] = true
-            n_X += 1
-        end
-    end
-    return n_X
-end
-=#
-
 function affine_sampling!(
     rbf::RBFModel, Δ, x0, fx0, global_lb=nothing, global_ub=nothing; 
     delta_max, norm_p, log_level, indent::Int=0
@@ -363,7 +161,6 @@ end
 
     X[:, 1] .= 0
     FX[:, 1] .= fx0
-    db_index[1] = 0
     n_X = 1
     db_index[1] = x0_db_index
     
@@ -387,11 +184,13 @@ end
         Δ1 = search_factor .* Δ
         trust_region_bounds!(lb, ub, x0, Δ1, global_lb, global_ub)
 
+        # set `filter_flags` to mark points from `database` lying in box `lb` to `ub`:
         box_search!(filter_flags, database, lb, ub)
+        # unset those entries that have already been chosen as interpolation points `1:n_X`
         for ix in 1:n_X
-            ci = db_index[ix]
-            ci < 1 && continue
-            filter_flags[ci] = false
+            ci = db_index[ix]   # integer database index of interpolation site
+            ci < 1 && continue  # no database entry
+            filter_flags[ci] = false    # in case of entry, unset flag
         end
 
         Xs = filtered_view_x(database, filter_flags)
@@ -569,4 +368,180 @@ function cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent::Int=0)
         @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) additional points in radius $delta."
     end
     return n_X
+end
+
+# Suppose, `filter_flags` has been used to create a view into `_X` via
+# `X = @view(_X[:, filter_flags])`.
+# From `X`, certain columns are chosen, these have integer 
+# indices `chosen_index[ix1:ix2]`.
+# The function `unfilter_index!` modifies `chosen_index[ix1:ix2]` to contain indices
+# with respect to `_X` instead of `X`.
+# It is equivalent to `chosen_index[ix1:ix2] = findall(filter_flags)[chosen_index[ix1:ix2]]`
+function unfilter_index!(
+    chosen_index, filter_flags; ix1=2, ix2=length(chosen_index)
+)
+    for i = ix1:ix2
+        ci = chosen_index[i]
+        j = 0
+        ci_valid = false
+        for (f, is) = enumerate(filter_flags)
+            !is && continue
+            j += 1
+            if ci == j
+                chosen_index[i] = f
+                ci_valid = true
+                break
+            end
+        end
+        ci_valid && continue
+        chosen_index[i] = -1
+    end
+    #=
+    j = 0
+    for (i, is) = enumerate(filter_flags)
+        if is
+            j += 1  # flag `i` is the `j`-th true flag
+            for l = ix1:ix2
+                ci = chosen_index[l]
+                if ci == j
+                    chosen_index[l] = i
+                    break
+                end
+            end
+        end
+    end=#
+end
+
+function model_shape_parameter(rbf::RBFModel, Δ)
+    if rbf.shape_parameter_function isa Function
+        ε = 0 
+        try 
+            ε = rbf.shape_parameter_function(Δ)
+        catch err
+            @error "Could not compute shape parameter." exception=(err, catch_backtrace())
+        end
+        if ε > 0
+            return ε
+        end
+    end
+    if rbf.shape_parameter_function isa Number
+        ε = rbf.shape_parameter_function
+        if ε > 0
+            return ε
+        end
+    end
+    return _shape_parameter(rbf.kernel)
+end
+
+function eval_missing_values!(rbf, op, x0, n_X; ix1 = 2)
+    @unpack buffers, params = rbf
+    @unpack X = params
+    @unpack db_index, sorting_flags, FX, xZ, fxZ = buffers
+
+    return eval_missing_values!(X, FX, xZ, fxZ, db_index, sorting_flags, ix1, n_X, op, x0)
+end
+
+@views function eval_missing_values!(X, FX, xtmp, fxtmp, db_index, sorting_flags, istart, iend, op, x0)
+
+    # `presort_eval_arrays!` will sort columns `istart:iend` in `X`, `FX` and `db_index` such that
+    # indices `istart:i0` have database values already.
+    i0 = presort_eval_arrays!(X, FX, db_index, sorting_flags, xtmp, fxtmp, istart, iend)
+    
+    # indices `i0+1:iend` need evaluation still
+    i0 += 1
+    i0 > iend && return iend
+    
+    _X = X[:, i0:iend] 
+    _FX = FX[:, i0:iend]
+    
+    _X .+= x0       # for evaluation, undo shift
+    _FX .= NaN
+    
+    @ignoraise func_vals!(_FX, op, _X)
+    _X .-= x0       # and re-do shift afterwards    # TODO extra buffer to avoid these additions?
+
+    # sort arrays so that valid entries are first, in columns `istart:n_X`
+    n_X = postsort_eval_arrays!(X, FX, db_index, sorting_flags, xtmp, fxtmp, i0, iend)
+    return n_X
+end
+
+function presort_eval_arrays!(
+    X, FX, db_index, sorting_flags, xtmp, fxtmp,
+    istart, iend
+)
+    presort_flags!(sorting_flags, db_index, istart, iend)
+    return sort_with_flags!(X, FX, db_index, sorting_flags, xtmp, fxtmp, istart, iend)
+end
+
+function presort_flags!(sorting_flags, db_index, istart, iend)
+    for i=istart:iend
+        sorting_flags[i] = db_index[i] < 0
+    end
+    return nothing
+end
+function postsort_eval_arrays!(X, FX, db_index, sorting_flags, xtmp, fxtmp, istart, iend)
+    postsort_flags!(sorting_flags, FX, istart, iend)
+    return sort_with_flags!(X, FX, db_index, sorting_flags, xtmp, fxtmp, istart, iend)
+end
+
+function postsort_flags!(sorting_flags, FX, istart, iend)
+    for i = istart:iend
+        sorting_flags[i] = any(isnan.(FX[:, i]))
+    end
+    return nothing
+end
+
+# move entries with sorting_flags[i] == false to the left
+function sort_with_flags!(X, FX, db_index, sorting_flags, xtmp, fxtmp, istart, iend)
+    j = istart-1 # last valid index
+    for i=istart:iend
+        bad_flag = sorting_flags[i]
+        bad_flag && continue
+       
+        # sub-arrays with istart:i-1 are sorted
+        # columns istart:j have valid values
+        # make current column `i` the new column `j+1`
+        
+        # first, cache column `i`:
+        di = db_index[i]
+        xtmp .= X[:, i]
+        fxtmp .= FX[:, i]
+
+        # shift all entries in the block `j+1:i-1` one to the right
+        # so that they become block `j+2:i`
+        l1 = j+1
+        r1 = i-1
+        l2 = l1 + 1
+        r2 = r1 + 1
+            
+        sorting_flags[l2:r2] .= sorting_flags[l1:r1]
+        db_index[l2:r2] .= db_index[l1:r1]
+        X[:, l2:r2] .= X[:, l1:r1]
+        FX[:, l2:r2] .= FX[:, l1:r1]
+        
+        # finally, place entries with index `i` into correct spot
+        j = l1
+        sorting_flags[j] = bad_flag
+        db_index[j] = di
+        X[:, j] .= xtmp
+        FX[:, j] .= fxtmp
+    end
+    return j
+end
+
+function put_new_evals_into_db!(rbf, x0, n_X, xZ)
+    @unpack buffers, database, params = rbf
+    @unpack db_index, FX = buffers
+    @unpack X = params
+    return put_new_evals_into_db!(database, X, FX, xZ, db_index, x0, 1, n_X)
+end
+@views function put_new_evals_into_db!(database, X, FX, xtmp, db_index, x0, istart, iend)
+    for i=istart:iend
+        db_index[i] > 0 && continue
+        xtmp .= X[:, i]
+        xtmp .+= x0
+        y = FX[:, i]
+        db_index[i] = add_to_database!(database, xtmp, y)
+    end
+    return nothing
 end

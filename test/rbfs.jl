@@ -278,7 +278,7 @@ end
     @assert all( ff[10:11] .== false )
 end
 #%%
-
+import Logging: Debug
 @testset "RBFModel" begin
     op = NonlinearFunction(;
         func = (y, x) -> begin
@@ -297,6 +297,7 @@ end
         for dim_x in (1, 2, 4, 10, 50)
         for dim_y in (1, 2, 4, 10)
         for max_points in (dim_x+1, 2*(dim_x + 1))
+            @show kernel, dim_x, dim_y, max_points
             C.@reset op.dim_in = dim_x
             C.@reset op.dim_out = dim_y
 
@@ -309,42 +310,49 @@ end
             func_vals!(fx0, op, x0)
 
             #update_rbf_model!(rbf, op, Δ, x0, fx0)
-            C.update!(rbf, op, Δ, x0, fx0, nothing, nothing,)
+            C.update!(rbf, op, Δ, x0, fx0, nothing, nothing; log_level=Debug)
             @test rbf.params.x0 == x0
             @test val(rbf.params.is_fully_linear_ref) == true
+            
             n_X = val(rbf.params.n_X_ref)
-            X = rbf.params.X[:, 1:n_X]
+            X = copy(rbf.params.X[:, 1:n_X])
+            fi = similar(fx0)
             yi = similar(fx0)
             @test all(X[:, 1] .≈ 0)
-            for i=1:n_X-1
-                ii = i+1
-                xi = X[:, ii]
+            for i=1:n_X
+                xi = X[:, i]
                 @test LA.norm(xi) <= max(cfg.sampling_factor, cfg.search_factor) * Δ
                 xi .+= x0
-                func_vals!(fx0, op, xi)
+                func_vals!(fi, op, xi)
                 func_vals!(yi, rbf, xi)
-                @test isapprox(fx0, yi; rtol=1e-6)
+                @test isapprox(fi, yi; rtol=1e-6, atol=1e-6)
             end 
             rbf0 = deepcopy(rbf)
-            #update_rbf_model!(rbf, op, Δ, x0, fx0)
-            C.update!(rbf, op, Δ, x0, fx0, nothing, nothing,)
+            
+            # this should not perform update (x0 same, radius same, database unchanged)
+            C.update!(rbf, op, Δ, x0, fx0, nothing, nothing; log_level=Debug)
             @test isequal(rbf.params, rbf0.params) # isequal(NaN, NaN) == true
             
-            #update_rbf_model!(rbf, op, Δ, x0, fx0; force_rebuild=true)
-            C.update!(rbf, op, Δ, x0, fx0, nothing, nothing; force_rebuild=true)
+            # we now force an update.  
+            C.update!(rbf, op, Δ, x0, fx0, nothing, nothing; force_rebuild=true, log_level=Debug)
+            # this should not lead to additional database entries, because the old entries
+            # suffice to make a good model:
             @test sum(rbf.database.flags_x) == sum(rbf0.database.flags_x)
             @test rbf.params.database_state_ref == rbf0.params.database_state_ref
             n_X = val(rbf.params.n_X_ref)
-            X = rbf.params.X[:, 1:n_X]
-            yi = similar(fx0)
-            for i=1:n_X-1
-                ii = i+1
-                xi = X[:, ii]
+            X = copy(rbf.params.X[:, 1:n_X])
+            for i=1:n_X
+                xi = X[:, i]
                 @test LA.norm(xi) <= max(cfg.sampling_factor, cfg.search_factor) * Δ
                 xi .+= x0
-                func_vals!(fx0, op, xi)
+                func_vals!(fi, op, xi)
                 func_vals!(yi, rbf, xi)
-                @test fx0 ≈ yi
+                @test fi ≈ yi
+
+                di = rbf.buffers.db_index[i]
+                @test di > 0
+                @test isapprox(xi, rbf.database.x[:, di]; atol=1e-6)
+                @test isapprox(yi, rbf.database.y[:, di]; atol=1e-4)
             end 
             for fn in (:n_X_ref, :has_z_new_ref, :is_fully_linear_ref, :z_new, :x0, :delta_ref, 
                 :shape_parameter_ref, )
@@ -362,7 +370,7 @@ end
             end
             
             #update_rbf_model!(rbf, op, Δ, x0, fx0)
-            C.update!(rbf, op, Δ, x0, fx0, nothing, nothing,)
+            C.update!(rbf, op, Δ, x0, fx0, nothing, nothing; log_level=Debug)
 
             n_X = val(rbf.params.n_X_ref)
             X = rbf.params.X[:, 1:n_X]
@@ -403,3 +411,5 @@ end
     end
 
 end
+#%%
+include("rbf2.jl")

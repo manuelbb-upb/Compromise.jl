@@ -21,12 +21,6 @@ function project_onto_Q_colspace!(x, qr, j1=1, j2=size(qr.Q, 2))
     return
 end
 
-copy_col!(mat_trgt, mat_src, j_trgt, j_src)=nothing
-function copy_col!(mat_trgt::AbstractMatrix, mat_src::AbstractMatrix, j_trgt, j_src)
-    mat_trgt[:, j_trgt] .= mat_src[:, j_src]
-    nothing
-end
-
 @views function find_poised_points!(
     X, Y, qr_ws, QRbuff, x0, Xs, Ys;
     xZ = zero(x0),
@@ -64,9 +58,7 @@ end
         if LA.norm(xZ, norm_p) >= th
             copy_col!(Y, Ys, j, l)
             n_X += 1
-            if !isnothing(chosen_index)
-                chosen_index[j] = l
-            end
+            _set_index!(chosen_index, j, l)
             if n_X == dim_x
                 break
             end
@@ -78,6 +70,15 @@ end
     end
     return n_X - _n_X, qr
 end
+
+copy_col!(mat_trgt, mat_src, j_trgt, j_src)=nothing
+function copy_col!(mat_trgt::AbstractMatrix, mat_src::AbstractMatrix, j_trgt, j_src)
+    mat_trgt[:, j_trgt] .= mat_src[:, j_src]
+    nothing
+end
+
+_set_index!(::Nothing, pos, val)=nothing
+_set_index!(arr, pos, val)=(arr[pos] = val)
 
 function sample_along_Z!(
     X,      # holds sufficiently independent columns between `ix1` and `ix2`

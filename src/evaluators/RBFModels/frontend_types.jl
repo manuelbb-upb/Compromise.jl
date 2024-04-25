@@ -168,7 +168,7 @@ Base.@kwdef struct RBFTrainingBuffers{T<:Real}
 
     "`dim_x + 1` vector to mark database points."
     db_index :: Vector{Int}
-    db_flags :: Vector{Bool}  # flag vector for batch evaluation
+    sorting_flags :: Vector{Bool}  # flag vector for batch evaluation
 
     filter_flags :: Vector{Bool}
 
@@ -206,7 +206,7 @@ end
 
 function Base.copyto!(dst::RBFTrainingBuffers, src::RBFTrainingBuffers)
   for fn in (
-    :lb, :ub, :FX, :xZ, :fxZ, :db_index, :db_flags, :Φ, :Q, :R, :Qj, :Rj, #src :Π
+    :lb, :ub, :FX, :xZ, :fxZ, :db_index, :sorting_flags, :Φ, :Q, :R, :Qj, :Rj, #src :Π,
     :NΦ, :NΦN, :L, :Linv, :v1, :v2
   )
     copyto!(getfield(dst, fn), getfield(src, fn))
@@ -355,7 +355,7 @@ function rbf_params_and_buffers(
   xZ = array(T, dim_x)
   fxZ = array(T, dim_y)
   db_index = fill(-1, min_points)
-  db_flags = ones(Bool, min_points) 
+  sorting_flags = ones(Bool, min_points) 
 
   Φ = array(T, max_points, max_points)
   #src Π = array(T, min_points, dim_π)
@@ -384,7 +384,7 @@ function rbf_params_and_buffers(
 
   buffers = RBFTrainingBuffers(;
     dim_x, dim_y, dim_π, max_points, min_points,
-    qr_ws_dim_x, lb, ub, FX, xZ, fxZ, db_index, db_flags, Φ, qr_ws_min_points,
+    qr_ws_dim_x, lb, ub, FX, xZ, fxZ, db_index, sorting_flags, Φ, qr_ws_min_points,
     Q, R, Qj, Rj, NΦ, NΦN, L, Linv, v1, v2, x0_db_index_ref, filter_flags
   )
 

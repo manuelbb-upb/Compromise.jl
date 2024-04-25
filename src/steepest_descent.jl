@@ -130,6 +130,11 @@ function compute_descent_step!(
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
     log_level
 )
+
+    return compute_steepest_descent_step!(step_cache, step_vals, mod, lin_cons, scaled_cons, vals, mod_vals)
+end
+
+function compute_steepest_descent_step!(step_cache, step_vals, mod, lin_cons, scaled_cons, vals, mod_vals)
     x = cached_x(vals)
     Dfx = cached_Dfx(mod_vals)
     @unpack n = step_vals

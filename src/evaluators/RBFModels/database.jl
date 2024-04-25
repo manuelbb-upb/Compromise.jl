@@ -48,10 +48,14 @@ function db_view_y(db::RBFDatabase{T}) where T
 end
 
 function filtered_view_x(db::RBFDatabase, flags)
-    return view(db_view_x(db), 1:db.dim_x, flags)
+    base_view = db_view_x(db)
+    n = size(base_view, 2)
+    return view(base_view, 1:db.dim_x, view(flags, 1:n))
 end
 function filtered_view_y(db::RBFDatabase, flags)
-    return view(db_view_y(db), 1:db.dim_y, flags)
+    base_view = db_view_y(db)
+    n = size(base_view, 2)
+    return view(base_view, 1:db.dim_y, view(flags, 1:n))
 end
 
 function init_rbf_database(
@@ -218,29 +222,35 @@ end
 function db_set_x!(
     rbf_database, x, x_index, flag=1
 )
-    @unpack flags_x, state, rwlock = rbf_database
+    @unpack flags_x, state = rbf_database
     X = rbf_database.x
-    if x_index != 0
+    return db_set_x!(X, flags_x, state, x, x_index, flag)
+end
+
+function db_set_x!(X, flags_x, state, x, x_index, flag)
+    if x_index > 0
         #lock(rwlock) do
-            X[:, x_index] .= x
-            flags_x[x_index] = flag
-            _state = val(state)
-            val!(state, hash(x, _state))
-        #end
+        X[:, x_index] .= x
+        flags_x[x_index] = flag
+        _state = val(state)
+        val!(state, hash(x, _state))
+    #end
     end
     return x_index
 end
 
 function db_set_y!(rbf_database, fx, x_index)
-    @unpack flags_y, flags_x, state, rwlock = rbf_database
-    Y = rbf_database.y
-    if x_index != 0
+    @unpack y, flags_y, flags_x, state = rbf_database
+    return db_set_y!(y, flags_y, flags_x, state, fx, x_index)
+end
+function db_set_y!(Y, flags_y, flags_x, state, fx, x_index)
+    if x_index > 0
         #lock(rwlock) do
-            Y[:, x_index] .= fx
-            flags_y[x_index] = flags_x[x_index]
-            _state = val(state)
-            val!(state, hash(fx, _state))
-        #end
+        Y[:, x_index] .= fx
+        flags_y[x_index] = flags_x[x_index]
+        _state = val(state)
+        val!(state, hash(fx, _state))
+    #end
     end
     return x_index
 end
