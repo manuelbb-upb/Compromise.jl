@@ -391,12 +391,7 @@ function backtrack!(
         xs .= xn .+ d
         @ignoraise objectives!(fxs, mod, xs)
     
-        fx_delta_min = mapreduce(eps, min, fxn)
-        fx_delta_too_small = if strict
-            fd -> all( _fd -> abs(_fd) <= fx_delta_min, fd )
-        else
-            fd -> abs(fd[1] <= fx_delta_min)
-        end
+        fx_delta_min = mapreduce(eps, min, fxn) 
 
         ## avoid re-computation of maximum for non-strict test:
         phi_xn = strict ? fxn : maximum(fxn)
@@ -409,7 +404,7 @@ function backtrack!(
             end
             if strict
                 @. fx_tmp = phi_xn - fxs
-                if fx_delta_too_small(fx_tmp)
+                if all( abs.(fx_tmp) .< fx_delta_min )
                     set_to_zero = true
                     break
                 end
@@ -417,13 +412,11 @@ function backtrack!(
                     break
                 end
             else
-                maximum!(fx_tmp, fxs)
-                fx_tmp[1] -= phi_xn
-                if fx_delta_too_small(fx_tmp)
+                fx_tmp[1] = phi_xn - maximum(fxs)
+                if abs(fx_tmp[1]) < fx_delta_min
                     set_to_zero = true
                     break
                 end
-                fx_tmp[1] *= -1
                 if fx_tmp[1] >= rhs
                     break
                 end
