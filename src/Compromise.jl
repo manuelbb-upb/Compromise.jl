@@ -208,21 +208,40 @@ function optimize_with_algo(
         optimizer_caches = initialize_structs(MOP, ξ0, algo_opts, user_callback)
         push!(all_optimizer_caches, optimizer_caches)
     end
-
+        
     @logmsg log_level "Starting sequential optimization of columns."
-    is_running = ones(Bool, num_sites)
+    flags_dominated = zeros(Bool, length(all_optimizer_caches))
+    if outer_opts.initial_nondominance_testing
+        @logmsg log_level "NONDOMINANCE TESTING"
+        flags_dominated = _flags_of_dominated_caches(flags_dominated, all_optimizer_caches)
+    end
+    is_running = .!(flags_dominated)
+
     all_return_objects = Vector{Any}(undef, num_sites)
 
     for (i, ocache) in enumerate(all_optimizer_caches)
+        flags_dominated[i] && continue
         if ocache isa AbstractStoppingCriterion
             is_running[i] = false
             ret = ReturnObject(copy(_ξ0[:, i]), nothing, ocache)
             all_return_objects[i] = ret
         end
     end
+
+    sort_by = opt_cache -> opt_cache.iteration_scalars.delta
+    I = collect(1:length(all_optimizer_caches))
     
+    outer_it_index = 0
+    nd_offset = outer_opts.nondominance_testing_offset
+    is_nd_tested = true
     while any(is_running)
+        outer_it_index += 1
+        is_nd_tested = false
+        sortperm!(I, all_optimizer_caches; by = sort_by, rev = true)
         for (i, ξ0_i) in enumerate(eachcol(_ξ0))
+            if flags_dominated[i]
+                is_running[i] = false
+            end
             !is_running[i] && continue
             @logmsg log_level """\n
             #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!
@@ -242,9 +261,64 @@ function optimize_with_algo(
                 all_return_objects[i] = ret
             end 
         end
+        if outer_it_index % nd_offset == 0
+            @logmsg log_level "NONDOMINANCE TESTING"
+            flags_dominated = _flags_of_dominated_caches(flags_dominated, all_optimizer_caches)
+            is_nd_tested = true
+        end
+    end
+    if outer_opts.final_nondominance_testing && !is_nd_tested
+        @logmsg log_level "NONDOMINANCE TESTING"
+        flags_dominated = _flags_of_dominated_caches(flags_dominated, all_optimizer_caches)
     end
 
+    deleteat!(all_return_objects, flags_dominated)
+
     return all_return_objects
+end
+
+function _flags_of_dominated_caches(caches)
+    flags_dominated = zeros(Bool, length(caches))
+    return _flags_of_dominated_caches(flags_dominated, caches)
+end
+
+function _flags_of_dominated_caches(flags_dominated, caches)
+    for (i, opt_cache_i) in enumerate(caches)
+        flags_dominated[i] && continue
+        # `opt_cache_i` is currently not flagged as dominated
+        vals_i = opt_cache_i.vals
+        fi = cached_fx(vals_i)
+        # check if it is dominated by any other cache
+        for (j, opt_cache_j) in enumerate(caches)
+            flags_dominated[i] && break
+            i == j && continue
+            flags_dominated[j] && continue  # if j is dominated by l, and i is dominated by j, then i is dominated by l as well
+                                            # l ≤ j & j ≤ i ⟹ l ≤ i
+            vals_j = opt_cache_j.vals
+            fj = cached_fx(vals_j)
+            
+            flags_dominated[i] = is_dominated_by(fi, fj)
+        end
+    end
+    return flags_dominated
+end
+
+"""
+   is_dominated_by(a, b)
+Return `true`, if `b .<= a` and `b[k] < a[k]` for some index `k`.
+"""
+function is_dominated_by(a, b)
+    is_dom = false 
+    for (ai, bi) in zip(a, b)
+        if bi > ai
+            is_dom = false
+            break
+        end
+        if bi < ai
+            is_dom = true
+        end
+    end
+    return is_dom
 end
 
 function do_inner_iteration!(optimizer_caches, algo_opts)
