@@ -90,9 +90,6 @@ Base.@kwdef struct AlgorithmOptions{T <: AbstractFloat, SC, SCALER_CFG_TYPE}
 	kappa_theta :: T = 1e-4 			# 1e-4 is suggested by Fletcher et. al. 
 	"Exponent (for constraint violation) in the model decrease condition."
 	psi_theta :: T = 2.0
-
-	"NLopt algorithm symbol for restoration phase."
-    nl_opt :: Symbol = :GN_DIRECT_L_RAND    
 end
 
 ## to be sure that equality is based on field values:
@@ -133,10 +130,8 @@ function AlgorithmOptions(
 	mu,
 	kappa_theta,
 	psi_theta,
-	nl_opt,
 ) where {float_type<:AbstractFloat, SC, SCALER_CFG_TYPE}
 	@assert scaler_cfg isa AbstractAffineScaler || scaler_cfg isa Val || scaler_cfg == :box || scaler_cfg == :none
-	@assert string(nl_opt)[2] == 'N' "Restoration algorithm must be derivative free."
 	return AlgorithmOptions{float_type, SC, SCALER_CFG_TYPE}(
 		float_type,
 		step_config,
@@ -172,7 +167,6 @@ function AlgorithmOptions(
 		mu,
 		kappa_theta,
 		psi_theta, 
-		nl_opt,
 	)
 end
 float_type(::AlgorithmOptions{F}) where F = F

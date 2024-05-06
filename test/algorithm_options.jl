@@ -100,7 +100,7 @@ end
         @test opts.mu ≈ .01 rtol=eps(Float16)
         @test opts.kappa_theta ≈ 1e-4 rtol=eps(Float16)
         @test opts.psi_theta ≈ 2 rtol=eps(Float16)
-        @test opts.nl_opt == :GN_DIRECT_L_RAND
+#        @test opts.nl_opt == :GN_DIRECT_L_RAND
     end
 
     opts16 = AlgorithmOptions(; float_type=Float16)

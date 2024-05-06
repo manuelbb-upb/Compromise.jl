@@ -14,11 +14,13 @@ function do_restoration(
     iteration_status.iteration_type = RESTORATION
 
     ret = :TODO
+    theta = cached_theta(vals)
     if !any(isnan.(step_vals.n))
         ret = :NOTNAN
         copyto!(cached_x(vals_tmp), step_vals.xn)
         @ignoraise eval_mop!(vals_tmp, mop, scaler)
-        if iszero(cached_theta(vals_tmp))
+        theta = cached_theta(vals_tmp)
+        if iszero(theta)
             @logmsg algo_opts.log_level "$(pad_str) Using `xn` as next iterate."
             xr_opt = copy(step_vals.xn)
             ret = :SUCCESS
@@ -33,7 +35,7 @@ function do_restoration(
             @logmsg algo_opts.log_level "$(pad_str) Trying to solve nonlinear subproblem"
             x0 = ret == :NONAN ? step_vals.xn : cached_x(vals)
 	        (θ_opt, xr_opt, ret) = solve_restoration_problem(
-                mop, vals_tmp, scaler, scaled_cons, x0, algo_opts.nl_opt
+                mop, vals_tmp, scaler, scaled_cons, x0, theta
             )
         else
             xr_opt = copy(step_vals.xn)
@@ -71,6 +73,102 @@ function do_restoration(
     return nothing
 end
 
+function restoration_objective()
+    return function(tx, grads)
+        return first(tx)
+    end
+end
+
+function restoration_constraints(mop, vals_tmp, scaler, scaled_cons)
+    @unpack A, b, E, c = scaled_cons
+    
+    function (constr_vec, txr::Vector, grads)
+        if !isempty(grads)
+            error("Restoration only supports derivative-free NLopt algorithms.")
+        end
+        t = first(txr)
+        xr = @view(txr[2:end])
+
+        ξ = cached_ξ(vals_tmp)
+        unscale!(ξ, scaler, xr)
+        @ignoraise nl_eq_constraints!(cached_hx(vals_tmp), mop, ξ)
+        @ignoraise nl_ineq_constraints!(cached_gx(vals_tmp), mop, ξ)
+        lin_cons!(cached_Ex_min_c(vals_tmp), cached_Ex(vals_tmp), E, c, xr)
+        lin_cons!(cached_Ax_min_b(vals_tmp), cached_Ax(vals_tmp), A, b, xr)
+        
+        gx = cached_gx(vals_tmp)
+        i = 1
+        j = length(gx)
+        constr_vec[i:j] .= gx .- t
+        
+        i = j + 1
+        hx = cached_hx(vals_tmp)
+        j += length(hx)
+        constr_vec[i:j] .= hx .- t
+        i = j + 1
+        j += length(hx)
+        constr_vec[i:j] .= -hx .- t
+
+        rineq = cached_Ax_min_b(vals_tmp)
+        i = j + 1
+        j += length(rineq)
+        constr_vec[i:j] .= rineq .- t
+
+        req = cached_Ex_min_c(vals_tmp)
+        i = j + 1
+        j += length(req)
+        constr_vec[i:j] .= req .- t
+        i = j + 1
+        j += length(req)
+        constr_vec[i:j] .= -req .- t
+
+       return constr_vec
+    end
+end
+
+
+function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, theta)
+    n_vars = length(x)
+
+	opt = NLopt.Opt(:LN_COBYLA, n_vars + 1)
+
+	opt.min_objective = restoration_objective()
+
+    l = min(-1, -2*abs(theta))
+    u = max(1, 2*abs(theta))
+    F = float_type(mop)
+    lb = array(F, n_vars + 1)
+    ub = array(F, n_vars + 1)
+    lb .= -Inf
+    ub .= Inf
+    lb[1] = l
+    ub[1] = u
+	if !isnothing(scaled_cons.lb)
+        lb[2:end] .= scaled_cons.lb
+    end
+    if !isnothing(scaled_cons.ub)
+        ub[2:end] .= scaled_cons.ub
+    end
+    opt.lower_bounds = lb
+    opt.upper_bounds = ub
+	
+    #src # TODO make some of these settings configurable ?
+    tol = sqrt(eps(F))
+    opt.xtol_rel = tol
+    opt.xtol_abs = eps(F)
+	opt.maxeval = 50 * n_vars^2
+	opt.stopval = 0
+
+    constr! = restoration_constraints(mop, vals_tmp, scaler, scaled_cons)
+    n_constr = dim_nl_ineq_constraints(mop) + 2 * dim_nl_eq_constraints(mop) + dim_lin_ineq_constraints(mop) + 2 * dim_lin_eq_constraints(mop)
+    NLopt.inequality_constraint!(opt, constr!, fill(tol, n_constr))
+
+    txr0 = [theta; x]
+	optf, opt_tx, ret = NLopt.optimize(opt, txr0)
+    return (optf, opt_tx[2:end], ret)
+end
+
+#=
 function restoration_objective(mop, vals_tmp, scaler, scaled_cons)
     @unpack A, b, E, c = scaled_cons
     function objf(xr::Vector, grad::Vector)
@@ -99,7 +197,7 @@ end
 function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, nl_opt)
     n_vars = length(x)
 
-	opt = NLopt.Opt(nl_opt, n_vars)
+	opt = NLopt.Opt(:LN_COBYLA, n_vars)
 
 	opt.min_objective = restoration_objective(mop, vals_tmp, scaler, scaled_cons)
 
@@ -119,7 +217,7 @@ function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, nl_opt
     xr0 = deepcopy(x)   # this allocation should not matter too much
 	return NLopt.optimize(opt, xr0)
 end
-
+=#
 function postproccess_restoration(
     xr_opt, Δ, trial_caches, mop, mod, scaler, lin_cons, scaled_cons,
     vals, vals_tmp, step_vals, mod_vals, filter, step_cache, algo_opts;
