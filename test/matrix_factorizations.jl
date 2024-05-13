@@ -121,7 +121,7 @@ end
         X, Y, qr_ws, QRbuff, x0, @view(Xs[:, 1:N]), Ys;
         ix1=2, ix2=1
     )
-    @test n_new == N
+    @test N == n_new
     @test X[:, 2:N+1] ≈ Xs[:, N:-1:1]
     _X = prod(qr)
     @test size(_X) == (dim_x, N)
