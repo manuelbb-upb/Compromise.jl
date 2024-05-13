@@ -129,8 +129,9 @@ end
 
     lb = fill(-1.0, dim_x)
     ub = fill(+1.0, dim_x)
-    n_new, qr = sample_along_Z!(
+    _N, qr = sample_along_Z!(
         X, qr_ws, QRbuff, x0, lb, ub, th; qr, ix1=2, ix2=N+1)
+    n_new = _N - N
     @test n_new == N
     for j in 2:dim_x+1
         @test mapreduce( xi -> (abs(xi) > 1e-6), +, X[:, j] ) == 1
