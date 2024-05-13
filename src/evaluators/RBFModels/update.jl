@@ -173,9 +173,10 @@ end
         has_z_new = val(has_z_new_ref)
         if has_z_new           
             X[:, 2] .= z_new
-            fit_z_into_box!(X[:, 2], x0, lb, ub; norm_p, th_qr)
-            db_index[2] = -1
-            n_X += 1
+            if !isnothing(fit_z_into_box!(X[:, 2], x0, lb, ub; norm_p, th_qr))
+                db_index[2] = -1
+                n_X += 1
+            end
         end
     end
     
@@ -210,13 +211,14 @@ end
     if n_X < min_points && enforce_fully_linear
         ΔZ1 = sampling_factor .* Δ
         trust_region_bounds!(lb, ub, x0, ΔZ1, global_lb, global_ub)
-
-        @ignoraise n_new, qr = sample_along_Z!(
+        @ignoraise _n_X, qr = sample_along_Z!(
             X, qr_ws_dim_x, QRbuff, x0, lb, ub, th_qr;
             ix1=2, ix2=n_X, norm_p, qr, n_new = min_points - n_X
         )
-        n_X += n_new
-        @logmsg log_level "$(pad_str)RBFModel: Sampled $(n_new) points in radius $(ΔZ1)."
+        _n_X += 1           # account for trust region center
+        n_new = _n_X - n_X  # get a number for logging
+        n_X = _n_X
+        @logmsg log_level "$(pad_str)RBFModel: Sampled $(n_new) points (now $n_X) in radius $(ΔZ1)."
     end
     
     if n_X < min_points || min_points < max_points

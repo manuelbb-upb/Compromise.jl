@@ -1,0 +1,28 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: CoMPrOMISE
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Manuel Bastian
+    family-names: Berkemeier
+    email: manuelbb@mail.uni-paderborn.de
+    affiliation: Paderborn University
+    orcid: 'https://orcid.org/0000-0002-3958-2277'
+repository-code: 'https://github.com/manuelbb-upb/Compromise.jl'
+abstract: >-
+  Research repository for a trust-region optimizer and
+  framework for surrogate-assisted multi-objective
+  optimization.
+keywords:
+  - multi-objective optimization
+  - nonlinear optimization
+  - radial basis functions
+  - surrogate models
+  - derivative-free optimization
+  - constrained optimization
+license: MIT

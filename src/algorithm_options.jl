@@ -202,10 +202,11 @@ Base.@kwdef struct ThreadedOuterAlgorithmOptions{A}
 end
 
 Base.@kwdef struct SequentialOuterAlgorithmOptions{A}
-	inner_opts :: A = AlgorithmOptions()
 	sort_by_delta :: Bool = true
 	initial_nondominance_testing :: Bool = false
 	nondominance_testing_offset :: Int = typemax(Int)
-	final_nondominance_testing :: Bool = false
+	log_level :: LogLevel = Info
+	final_nondominance_testing :: Bool = true
+	inner_opts :: A = AlgorithmOptions(; log_level)
 end
 @batteries SequentialOuterAlgorithmOptions selfconstructor=false

@@ -197,7 +197,7 @@ function optimize_with_algo(
     _ξ0 = ξ0 isa RVec ? reshape(ξ0, :, 1) : ξ0
 
     algo_opts = outer_opts.inner_opts
-    log_level = algo_opts.log_level
+    log_level = outer_opts.log_level
 
     num_sites = size(_ξ0, 2)
     all_optimizer_caches = Any[]

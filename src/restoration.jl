@@ -126,7 +126,6 @@ function restoration_constraints(mop, vals_tmp, scaler, scaled_cons)
     end
 end
 
-
 function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, theta)
     n_vars = length(x)
 
