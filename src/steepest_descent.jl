@@ -298,17 +298,25 @@ function solve_steepest_descent_problem(
     ball_norm::Real,
     normalize_gradients::Bool
 )
+    χ = 0
+    dir = zero(xn)
+    try
+        opt = JuMP.Model(qp_opt)
+        β, d = setup_steepest_descent_problem!(
+            opt, xn, Dfx, lb, ub, _E, Axn, _A, b, Dhx, Dgx_n, Dgx; 
+            ball_norm, normalize_gradients
+        )
+        JuMP.optimize!(opt)
 
-    opt = JuMP.Model(qp_opt)
-    β, d = setup_steepest_descent_problem!(
-        opt, xn, Dfx, lb, ub, _E, Axn, _A, b, Dhx, Dgx_n, Dgx; ball_norm, normalize_gradients)
-    JuMP.optimize!(opt)
-
-    if MOI.get(opt, MOI.TerminationStatus()) == MOI.INFEASIBLE
-        return 0, zero(xn)
+        if MOI.get(opt, MOI.TerminationStatus()) == MOI.INFEASIBLE
+            return 0, zero(xn)
+        end
+        χ = abs(JuMP.value(β))
+        dir .= JuMP.value.(d)
+    catch err
+        @error "Exception in Descent Step Computation." exception=(err, catch_backtrace())
     end
-    χ = abs(JuMP.value(β))
-    return χ, JuMP.value.(d)
+    return χ, dir
 end
 
 function setup_steepest_descent_problem!(

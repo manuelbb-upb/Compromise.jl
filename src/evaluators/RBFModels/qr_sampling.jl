@@ -93,36 +93,60 @@ function sample_along_Z!(
                 # QR decomposition of `X[:, ix1:ix2]`
     ix1=2, 
     ix2=ix1-1, 
-    norm_p=Inf
+    norm_p=Inf,
+    is_emergency=false
 )
-
-    ix2 = max(0, ix2)
-    _n_X = n_X = ix2 - ix1 + 1
-    dim_x = size(X,1)
+    ## clean up column indices for `X`
+    ix2 = max(ix2, ix1-1)
+    n_X = ix2 - ix1 + 1     # number of columns of `X[:, ix1:ix2]`
+    dim_x, s_X = size(X)
 
     if n_X >= dim_x
+        ## there can at most be `dim_x` linearly independent columns
         return 0, qr
     end
 
+    ## determine maximum number of new sites:
     dim_Z = dim_x - n_X
-    n_its = isnothing(n_new) ? dim_Z : min(n_new, dim_Z)
-    n_its = min(size(X,2) - ix2, n_its)
+    if isnothing(n_new)
+        n_new = dim_Z
+    end
+    n_new = min(n_new, dim_Z)
+    
     if isnothing(qr)
         qr = do_qr!(qr_ws, @view(X[:, ix1:ix2]), QRbuff)
     end
 
-    for i=1:n_its
-        z = @view(X[:, ix2+i])
-        ## project onto orthogonal complement of `X[:, ix1:ix2+i]`:
-        j_col_Z = _n_X + i
+    for _=1:n_new
+        ## at the moment, there are `n_X` independent columns in `X[:, ix1:ix2]`
+        ## we want to take column `n_X + 1` of Q factor and store it at position `ix2 + 1`.
+        ix2 += 1
+        ix2 > s_X && break
+        
+        ## get a view for storage
+        z = @view(X[:, ix2])
+        ## extract column `n_X + 1` of Q factor by multiplying it with standard basis
+        ## vector [0, …, 0, 1, 0, …, 0], where 1 is in position `n_X + 1`:
+        _n_X = n_X + 1
         z .= 0
-        z[j_col_Z] = 1
+        z[_n_X] = 1
         LA.lmul!(qr.Q, z)
-        ## scale into box:
-        @ignoraise fit_z_into_box!(z, x0, lb, ub; norm_p, th_qr)
+        ## scale resulting direction into box:
+        @ignoraise success = fit_z_into_box!(z, x0, lb, ub; norm_p, th_qr)
+        if isnothing(success) && !is_emergency
+            return sample_along_Z!(
+                X, qr_ws, QRbuff, x0, lb, ub, th_qr;
+                n_new = nothing,
+                qr = nothing,
+                ix1=2,
+                ix2=ix1-1,
+                norm_p,
+                is_emergency=true
+            )
+        end
         n_X += 1
     end
-    return n_X - _n_X, qr 
+    return n_X, qr 
 end
 
 function fit_z_into_box!(
@@ -137,9 +161,10 @@ function fit_z_into_box!(
         return RBFConstructionImpossible()
     elseif norm_z < th_qr
         ## c * norm_z = th_qr ⇔ c = th_qr / norm_z
-        c = th_qr / norm_z
-        @warn "Incompatible box constraints, changing σ from $σ to $(c*σ)."
-        z .*= c
+        #c = th_qr / norm_z
+        #@warn "Incompatible box constraints, changing σ from $σ to $(c*σ)."
+        #z .*= c
+        return nothing
     end
     return z
 end

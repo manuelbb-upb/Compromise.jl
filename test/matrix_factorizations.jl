@@ -121,7 +121,7 @@ end
         X, Y, qr_ws, QRbuff, x0, @view(Xs[:, 1:N]), Ys;
         ix1=2, ix2=1
     )
-    @test n_new == N
+    @test N == n_new
     @test X[:, 2:N+1] ≈ Xs[:, N:-1:1]
     _X = prod(qr)
     @test size(_X) == (dim_x, N)
@@ -129,8 +129,9 @@ end
 
     lb = fill(-1.0, dim_x)
     ub = fill(+1.0, dim_x)
-    n_new, qr = sample_along_Z!(
+    _N, qr = sample_along_Z!(
         X, qr_ws, QRbuff, x0, lb, ub, th; qr, ix1=2, ix2=N+1)
+    n_new = _N - N
     @test n_new == N
     for j in 2:dim_x+1
         @test mapreduce( xi -> (abs(xi) > 1e-6), +, X[:, j] ) == 1
