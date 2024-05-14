@@ -69,7 +69,7 @@ function do_restoration(
         iteration_status, iteration_scalars, stop_crits,
         algo_opts
     ) indent
-    accept_trial_point!(vals, vals_tmp)
+    universal_copy!(vals, vals_tmp)
     return nothing
 end
 
