@@ -614,7 +614,7 @@ function do_iteration!(
 
     ## update filter
     if iteration_status.iteration_type == THETA_STEP
-        add_to_filter!(filter, cached_theta(vals_tmp), cached_Phi(vals_tmp))
+        add_to_filter!(filter, cached_theta(vals), cached_Phi(vals))
     end
    
     if _trial_point_accepted(iteration_status)
