@@ -162,7 +162,7 @@ function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, theta)
     n_constr = dim_nl_ineq_constraints(mop) + 2 * dim_nl_eq_constraints(mop) + dim_lin_ineq_constraints(mop) + 2 * dim_lin_eq_constraints(mop)
     NLopt.inequality_constraint!(opt, constr!, fill(tol, n_constr))
 
-    txr0 = [theta; x]
+    txr0 = min.(ub, max.(lb, [theta; x]))
 	optf, opt_tx, ret = NLopt.optimize(opt, txr0)
     return (optf, opt_tx[2:end], ret)
 end
