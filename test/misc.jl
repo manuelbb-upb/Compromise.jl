@@ -1,5 +1,6 @@
 using Compromise
-
+import Random
+Random.seed!(9876543210)
 @testset "Taylor Polynomials deg 2" begin
     tcfg = TaylorPolynomialConfig(;degree=2)
     function func(x)
@@ -284,7 +285,7 @@ end
     mop = MutableMOP(;num_vars=2)
     add_objectives!(
         mop, objective_function, grads_objectives_function, :exact; 
-        dim_out=2, max_func_calls=10, 
+        func_iip = false, grads_iip = false, dim_out=2, max_func_calls=10, 
     )
     ret = optimize(mop, [π, -ℯ]; algo_opts)
 
@@ -400,7 +401,7 @@ end
 
 @testset "Variable Bounds" begin
     algo_opts = AlgorithmOptions(; stop_delta_min=1e-11)
-
+    randx(n=2) = lb .+ (ub .- lb) .* rand(n)
     function objective_function(x)
         return [
             sum( (x .- 1).^2 ),
@@ -415,10 +416,10 @@ end
     @test mop.lb == lb
     @test mop.ub == ub
 
-    randx(n=2) = lb .+ (ub .- lb) .* rand(n)
+    x0 = randx()
     add_objectives!(mop, objective_function, :rbf; dim_out=2, func_iip=false)
-    ret = optimize(mop, randx(); algo_opts)
+    ret = optimize(mop, x0; algo_opts)
     ξ = opt_vars(ret)
     @test all(lb .- 1e-5 .<= ξ)
-    @test all(ξ .<= ub .- 1e-5)
+    @test all(ξ .<= ub .+ 1e-5)
 end

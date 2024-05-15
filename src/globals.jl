@@ -163,6 +163,7 @@ function init_lin_cons(::Type{F}, lb, ub, A, b, E, c) where F
 end
 
 @enum RADIUS_UPDATE :: Int8 begin
+	NO_CHANGE = -3
 	SHRINK_FAIL = -2
 	GROW_FAIL = -1
 	INITIAL_RADIUS = 0
@@ -171,24 +172,23 @@ end
 end
 
 @enum ITERATION_TYPE :: UInt8 begin
-	INITIALIZATION
-	RESTORATION
-	FILTER_FAIL
-	F_STEP
-	THETA_STEP
-end
-
-@enum STEP_CLASS :: Int8 begin
-	INACCEPTABLE = 0
-	ACCEPTABLE = 1 
-	SUCCESSFUL = 2
-	INITIAL_STEP = 3
+	INITIALIZATION = 0
+	RESTORATION = 1
+	FILTER_FAIL = 2
+	INACCEPTABLE = 3
+	F_STEP_ACCEPTABLE = 4
+	F_STEP_SUCCESSFUL = 5
+	THETA_STEP = 6
 end
 
 Base.@kwdef mutable struct IterationStatus
 	iteration_type :: ITERATION_TYPE
-	radius_change :: RADIUS_UPDATE
-	step_class :: STEP_CLASS
+	radius_update_result :: RADIUS_UPDATE
+end
+
+_trial_point_accepted(it_type::ITERATION_TYPE)=(UInt8(it_type) >= 4)
+function _trial_point_accepted(it_status::IterationStatus)
+	return _trial_point_accepted(it_status.iteration_type)
 end
 
 Base.@kwdef mutable struct IterationScalars{F}

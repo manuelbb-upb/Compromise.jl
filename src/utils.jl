@@ -73,13 +73,6 @@ function array(T, size...)
 	return array(T, size)
 end
 
-function _trial_point_accepted(iteration_status)
-    return _trial_point_accepted(iteration_status.step_class)
-end
-function _trial_point_accepted(step_class::STEP_CLASS)
-	return Int8(step_class) > 0
-end
-
 """
 	`var_bounds_valid(lb, ub)`
 Return `true` if lower bounds `lb` and upper bounds `ub` are consistent.
@@ -110,6 +103,24 @@ function project_into_box!(x, lin_cons::LinearConstraints)
 	project_into_upper_bounds!(x, lin_cons.ub)
 end
 
+function log_stop_code(crit, log_level)
+    @logmsg log_level stop_message(crit)
+end
+
+
+function compatibility_test_rhs(c_delta, c_mu, mu, Δ)
+    return c_delta * min(Δ, c_mu + Δ^(1+mu))
+end
+
+function compatibility_test(n, c_delta, c_mu, mu, Δ)
+    return LA.norm(n, Inf) <= compatibility_test_rhs(c_delta, c_mu, mu, Δ)
+end
+
+function compatibility_test(n, algo_opts, Δ)
+    any(isnan.(n)) && return false
+    @unpack c_delta, c_mu, mu = algo_opts
+    return compatibility_test(n, c_delta, c_mu, mu, Δ)
+end
 const SUPERSCRIPT_DICT = Base.ImmutableDict(
 	0 => "⁰",
 	1 => "¹",
