@@ -108,11 +108,21 @@ function do_iteration!(
     ## - the last iteration was a successfull restoration iteration.
     ## - if the point has not changed and the models do not depend on the radius or  
     ##   radius has not changed neither.
-    radius_has_changed = Int8(iteration_status.radius_change) >= 0
-    models_valid = (
-        iteration_status.iteration_type == RESTORATION ||
-        !_trial_point_accepted(iteration_status) && !(depends_on_radius(mod) && radius_has_changed)
-    )
+    radius_has_changed = Int8(iteration_status.radius_update_result) >= 0
+    models_valid = if iteration_status.iteration_type == INITIALIZATION
+        false
+    else
+        if iteration_status.iteration_type == RESTORATION
+            true
+        elseif (
+            !_trial_point_accepted(iteration_status) && 
+            !( depends_on_radius(mod) && radius_has_changed )
+        )
+            true
+        else
+            false
+        end
+    end
 
     if !models_valid
         @logmsg log_level "* Updating Surrogates."

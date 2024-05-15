@@ -73,13 +73,6 @@ function array(T, size...)
 	return array(T, size)
 end
 
-function _trial_point_accepted(iteration_status)
-    return _trial_point_accepted(iteration_status.step_class)
-end
-function _trial_point_accepted(step_class::STEP_CLASS)
-	return Int8(step_class) > 0
-end
-
 """
 	`var_bounds_valid(lb, ub)`
 Return `true` if lower bounds `lb` and upper bounds `ub` are consistent.

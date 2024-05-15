@@ -87,8 +87,7 @@ function initialize_structs_from_mop(
     ## finally, compose information about the 0-th iteration for next_iterations:
     iteration_status = IterationStatus(;
         iteration_type = INITIALIZATION,
-        radius_change = INITIAL_RADIUS,
-        step_class = INITIAL_STEP,
+        radius_update_result = INITIAL_RADIUS,
     )
     @unpack delta_init = algo_opts
     iteration_scalars = IterationScalars{T}(;
