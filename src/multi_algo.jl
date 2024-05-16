@@ -56,6 +56,8 @@ push_extra!(ndset::NondominatedSet, ex)=push_extra!(ndset.extra, ex)
 push_extra!(::Nothing, ex)=nothing
 push_extra!(extra, ex)=push!(extra, ex)
 
+filter_min_theta(ndset::NondominatedSet) = max(0, minimum(ndset.theta_vals; init=0))
+
 function NondominatedSet(::Type{F}, extra = nothing; gamma=0.005) where F<:AbstractFloat
     return NondominatedSet(Vector{F}[], F[], F(gamma), extra, Ref(0))
 end

@@ -14,6 +14,8 @@ function do_restoration(
     
     iteration_status.iteration_type = RESTORATION
 
+    stopval = filter_min_theta(filter)
+
     ret = :TODO
     theta = cached_theta(vals)
     if !any(isnan.(step_vals.n))
@@ -37,7 +39,8 @@ function do_restoration(
                 @logmsg algo_opts.log_level "$(pad_str) Trying to solve nonlinear subproblem"
                 x0 = ret == :NONAN ? step_vals.xn : cached_x(vals)
 	            (θ_opt, xr_opt, ret) = solve_restoration_problem(
-                   mop, vals_tmp, scaler, scaled_cons, x0, theta
+                   mop, vals_tmp, scaler, scaled_cons, x0, theta;
+                   stopval
                 )
             end
         else
@@ -129,7 +132,7 @@ function restoration_constraints(mop, vals_tmp, scaler, scaled_cons)
     end
 end
 
-function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, theta)
+function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, theta; stopval)
     n_vars = length(x)
 
 	opt = NLopt.Opt(:LN_COBYLA, n_vars + 1)
@@ -159,7 +162,7 @@ function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, theta)
     opt.xtol_rel = tol
     opt.xtol_abs = eps(F)
 	opt.maxeval = 50 * n_vars^2
-	opt.stopval = 0
+	opt.stopval = max(stopval - tol, 0)
 
     constr! = restoration_constraints(mop, vals_tmp, scaler, scaled_cons)
     n_constr = dim_nl_ineq_constraints(mop) + 2 * dim_nl_eq_constraints(mop) + dim_lin_ineq_constraints(mop) + 2 * dim_lin_eq_constraints(mop)
