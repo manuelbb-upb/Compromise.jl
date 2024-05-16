@@ -35,7 +35,7 @@ ConcurrentRWLockExt = "ConcurrentUtils"
 ForwardDiffBackendExt = "ForwardDiff"
 
 [compat]
-julia = "1"
+julia = "1.6"
 
 [extras]
 ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477"
