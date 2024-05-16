@@ -233,7 +233,7 @@ function postproccess_restoration(
     trial_caches.diff_fx_mod .= cached_fx(mod_vals)
 
     ## the next point should be acceptable for the filter:
-    if is_acceptable(filter, cached_theta(vals_tmp), cached_Phi(vals_tmp))
+    if is_filter_acceptable(filter, vals_tmp)
         ## make models valid at `x + r` and set model values
         ## also compute normal step based on models
         @ignoraise update_models!(mod, Δ, scaler, vals_tmp, scaled_cons; log_level, indent)

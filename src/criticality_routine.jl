@@ -32,7 +32,6 @@ function criticality_routine!(
             # at this point, `step_vals` have a compatible normal step and descent step
             # we sync this in case we cannot find a normal step for smaller radius `Δj`
             universal_copy!(crit_cache.step_vals, step_vals)
-
             @ignorebreak stop_code =  check_stopping_criterion(
                 stop_crits, CheckPreCritLoop(), 
                 mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,

@@ -13,6 +13,7 @@ function test_trial_point!(
     copyto!(cached_x(vals_tmp), step_vals.xs)
     @ignoraise eval_mop!(vals_tmp, mop, scaler) indent
     
+    fits_filter = is_filter_acceptable(filter, vals, vals_tmp)
     (x, fx, θx, Φx, fx_mod, xs, fxs, θxs, Φxs, fxs_mod) = _trial_point_arrays(
         vals, vals_tmp, mod_vals, step_vals)
 
@@ -20,7 +21,7 @@ function test_trial_point!(
     @unpack diff_x, diff_fx, diff_fx_mod = trial_caches
     iteration_type = _test_trial_point!(
         diff_x, diff_fx, diff_fx_mod,
-        filter, x, xs, fx, fxs, fx_mod, fxs_mod, θx, θxs, Φx, Φxs,
+        x, xs, fx, fxs, fx_mod, fxs_mod, θx, fits_filter, 
         strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success;
     )
     _log_trial_results(θxs, Φxs, iteration_type; indent, log_level)
@@ -58,11 +59,9 @@ end
 
 function _test_trial_point!(
     diff_x, diff_fx, diff_fx_mod,
-    filter, x, xs, fx, fxs, fx_mod, fxs_mod, θx, θxs, Φx, Φxs,
+    x, xs, fx, fxs, fx_mod, fxs_mod, θx, fits_filter,
     strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success
 )
-    
-    fits_filter = is_acceptable(filter, θxs, Φxs, θx, Φx)
     
     @. diff_x = x - xs
     @. diff_fx = fx - fxs
