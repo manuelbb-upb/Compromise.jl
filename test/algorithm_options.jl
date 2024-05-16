@@ -81,7 +81,7 @@ end
         @test opts.stop_theta_tol_abs.val ≈ eps(float_type)
         @test opts.stop_theta_tol_abs.is_default
         @test opts.stop_max_crit_loops == 10
-        @test opts.eps_crit ≈ .1 rtol=eps(Float16)
+        @test opts.eps_crit ≈ .01 rtol=eps(Float16)
         @test opts.eps_theta ≈ .05 rtol=eps(Float16)
         @test opts.crit_B ≈ 100 rtol=eps(Float16)
         @test opts.crit_M ≈ 3*opts.crit_B rtol=eps(Float16)

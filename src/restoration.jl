@@ -2,7 +2,8 @@ function do_restoration(
     mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
     mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
     iteration_status, iteration_scalars, stop_crits,
-    algo_opts
+    algo_opts;
+    solve_nl_subproblem=true
 )
     indent = 1
     Δ = iteration_scalars.delta
@@ -20,7 +21,7 @@ function do_restoration(
         copyto!(cached_x(vals_tmp), step_vals.xn)
         @ignoraise eval_mop!(vals_tmp, mop, scaler)
         theta = cached_theta(vals_tmp)
-        if iszero(theta)
+        if is_filter_acceptable(filter, vals_tmp)
             @logmsg algo_opts.log_level "$(pad_str) Using `xn` as next iterate."
             xr_opt = copy(step_vals.xn)
             ret = :SUCCESS
@@ -32,11 +33,13 @@ function do_restoration(
             (dim_nl_eq_constraints(mop) > 0 || dim_nl_ineq_constraints(mop) > 0) ||
             ret == :TODO
         )
-            @logmsg algo_opts.log_level "$(pad_str) Trying to solve nonlinear subproblem"
-            x0 = ret == :NONAN ? step_vals.xn : cached_x(vals)
-	        (θ_opt, xr_opt, ret) = solve_restoration_problem(
-                mop, vals_tmp, scaler, scaled_cons, x0, theta
-            )
+            if solve_nl_subproblem
+                @logmsg algo_opts.log_level "$(pad_str) Trying to solve nonlinear subproblem"
+                x0 = ret == :NONAN ? step_vals.xn : cached_x(vals)
+	            (θ_opt, xr_opt, ret) = solve_restoration_problem(
+                   mop, vals_tmp, scaler, scaled_cons, x0, theta
+                )
+            end
         else
             xr_opt = copy(step_vals.xn)
             ret = :SUCCESS
@@ -57,7 +60,7 @@ function do_restoration(
             indent
         ) indent
     else
-        return InfeasibleStopping(indent)
+        return InfeasibleStopping()
     end
     
     # If we are here, then restoration was successfull and `trial_caches` are set

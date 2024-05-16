@@ -23,6 +23,7 @@ Requires = "ae029012-a4dd-5104-9daa-d747884805df"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StridedViews = "4db3bf67-4bd7-4b4e-b153-31dc3fb37143"
 StructHelpers = "4093c41a-2008-41fd-82b8-e3f9d02b504f"
+UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 
 [weakdeps]

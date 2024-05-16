@@ -3,7 +3,9 @@ function test_trial_point!(
     mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
     iteration_status, iteration_scalars, stop_crits,
     algo_opts;
-    indent::Int=0
+    indent::Int=0,
+    do_log_trial::Bool=true,
+    do_log_radius::Bool=true
 )
    
     @unpack log_level = algo_opts
@@ -24,13 +26,18 @@ function test_trial_point!(
         x, xs, fx, fxs, fx_mod, fxs_mod, θx, fits_filter, 
         strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success;
     )
-    _log_trial_results(θxs, Φxs, iteration_type; indent, log_level)
+    if do_log_trial
+        _log_trial_results(θxs, Φxs, iteration_type; indent, log_level)
+    end
 
     delta = iteration_scalars.delta
     @unpack gamma_grow, gamma_shrink, gamma_shrink_much, delta_max = algo_opts
     delta_new, radius_update = _update_radius(
         delta, iteration_type, gamma_grow, gamma_shrink, gamma_shrink_much, delta_max)
-    _log_radius_update(delta, delta_new, radius_update; indent, log_level)
+    
+    if do_log_radius
+        _log_radius_update(delta, delta_new, radius_update; indent, log_level)
+    end
 
     iteration_status.iteration_type = iteration_type
     iteration_status.radius_update_result = radius_update

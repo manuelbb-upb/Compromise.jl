@@ -142,6 +142,7 @@ include("SimpleMOP/simple_mop.jl")
 include("algo_init.jl")
 include("main_algo.jl")
 include("outer_algos.jl")
+include("multi_algo.jl")
 
 export optimize, optimize_with_algo, 
     AlgorithmOptions, ThreadedOuterAlgorithmOptions, SequentialOuterAlgorithmOptions

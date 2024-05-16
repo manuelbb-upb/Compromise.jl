@@ -444,6 +444,7 @@ depends_on_radius(::AbstractSurrogateModel)=true
 # objects, such as databases, by reference so as to avoid a large memory-overhead.
 # Moreover, we only need copies for radius-dependent models!
 # You can ignore those methods otherwise.
+copy_model(mod::AbstractSurrogateModel)=deepcopy(mod)
 
 # A surrogate is initialized from its configuration and the operator it is meant to model:
 """
