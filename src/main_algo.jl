@@ -103,7 +103,6 @@ function do_iteration!(
     x = $(pretty_row_vec(cached_x(vals)))
     fx = $(pretty_row_vec(cached_fx(vals)))
     """
-
     ## The models are valid
     ## - the last iteration was a successfull restoration iteration.
     ## - if the point has not changed and the models do not depend on the radius or  
@@ -139,13 +138,14 @@ function do_iteration!(
     if !n_is_compatible
         ## Try to do a restoration
         @logmsg log_level "* Normal step incompatible. Trying restoration."
-        add_to_filter!(filter, cached_theta(vals), cached_Phi(vals))
+        add_to_filter!(filter, vals)
         @ignoraise do_restoration(
             mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
             mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
             iteration_status, iteration_scalars, stop_crits,
             algo_opts
         ) indent
+        return nothing
     end
 
     @logmsg log_level "* Computing a descent step."
@@ -197,7 +197,7 @@ function do_iteration!(
 
     ## update filter
     if iteration_status.iteration_type == THETA_STEP
-        add_to_filter!(filter, cached_theta(vals), cached_Phi(vals))
+        add_to_filter!(filter, vals)
     end
    
     if _trial_point_accepted(iteration_status)

@@ -40,6 +40,10 @@ function add_to_filter!(filter::StandardFilter, θ, Φ)
     return num_entries(filter)
 end
 
+function add_to_filter!(filter::StandardFilter, cache)
+    return add_to_filter!(filter, cached_theta(cache), cached_Phi(cache))
+end
+
 function is_acceptable(filter::StandardFilter, θ, Φ)
     θmin = filter.min_theta[]
     Φmin = filter.min_phi[]
@@ -70,4 +74,16 @@ function is_acceptable(filter::StandardFilter, θ_test, Φ_test, θ_add, Φ_add)
     else
         return false
     end
+end
+
+function is_filter_acceptable(filter::StandardFilter, cache)
+    return is_acceptable(filter, cached_theta(cache), cached_Phi(cache))
+end
+
+function is_filter_acceptable(filter::StandardFilter, cache_test, cache_add)
+    return is_acceptable(
+        filter, 
+        cached_theta(cache_test), cached_Phi(cache_test),
+        cached_theta(cache_add), cached_Phi(cache_add),
+    )
 end

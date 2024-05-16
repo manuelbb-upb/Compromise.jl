@@ -45,8 +45,8 @@ function do_normal_step!(
 
     else
         step_vals.n .= 0
+        step_vals.xn .= cached_x(vals) .+ step_vals.n
     end
-    step_vals.xn .= cached_x(vals) .+ step_vals.n
     nothing
 end
 

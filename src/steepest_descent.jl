@@ -107,18 +107,15 @@ function compute_normal_step!(
     log_level
 )
     x = cached_x(vals)
-    Eξ = cached_Ex(vals)
-    Aξ = cached_Ax(vals)
-    @unpack lb, ub = scaled_cons
-    @unpack b, c = lin_cons
-    _A = scaled_cons.A
-    _E = scaled_cons.E
+    Ex_min_c = cached_Ex_min_c(vals)
+    Ax_min_b = cached_Ax_min_b(vals)
+    @unpack A, E, lb, ub = scaled_cons
     gx = cached_gx(mod_vals)
     Dgx = cached_Dgx(mod_vals)
     hx = cached_hx(mod_vals)
     Dhx = cached_Dhx(mod_vals)
     n = solve_normal_step_problem(
-        x, lb, ub, Eξ, _E, c, Aξ, _A, b, hx, Dhx, gx, Dgx, qp_optimizer_type(step_cache);
+        x, lb, ub, Ex_min_c, E, Ax_min_b, A, hx, Dhx, gx, Dgx, qp_optimizer_type(step_cache);
         step_norm = step_cache.normal_step_norm
     )
     Base.copyto!(step_vals.n, n)
@@ -131,10 +128,10 @@ function compute_descent_step!(
     log_level
 )
 
-    return compute_steepest_descent_step!(step_cache, step_vals, mod, lin_cons, scaled_cons, vals, mod_vals)
+    return compute_steepest_descent_step!(step_cache, step_vals, mod, scaled_cons, vals, mod_vals)
 end
 
-function compute_steepest_descent_step!(step_cache, step_vals, mod, lin_cons, scaled_cons, vals, mod_vals)
+function compute_steepest_descent_step!(step_cache, step_vals, mod, scaled_cons, vals, mod_vals)
     x = cached_x(vals)
     Dfx = cached_Dfx(mod_vals)
     @unpack n = step_vals
@@ -144,19 +141,16 @@ function compute_steepest_descent_step!(step_cache, step_vals, mod, lin_cons, sc
     gx = cached_gx(mod_vals)
     Dgx = cached_Dgx(mod_vals)
     @unpack Axn, Dgx_n = step_cache
-    Aξ = cached_Ax(vals)
-    _A = scaled_cons.A
+    Ax_min_b = cached_Ax_min_b(vals)
+    @unpack A, E, lb, ub = scaled_cons
 
-    postprocess_normal_step_results!(Axn, Dgx_n, n, Aξ, _A, Dgx, gx)
+    postprocess_normal_step_results!(Axn, Dgx_n, n, Ax_min_b, A, Dgx, gx)
 
     @unpack xn = step_vals
-    @unpack lb, ub = scaled_cons
-    _E = scaled_cons.E
-    @unpack b, c = lin_cons
     Dhx = cached_Dhx(mod_vals)
     @unpack normalize_gradients = step_cache
     χ, _d = solve_steepest_descent_problem(
-        xn, Dfx, lb, ub, _E, Axn, _A, b, Dhx, Dgx_n, Dgx, qp_optimizer_type(step_cache);
+        xn, Dfx, lb, ub, E, Axn, A, Dhx, Dgx_n, Dgx, qp_optimizer_type(step_cache);
         normalize_gradients, ball_norm = step_cache.descent_step_norm
     )
     
@@ -172,14 +166,12 @@ function finalize_step_vals!(
 )
     x = cached_x(vals)
     @unpack xn, fxs, d = step_vals
-    @unpack lb, ub = scaled_cons
-    _A = scaled_cons.A
-    @unpack b = lin_cons
+    @unpack A, E, lb, ub = scaled_cons
     gx = cached_gx(mod_vals)
     Dgx = cached_Dgx(mod_vals)
     @unpack lb_tr, ub_tr, Axn, Dgx_n = step_cache
     trust_region_bounds!(lb_tr, ub_tr, x, Δ, lb, ub)
-    _, σ = initial_steplength(xn, d, lb_tr, ub_tr, Axn, _A, b, gx, Dgx_n, Dgx)
+    _, σ = initial_steplength(xn, d, lb_tr, ub_tr, Axn, A, gx, Dgx_n, Dgx)
     
     if isnan(σ)
         step_vals.crit_ref[] = 0
@@ -206,8 +198,8 @@ end
 function solve_normal_step_problem(
     x::RVec, 
     lb::Union{RVec, Nothing}, ub::Union{RVec, Nothing},
-    Eξ::RVec, _E::Union{RMat, Nothing}, c::Union{RVec, Nothing},
-    Aξ::RVec, _A::Union{RMat, Nothing}, b::Union{RVec, Nothing},
+    Ex_min_c::RVec, E::Union{RMat, Nothing}, 
+    Ax_min_b::RVec, A::Union{RMat, Nothing},
     hx::RVec, Dhx::RMat, gx::RVec, Dgx::RMat,
     qp_opt;
     step_norm::Real=2
@@ -225,18 +217,13 @@ function solve_normal_step_problem(
     set_lower_bounds!(opt, xn, lb)
     set_upper_bounds!(opt, xn, ub)
 
-    if !(isnothing(b) || isnothing(_A))
-        ## Suppose `_A` and `_b` are applicable in the scaled domain, `_A * x ≤ _b`.
-        ## In the unscaled domain, `A * ξ ≤ b`.
-        ## `Aξ` actually holds `A*ξ = A*(S*x + s) = _A * x + A * s` ⇒ `_A * x = Aξ - A*s`.
-        ## Additionally, `_b = b - A * s`.
-        ## Thus,  `_A * x + _A * n .<= _b` is equivalent to 
-        ## `Aξ - A*s + _A*n .<= b - A*s` ⇔ `Aξ + _A*n .<= b`
-        JuMP.@constraint(opt, Aξ .+ _A * n .<= b)
+    if !isnothing(A)
+        # A(x + n) ≤ b ⇔ A(x + n) - b ≤ 0 ⇔ Ax - b + An ≤ 0
+        JuMP.@constraint(opt, Ax_min_b .+ A * n .<= 0)
     end
 
-    if !(isnothing(_E) || isnothing(c))
-        JuMP.@constraint(opt, Eξ .+ _E * n .== c)
+    if !isnothing(E)
+        JuMP.@constraint(opt, Ex_min_c .+ E * n .== 0)
     end
 
     JuMP.@constraint(opt, hx .+ Dhx'n .== 0)
@@ -274,13 +261,14 @@ function postprocess_normal_step_results!(
     Axn, Dgx_n,
     # not modified:
     n::RVec,
-    Aξ::RVec, 
-    _A::Union{RMat, Nothing},
+    Ax_min_b::RVec, 
+    A::Union{RMat, Nothing},
     Dgx::RMat, gx::RVec
 )
-    Axn .= Aξ
-    if !isnothing(_A)
-        Axn .+= _A * n
+    Axn .= Ax_min_b
+    if !isnothing(A)
+        ## Axn .+= _A * n
+        LA.mul!(Axn, A, n, 1, 1)
     end
     Dgx_n .= gx
     Dgx_n .+= Dgx'n
@@ -290,8 +278,8 @@ end
 function solve_steepest_descent_problem(
     xn::RVec, Dfx::RMat,
     lb::Union{RVec, Nothing}, ub::Union{RVec, Nothing},
-    _E::Union{RMat, Nothing},
-    Axn::RVec, _A::Union{RMat, Nothing}, b::Union{RVec, Nothing},
+    E::Union{RMat, Nothing},
+    Axn::RVec, A::Union{RMat, Nothing},
     Dhx::RMat, Dgx_n::RVec, Dgx::RMat,
     qp_opt, #::Type{<:MOI.AbstractOptimizer};
     ;
@@ -303,12 +291,13 @@ function solve_steepest_descent_problem(
     try
         opt = JuMP.Model(qp_opt)
         β, d = setup_steepest_descent_problem!(
-            opt, xn, Dfx, lb, ub, _E, Axn, _A, b, Dhx, Dgx_n, Dgx; 
+            opt, xn, Dfx, lb, ub, E, Axn, A, Dhx, Dgx_n, Dgx; 
             ball_norm, normalize_gradients
         )
         JuMP.optimize!(opt)
 
         if MOI.get(opt, MOI.TerminationStatus()) == MOI.INFEASIBLE
+            @warn "Steepest descent problem infeasible."
             return 0, zero(xn)
         end
         χ = abs(JuMP.value(β))
@@ -320,7 +309,8 @@ function solve_steepest_descent_problem(
 end
 
 function setup_steepest_descent_problem!(
-    opt, xn, Dfx, lb, ub, _E, Axn, _A, b, Dhx, Dgx_n, Dgx; ball_norm, normalize_gradients
+    opt, xn, Dfx, lb, ub, E, Axn, A, Dhx, Dgx_n, Dgx; 
+    ball_norm, normalize_gradients
 )
     n_vars = length(xn)
     JuMP.set_silent(opt)
@@ -349,11 +339,13 @@ function setup_steepest_descent_problem!(
     ## x + s .<= ub
     set_upper_bounds!(opt, xs, ub)
 
-    if !isnothing(_E)
-        JuMP.@constraint(opt, _E * d .== 0)
+    if !isnothing(A)
+        ## Axn = Ax - b + An
+        ## Axn + Ad ≤ 0 ⇔ A(x + n + d) ≤ b
+        JuMP.@constraint(opt, Axn .+ A * d .<= 0)
     end
-    if !(isnothing(b) || isnothing(_A))
-        JuMP.@constraint(opt, Axn .+ _A * d .<= b)
+    if !isnothing(E)
+        JuMP.@constraint(opt, E * d .== 0)
     end
 
     JuMP.@constraint(opt, Dhx'd .== 0)
@@ -493,12 +485,12 @@ end
 function initial_steplength(
     xn::RVec, d::RVec,
     lb_tr::RVec, ub_tr::RVec,
-    Axn::RVec, _A::Union{RMat, Nothing}, b::Union{RVec, Nothing},
+    Axn::RVec, A::Union{RMat, Nothing},
     gx::RVec, Dgx_n::RVec, Dgx::RMat
 )
 
     ## By construction, `d` is in the kernel of the linear equality constraint matrix
-    ## `_E`, so any steplength `σ ∈ ℝ` will be compatible with these constraints.
+    ## `E`, so any steplength `σ ∈ ℝ` will be compatible with these constraints.
     
     ## Same holds for the linearized nonlinear equality constraints:
     ## `Dhx'd .== 0`.
@@ -506,10 +498,10 @@ function initial_steplength(
     T = eltype(xn)
     σ_min, σ_max = intersect_box(xn, d, lb_tr, ub_tr)
         
-    if !(isnothing(_A) || isnothing(b))
-        for (i, ai) = enumerate(eachrow(_A))
+    if !isnothing(A)
+        for (i, ai) = enumerate(eachrow(A))
             # Axn + σ * A*d .<= b
-            σl, σr = intersect_bound(Axn[i], LA.dot(ai, d), b[i], T)
+            σl, σr = intersect_bound(Axn[i], LA.dot(ai, d), 0, T)
             σ_min, σ_max = intersect_intervals(σ_min, σ_max, σl, σr, T)
         end
     end
