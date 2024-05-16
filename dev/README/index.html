@@ -33,14 +33,14 @@ end</code></pre><pre class="documenter-example-output"><code class="nohighlight 
     func_iip=true, dim_out=1
 )</code></pre><p>The <code>MutableMOP</code> is turned into a <code>TypedMOP</code> during initialization. We can thus simply pass it to <code>optimize</code>:</p><pre><code class="language-julia hljs">ret = optimize(mop, [-2.0, 0.5])</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">ReturnObject
 x0   = [-2.00e+00, 5.00e-01]
-x*   = [2.00e+00, 5.57e-01]
-f(x*)= [1.96e-01, 2.42e+00]
+x*   = [2.00e+00, -1.55e-01]
+f(x*)= [1.33e+00, 7.14e-01]
 code = Compromise.RBFModels.RBFConstructionImpossible()</code></pre><p><code>ret</code> is the return object. You can query it using functions like <code>opt_vars</code> etc. Final argument vector:</p><pre><code class="language-julia hljs">opt_vars(ret)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{Float64}:
- 2.000000010845848
- 0.5571955905940019</code></pre><p>Final value vector:</p><pre><code class="language-julia hljs">opt_objectives(ret)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{Float64}:
- 0.19607574498939487
- 2.4248581073654023</code></pre><p>Final constraint vector:</p><pre><code class="language-julia hljs">opt_nl_ineq_constraints(ret)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">1-element Vector{Float64}:
- -3.3104669695607916</code></pre><h3 id="More-RBF-Options"><a class="docs-heading-anchor" href="#More-RBF-Options">More RBF Options</a><a id="More-RBF-Options-1"></a><a class="docs-heading-anchor-permalink" href="#More-RBF-Options" title="Permalink"></a></h3><p>Instead of passing <code>:rbf</code>, you can also pass an <code>RBFConfig</code>. To use the Gaussian kernel:</p><pre><code class="language-julia hljs">cfg = RBFConfig(; kernel=GaussianKernel())</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">RBFConfig{Float64, GaussianKernel{Int64}, Nothing, Nothing, Nothing}
+  2.000000005044235
+ -0.1552819261889915</code></pre><p>Final value vector:</p><pre><code class="language-julia hljs">opt_objectives(ret)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{Float64}:
+ 1.3346763289789465
+ 0.7135486242229804</code></pre><p>Final constraint vector:</p><pre><code class="language-julia hljs">opt_nl_ineq_constraints(ret)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">1-element Vector{Float64}:
+ -3.024112496777903</code></pre><h3 id="More-RBF-Options"><a class="docs-heading-anchor" href="#More-RBF-Options">More RBF Options</a><a id="More-RBF-Options-1"></a><a class="docs-heading-anchor-permalink" href="#More-RBF-Options" title="Permalink"></a></h3><p>Instead of passing <code>:rbf</code>, you can also pass an <code>RBFConfig</code>. To use the Gaussian kernel:</p><pre><code class="language-julia hljs">cfg = RBFConfig(; kernel=GaussianKernel())</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">RBFConfig{Float64, GaussianKernel{Int64}, Nothing, Nothing, Nothing}
   kernel: GaussianKernel{Int64}
   poly_deg: Int64 1
   shape_parameter_function: Nothing nothing
@@ -106,8 +106,8 @@ end
 add_objectives!(
     mop, counted_objf, cfg; dim_out=2, func_iip=false,
 )</code></pre><p>First run:</p><pre><code class="language-julia hljs">ret = optimize(mop, [-2.0, 0.5])
-objf_counter[]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">69</code></pre><p>Second run:</p><pre><code class="language-julia hljs">ret = optimize(mop, [-2.0, 0.0])
-objf_counter[]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">139</code></pre><h5 id="Parallelism"><a class="docs-heading-anchor" href="#Parallelism">Parallelism</a><a id="Parallelism-1"></a><a class="docs-heading-anchor-permalink" href="#Parallelism" title="Permalink"></a></h5><p>The RBF update algorithm has a lock to access the database in a safe way (?) when multiple optimization runs are done concurrently. There even is an “algorithm” for this:</p><pre><code class="language- hljs">using ConcurrentUtils
+objf_counter[]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">528</code></pre><p>Second run:</p><pre><code class="language-julia hljs">ret = optimize(mop, [-2.0, 0.0])
+objf_counter[]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">598</code></pre><h5 id="Parallelism"><a class="docs-heading-anchor" href="#Parallelism">Parallelism</a><a id="Parallelism-1"></a><a class="docs-heading-anchor-permalink" href="#Parallelism" title="Permalink"></a></h5><p>The RBF update algorithm has a lock to access the database in a safe way (?) when multiple optimization runs are done concurrently. There even is an “algorithm” for this:</p><pre><code class="language- hljs">using ConcurrentUtils
 mop = MutableMOP(; num_vars=2)
 add_objectives!(
     mop, counted_objf, :rbfLocked; dim_out=2, func_iip=false,
@@ -142,7 +142,7 @@ add_objectives!(mop, objective_function, :exact;
 )
 
 optimize(mop, -5 .+ 10 .* rand(2))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">ReturnObject
-x0   = [2.51e+00, -4.04e+00]
-x*   = [2.00e+00, -5.35e-01]
-f(x*)= [2.36e+00, 2.16e-01]
-code = MaxCritLoopsStopping(10)</code></pre><hr/><p><em>This page was generated using <a href="https://github.com/fredrikekre/Literate.jl">Literate.jl</a>.</em></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.4.0 on <span class="colophon-date" title="Friday 26 April 2024 07:17">Friday 26 April 2024</span>. Using Julia version 1.9.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+x0   = [6.56e-01, 1.10e+00]
+x*   = [2.00e+00, 6.03e-01]
+f(x*)= [1.57e-01, 2.57e+00]
+code = MaxCritLoopsStopping(10)</code></pre><hr/><p><em>This page was generated using <a href="https://github.com/fredrikekre/Literate.jl">Literate.jl</a>.</em></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.4.1 on <span class="colophon-date" title="Thursday 16 May 2024 14:40">Thursday 16 May 2024</span>. Using Julia version 1.9.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
