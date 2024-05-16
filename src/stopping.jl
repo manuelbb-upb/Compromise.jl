@@ -314,7 +314,7 @@ end
 unwrap_stop_crit(crit)=crit
 
 # ## Container
-mutable struct DefaultStoppingCriteriaContainer{F, UC, DC} <: AbstractStoppingCriterion
+mutable struct DefaultStoppingCriteriaContainer{F, UC, DC<:Tuple} <: AbstractStoppingCriterion
     x_norm2 :: F
     fx_norm2 :: F
     diff_x_norm2 :: F
@@ -396,4 +396,8 @@ function stopping_criteria(
         MaxCritLoopsStopping(;num=stop_max_crit_loops)
     )
     return DefaultStoppingCriteriaContainer(NaNF, NaNF, NaNF, NaNF, user_callback, default_crits)
+end
+
+function stop_crit_type(::DefaultStoppingCriteriaContainer{F, UC, DC}) where {F, UC, DC}
+    return Union{UC, Union{DC.parameters...}}
 end

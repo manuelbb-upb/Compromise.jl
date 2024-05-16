@@ -2,7 +2,7 @@ import Compromise as C
 import Compromise: NondominatedSet, init_nondom_set!
 import Compromise: @unpack
 
-include("TestProblems.jl")
+includet("TestProblems.jl")
 TP = TestProblems
 #%%
 
@@ -19,8 +19,9 @@ rflags = ndset.extra
 z = vcat(theta', fx)
 _z = vcat(theta[rflags]', fx[:, rflags])
 #%%
-mop = TP.to_mutable_mop(TP._test_problem(Val(6), 2))
-X = mop.lb .+ (mop.ub .- mop.lb) .* rand(2, 50)
-algo_opts = C.AlgorithmOptions(; max_iter=1)
+tp = TP._test_problem(Val(5), 2)
+_mop = TP.to_mutable_mop(tp; max_func_calls=500)
+X = _mop.lb .+ (_mop.ub .- _mop.lb) .* rand(2, 20)
+algo_opts = C.AlgorithmOptions(; max_iter=100, stop_delta_min=1e-6)
 
-C.optimize_set(X, mop; algo_opts);
+filter = C.optimize_set(X, _mop; algo_opts);

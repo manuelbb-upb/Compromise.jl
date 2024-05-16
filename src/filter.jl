@@ -87,3 +87,5 @@ function is_filter_acceptable(filter::StandardFilter, cache_test, cache_add)
         cached_theta(cache_add), cached_Phi(cache_add),
     )
 end
+
+filter_min_theta(filter::StandardFilter)=filter.min_phi[]

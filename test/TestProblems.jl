@@ -164,6 +164,16 @@ function grads_ineq_constraint!(::Val{6}, Dg, x)
     return nothing
 end
 
+struct SimplexParaboloidsInPlaceFunction <: Function
+    counter :: Base.RefValue{Int}
+end
+SimplexParaboloidsInPlaceFunction() = SimplexParaboloidsInPlaceFunction(Ref(0))
+
+function (f::SimplexParaboloidsInPlaceFunction)(y, x)
+    f.counter[] += 1
+    return simplex_paraboloids!(y, x)
+end
+
 function simplex_paraboloids!(y, x)
     y .= 0
     for i = eachindex(y)
@@ -193,6 +203,7 @@ end
 
 Base.@kwdef mutable struct SimplexParaboloids{F<:AbstractFloat}
     n_vars :: Int = 2
+    objective_function :: SimplexParaboloidsInPlaceFunction = SimplexParaboloidsInPlaceFunction()
     x0 :: Vector{F} = rand(F, n_vars)
     eq_constraint_index :: Union{Nothing, Int} = nothing
     ineq_constraint_index :: Union{Nothing, Int} = nothing
@@ -247,7 +258,7 @@ function _test_problem(::Val{6}, n_vars::Int=2, F=Float64)
 end
 
 using Compromise
-function to_mutable_mop(mop::SimplexParaboloids, mcfg=:rbf)
+function to_mutable_mop(mop::SimplexParaboloids; mcfg=:rbf, max_func_calls=typemax(Int))
     p = MutableMOP(;
         num_vars = mop.n_vars,
         lb = mop.lb,
@@ -258,15 +269,17 @@ function to_mutable_mop(mop::SimplexParaboloids, mcfg=:rbf)
         b = mop.b
     )
     add_objectives!(
-        p, simplex_paraboloids!, :rbf; 
-        dim_out=mop.n_vars, func_iip=true
+        p, mop.objective_function, :rbf; 
+        dim_out=mop.n_vars, func_iip=true,
+        max_func_calls
     )
     if !isnothing(mop.ineq_constraint_index)
         v = Val(mop.ineq_constraint_index)
         if mcfg == :rbf || mcfg isa RBFConfig
             add_nl_ineq_constraints!(
                 p, iip_ineq_func(v), mcfg;
-                    func_iip=true, dim_out=dim_ineq_constraints(v, mop.n_vars)
+                    func_iip=true, dim_out=dim_ineq_constraints(v, mop.n_vars),
+                    max_func_calls
             )
         end
     end

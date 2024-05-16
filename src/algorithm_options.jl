@@ -43,7 +43,7 @@ Base.@kwdef struct AlgorithmOptions{T <: AbstractFloat, SC, SCALER_CFG_TYPE}
 
 	# criticality test thresholds
 	"Lower bound for criticality before entering Criticality Routine."
-	eps_crit :: T = 0.1
+	eps_crit :: T = 0.01
 	"Lower bound for feasibility before entering Criticality Routine."
 	eps_theta :: T = 0.05
 	"At the end of the Criticality Routine the radius is possibly set to `crit_B * χ`."

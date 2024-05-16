@@ -1,7 +1,7 @@
 name = "Compromise"
 uuid = "254bc946-86ae-484f-a9da-8147cb79ba93"
 authors = ["Manuel Berkemeier <manuelbb@mail.uni-paderborn.de> and contributors"]
-version = "0.2.0"
+version = "0.3.0-DEV"
 
 [deps]
 Accessors = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
@@ -23,6 +23,7 @@ Requires = "ae029012-a4dd-5104-9daa-d747884805df"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StridedViews = "4db3bf67-4bd7-4b4e-b153-31dc3fb37143"
 StructHelpers = "4093c41a-2008-41fd-82b8-e3f9d02b504f"
+UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 
 [weakdeps]
@@ -34,7 +35,7 @@ ConcurrentRWLockExt = "ConcurrentUtils"
 ForwardDiffBackendExt = "ForwardDiff"
 
 [compat]
-julia = "1"
+julia = "1.6"
 
 [extras]
 ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477"

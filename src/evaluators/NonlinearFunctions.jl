@@ -6,7 +6,7 @@ import ..Compromise: RVec, RMat, RVecOrMat, @ignoraise
 import ..Compromise.CompromiseEvaluators as CE
 import ..Compromise.CompromiseEvaluators: FuncCallCounter
 import ..Compromise: Accessors
-
+import ..Compromise: @batteries 
 using Parameters: @with_kw
 
 # ## Wrapper for Parametric Functions
@@ -83,6 +83,7 @@ compute the derivatives if the relevant field `isnothing`.
         !isnothing(backend) || !isnothing(grads) || !isnothing(func_and_grads)
     ) "If Hessians can be computed, then gradients should be computed too."
 end
+@batteries NonlinearParametricFunction selfconstructor=false
 
 CE.operator_has_params(op::NonlinearParametricFunction)=true
 CE.operator_can_partial(op::NonlinearParametricFunction)=false
@@ -254,6 +255,7 @@ end
 struct MakeParametric{F} <: Function
     func :: F
 end
+@batteries MakeParametric selfconstructor=false
 
 # Re-define evaluation to take parameters.
 # For the general case, with arbitrarily many arguments,
@@ -268,6 +270,7 @@ struct NonlinearFunction{
     WF<:CE.AbstractNonlinearOperator} <: CE.AbstractNonlinearOperatorWrapper
     wrapped_function :: WF
 end
+@batteries NonlinearFunction selfconstructor=false
 
 CE.wrapped_operator(op::NonlinearFunction)=op.wrapped_function
 preprocess_inputs(op::NonlinearFunction, x::RVec, p)=(x, nothing)

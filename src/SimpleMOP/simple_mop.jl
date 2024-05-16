@@ -26,6 +26,7 @@ struct RecountedOperator{O} <: AbstractNonlinearOperatorWrapper
     num_grad_calls :: Union{FuncCallCounter, Nothing}
     num_hess_calls :: Union{FuncCallCounter, Nothing}
 end
+@batteries RecountedOperator selfconstructor=false
 
 recount_operator(op::Nothing, ::Val{true}) = nothing
 recount_operator(op::Nothing, ::Val{false}) = nothing
@@ -60,6 +61,7 @@ struct ScaledOperator{F<:AbstractFloat, O, S} <: AbstractNonlinearOperatorWrappe
     ## cache for unscaled site
     ξ :: Matrix{F}
 end
+@batteries ScaledOperator selfconstructor=false
 CE.wrapped_operator(sop::ScaledOperator)=sop.op
 function CE.operator_chunk_size(sop::ScaledOperator)
     return min(size(sop.ξ, 2), CE.operator_chunk_size(sop.op))
@@ -147,6 +149,7 @@ By default, we assume `ExactModelConfig()`, which requires differentiable object
     A :: Union{Nothing, Matrix{Float64}} = nothing
     b :: Union{Nothing, Vector{Float64}} = nothing
 end
+@batteries MutableMOP selfconstructor=false
 MutableMOP(num_vars::Int)=MutableMOP(;num_vars)
 _reset_call_counters(mop::MutableMOP)=Val(mop.reset_call_counters)
 
@@ -183,6 +186,7 @@ Base.@kwdef struct TypedMOP{
     A :: AType = nothing
     b :: BType = nothing
 end
+@batteries TypedMOP selfconstructor=false
 _reset_call_counters(mop::TypedMOP) = mop.reset_call_counters
 
 # This initialization really is just a forwarding of all fields:
@@ -474,9 +478,24 @@ struct SimpleMOPSurrogate{
     mod_nl_eq_constraints :: MNLEC
     mod_nl_ineq_constraints :: MNLIC
 end
+@batteries SimpleMOPSurrogate selfconstructor=false
+function CE.copy_model(mod::SimpleMOPSurrogate)
+    @unpack objectives, nl_eq_constraints, nl_ineq_constraints, num_vars, mod_objectives,
+        mod_nl_eq_constraints, mod_nl_ineq_constraints = mod
+    return SimpleMOPSurrogate(
+        objectives,
+        nl_eq_constraints,
+        nl_ineq_constraints,
+        num_vars,
+        deepcopy(mod_objectives),
+        deepcopy(mod_nl_eq_constraints),
+        deepcopy(mod_nl_ineq_constraints)
+    )
+end
 
 # The float_type is again fixed:
 float_type(mod::SimpleMOPSurrogate)=Float64
+stop_type(mod::SimpleMOPSurrogate)=Union{}
 
 # Getters are generated automatically:
 dim_vars(mod::SimpleMOPSurrogate)=mod.num_vars::Int
@@ -581,14 +600,17 @@ function update_models!(
     x = cached_x(vals)
     @unpack lb, ub = scaled_cons
     if !isnothing(mod.mod_objectives)
+        @logmsg log_level "$(indent_str(indent))(Objectives)"
         @ignoraise update!(
             mod.mod_objectives, mod.objectives, Δ, x, cached_fx(vals), lb, ub; log_level, indent)
     end
     if !isnothing(mod.mod_nl_eq_constraints)
+        @logmsg log_level "$(indent_str(indent))(Eq. Constraints)"
         @ignoraise update!(
             mod.mod_nl_eq_constraints, mod.nl_eq_constraints, Δ, x, cached_hx(vals), lb, ub; log_level, indent)
     end
     if !isnothing(mod.mod_nl_ineq_constraints)
+        @logmsg log_level "$(indent_str(indent))(Ineq. Constraints)"
         @ignoraise update!(
             mod.mod_nl_ineq_constraints, mod.nl_ineq_constraints, Δ, x, cached_gx(vals), lb, ub; log_level, indent)
     end
