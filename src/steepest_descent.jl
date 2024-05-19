@@ -4,8 +4,7 @@ Base.@kwdef struct SteepestDescentConfig{F, QPTYPE} <: AbstractStepConfig
     rhs_factor :: F = 1e-3
     
     normalize_gradients :: Bool = false
-    strict_backtracking :: Bool = true    
-    
+    backtracking_mode :: Union{Val{:all}, Val{:any}, Val{:max}} = Val(:max)
     descent_step_norm :: F = Inf
     normal_step_norm :: F = 2
 
@@ -18,7 +17,7 @@ function SteepestDescentConfig(
     backtracking_factor,
     rhs_factor,
     normalize_gradients,
-    strict_backtracking,
+    backtracking_mode,
     descent_step_norm,
     normal_step_norm,
     qp_opt::Type{QPTYPE},
@@ -27,12 +26,19 @@ function SteepestDescentConfig(
     @assert 0 < rhs_factor < 1 "`rhs_factor` must be in (0,1)."
     @assert descent_step_norm == Inf    # TODO enable other norms
     @assert normal_step_norm == 2 || isinf(normal_step_norm) # TODO enable other norms
+    
+    if backtracking_mode isa Symbol
+        backtracking_mode = Val(backtracking_mode)
+    end
+    if !isa(backtracking_mode, Union{Val{:all},Val{:any},Val{:max}})
+        backtracking_mode = Val(:max)
+    end
     return SteepestDescentConfig{float_type, QPTYPE}(
         float_type, 
         backtracking_factor,
         rhs_factor,
         normalize_gradients,
-        strict_backtracking,
+        backtracking_mode,
         descent_step_norm,
         normal_step_norm,
         qp_opt
@@ -53,7 +59,7 @@ Base.@kwdef struct SteepestDescentCache{
     backtracking_factor :: F
     rhs_factor :: F
     normalize_gradients :: Bool
-    strict_backtracking :: Bool
+    backtracking_mode :: Union{Val{:all},Val{:any},Val{:max}}
     descent_step_norm :: F
     normal_step_norm :: F
     
@@ -84,7 +90,7 @@ function init_step_cache(
     backtracking_factor = F(cfg.backtracking_factor)
     rhs_factor = F(cfg.rhs_factor)
 
-    @unpack normalize_gradients, strict_backtracking, descent_step_norm, 
+    @unpack normalize_gradients, backtracking_mode, descent_step_norm, 
         normal_step_norm = cfg
 
     lb_tr = array(F, dim_vars(vals))
@@ -95,7 +101,7 @@ function init_step_cache(
 
     return SteepestDescentCache(;
         backtracking_factor, rhs_factor, normalize_gradients, 
-        strict_backtracking, descent_step_norm, normal_step_norm, 
+        backtracking_mode, descent_step_norm, normal_step_norm, 
         fxn, fx_tmp, lb_tr, ub_tr, Axn, Dgx_n, 
         qp_opt=qp_optimizer_type(cfg)
     )
@@ -173,25 +179,23 @@ function finalize_step_vals!(
     trust_region_bounds!(lb_tr, ub_tr, x, Δ, lb, ub)
     _, σ = initial_steplength(xn, d, lb_tr, ub_tr, Axn, A, gx, Dgx_n, Dgx)
     
-    if isnan(σ)
-        step_vals.crit_ref[] = 0
+    if isnan(σ) || σ <= 0
+        _χ = 0
         d .= 0
-        step_vals.s .= step_vals.n
-        step_vals.xs .= step_vals.xn
-        @ignoraise objectives!(step_vals.fxs, mod, step_vals.xn)
-        return nothing
+    else    
+        @unpack fxn, fx_tmp, rhs_factor, backtracking_mode, backtracking_factor = step_cache
+        @unpack xs = step_vals
+        χ = step_vals.crit_ref[]
+        @ignoraise _χ = backtrack!(
+            d, xs, fxn, fxs,
+            mod, xn, lb_tr, ub_tr, χ, backtracking_factor, rhs_factor, backtracking_mode;
+            fx_tmp, σ_init=σ
+        )
     end
-    
-    @unpack fxn, fx_tmp, rhs_factor, strict_backtracking, backtracking_factor = step_cache
-    @unpack xs = step_vals
-    χ = step_vals.crit_ref[]
-    @ignoraise _χ = backtrack!(
-        d, xs, fxn, fxs,
-        mod, xn, lb_tr, ub_tr, χ, backtracking_factor, rhs_factor, strict_backtracking;
-        fx_tmp, σ_init=σ
-    )
     step_vals.crit_ref[] = _χ
     @. step_vals.s = step_vals.n + d
+    @. step_vals.xs = step_vals.xn + d
+    @ignoraise objectives!(step_vals.fxs, mod, step_vals.xn)
     return nothing
 end
 
@@ -300,8 +304,9 @@ function solve_steepest_descent_problem(
             @warn "Steepest descent problem infeasible."
             return 0, zero(xn)
         end
-        χ = abs(JuMP.value(β))
+        #χ = abs(JuMP.value(β))
         dir .= JuMP.value.(d)
+        χ = -min(0, maximum(dir'Dfx))
     catch err
         @error "Exception in Descent Step Computation." exception=(err, catch_backtrace())
     end
@@ -353,11 +358,17 @@ function setup_steepest_descent_problem!(
     return β, d
 end
 
+@enum ARMIJO_RESULT :: UInt8 begin
+    ARMIJO_TEST_PASSED
+    ARMIJO_TEST_FAILED
+    ARMIJO_ABBORTED
+end
+
 function backtrack!(
     d, xs, fxn, fxs, 
     mod, xn, lb_tr, ub_tr, 
     χ, backtracking_factor, rhs_factor,
-    strict :: Bool;
+    mode :: Union{Val{:all}, Val{:any}, Val{:max}};
     fx_tmp = copy(fxn),
     σ_init = one(eltype(xs))
 )
@@ -367,81 +378,101 @@ function backtrack!(
     end
     ## initialize stepsize `σ=1`
     σ = σ_init
-    x_delta_min = mapreduce(eps, min, xn)   # TODO make configurable ?
-
-    x_delta_too_small = xdel -> all( _d -> abs(_d) <= x_delta_min, xdel )
+    x_rel_tol = mapreduce(eps, min, xn)   # TODO make configurable ?
 
     d .*= σ_init
-    set_to_zero = x_delta_too_small(d)
+    set_to_zero = _delta_too_small(d, x_rel_tol)
 
     if set_to_zero
         d .= 0
-        xs .= xn
-        @ignoraise objectives!(fxs, mod, xs)
+        return 0
     end
+    
+    ## pre-compute RHS for Armijo test
+    rhs = χ * rhs_factor * σ
 
-    if !set_to_zero
-        ## pre-compute RHS for Armijo test
-        rhs = χ * rhs_factor * σ
+    ## evaluate objectives at `xn` and trial point `xs`
+    #src project_into_box!(xs, lb_tr, ub_tr)
+    #src d .= xs .- xn
+    @ignoraise objectives!(fxn, mod, xn)
+    xs .= xn .+ d
+    @ignoraise objectives!(fxs, mod, xs)
 
-        ## evaluate objectives at `xn` and trial point `xs`
-        #src project_into_box!(xs, lb_tr, ub_tr)
-        #src d .= xs .- xn
-        @ignoraise objectives!(fxn, mod, xn)
+    fx_tol_rel = mapreduce(eps, min, fxn) 
+
+    ## avoid re-computation of maximum for non-strict test:
+    phi_xn = _armijo_Phi_xn(mode, fxn)
+
+    ## shrink stepsize until armijo condition is fullfilled
+    while true 
+        if σ <= 0
+            set_to_zero = true
+            break
+        end
+        armijo_result = _armijo_condition(mode, fx_tmp, phi_xn, fxs, rhs, fx_tol_rel)
+        if armijo_result == ARMIJO_ABBORTED
+            set_to_zero = true
+            break
+        elseif armijo_result == ARMIJO_TEST_PASSED
+            break
+        end
+        
+        ## shrink `σ`, `rhs` and `d` by multiplication with `backtracking_factor`
+        σ *= backtracking_factor
+        rhs *= backtracking_factor
+        d .*= backtracking_factor
+        
+        set_to_zero = _delta_too_small(d, x_rel_tol)
+        if set_to_zero
+            break
+        end
+
+        ## reset trial point and compute objectives
         xs .= xn .+ d
         @ignoraise objectives!(fxs, mod, xs)
-    
-        fx_delta_min = mapreduce(eps, min, fxn) 
-
-        ## avoid re-computation of maximum for non-strict test:
-        phi_xn = strict ? fxn : maximum(fxn)
-
-        ## shrink stepsize until armijo condition is fullfilled
-        while true 
-            if σ <= 0
-                set_to_zero = true
-                break
-            end
-            if strict
-                @. fx_tmp = phi_xn - fxs
-                if all( abs.(fx_tmp) .< fx_delta_min )
-                    set_to_zero = true
-                    break
-                end
-                if all( fx_tmp .>= rhs )
-                    break
-                end
-            else
-                fx_tmp[1] = phi_xn - maximum(fxs)
-                if abs(fx_tmp[1]) < fx_delta_min
-                    set_to_zero = true
-                    break
-                end
-                if fx_tmp[1] >= rhs
-                    break
-                end
-            end
-            
-            ## shrink `σ`, `rhs` and `d` by multiplication with `backtracking_factor`
-            σ *= backtracking_factor
-            rhs *= backtracking_factor
-            d .*= backtracking_factor
-            
-            set_to_zero = x_delta_too_small(d)
-            if set_to_zero
-                d .= 0
-            end
-
-            ## reset trial point and compute objectives
-            xs .= xn .+ d
-            @ignoraise objectives!(fxs, mod, xs)
-            
-            set_to_zero && break
-        end
     end
-    _χ = set_to_zero ? 0 : χ
-    return _χ
+
+    if set_to_zero
+        d .= 0
+        return 0
+    end
+   
+    return χ
 end
+
+_armijo_Phi_xn(::Val{:all}, fxn)=fxn
+_armijo_Phi_xn(::Val{:any}, fxn)=fxn
+_armijo_Phi_xn(::Val{:max}, fxn)=maximum(fxn)
+
+function _armijo_condition(mode::Val{:max}, _tmp, Φxn, fxs, rhs, tol)
+    tmp = Φxn - maximum(fxs)
+    if _delta_too_small(tmp, tol)
+        return ARMIJO_ABBORTED
+    end
+    if tmp >= rhs
+        return ARMIJO_TEST_PASSED
+    end
+    return ARMIJO_TEST_FAILED
+end
+function _armijo_condition(mode::Union{Val{:any},Val{:all}}, tmp, Φxn, fxs, rhs, tol)
+    @. tmp = Φxn - fxs
+    if _delta_too_small(tmp, tol)
+        return ARMIJO_ABBORTED
+    end
+    res = reduce(_armijo_selector(mode), tmp .>= rhs)
+    if res
+        return ARMIJO_TEST_PASSED
+    end
+    return ARMIJO_TEST_FAILED
+end
+_armijo_selector(::Val{:any})=|
+_armijo_selector(::Val{:all})=&
+
+_delta_too_small(xdel::Real, tol) = (abs(xdel) <= tol)
+function _delta_too_small(xdel, tol)
+    return all( _d -> abs(_d) <= tol, xdel)
+end
+
 
 function descent_step_unit_constraint!(opt, d, p)
     if p == 2

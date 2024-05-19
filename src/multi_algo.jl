@@ -2,7 +2,9 @@
 # structures.
 # For sake of simplicity, we don't care too much about optimizing allocations right now.
 # We thus maintain objects in arrays and modify these arrays as needed.
-struct IncompatibleNormalStep end
+abstract type AbstractMultiStatus end
+struct IncompatibleNormalStep <: AbstractMultiStatus end
+struct InacceptablePoint <: AbstractMultiStatus end
 
 import UUIDs: UUID, uuid4
 struct SolutionStructs{
@@ -58,7 +60,7 @@ push_extra!(extra, ex)=push!(extra, ex)
 
 filter_min_theta(ndset::NondominatedSet) = max(0, minimum(ndset.theta_vals; init=0))
 
-function NondominatedSet(::Type{F}, extra = nothing; gamma=0.005) where F<:AbstractFloat
+function NondominatedSet(::Type{F}, extra = nothing; gamma=0) where F<:AbstractFloat
     return NondominatedSet(Vector{F}[], F[], F(gamma), extra, Ref(0))
 end
 
@@ -90,7 +92,12 @@ function set_counter!(ndset, solution_structs)
 end
 function add_to_filter!(ndset::NondominatedSet, cache, extra=nothing)
     set_counter!(ndset, extra)
-    return add_and_remove_dominated_no_check!(ndset, cached_fx(cache), cached_theta(cache), extra)
+    return add_and_remove_dominated_no_check!(ndset, copy(cached_fx(cache)), cached_theta(cache), extra)
+end
+
+function add_to_filter!(ndset::NondominatedSet, sstructs::SolutionStructs)
+    cache=sstructs.vals
+    return add_and_remove_dominated_no_check!(ndset, cache, sstructs)
 end
 
 function add_and_remove_dominated!(ndset::NondominatedSet, fx, theta, extra=nothing)
@@ -188,8 +195,9 @@ function optimize_set(
         any_not_converged = false
         any_is_compat = false
 
-        sort_fn(sol_structs) = !isnothing(sol_structs.status[]) ? -Inf : (sol_structs.gen_id[] != it_id ? -Inf : sol_structs.iteration_scalars.delta)
-        I = sortperm(filter.extra; by = sort_fn, rev = true)
+        #sort_fn(sol_structs) = !isnothing(sol_structs.status[]) ? -Inf : (sol_structs.gen_id[] != it_id ? -Inf : sol_structs.iteration_scalars.delta)
+        #I = sortperm(filter.extra; by = sort_fn, rev = true)
+        I = eachindex(filter.extra)
         for sol_index in I 
             solution_structs = filter.extra[sol_index]
             !isnothing(solution_structs.status[]) && continue
@@ -323,7 +331,8 @@ function optimize_set(
         end
         while there_are_solutions_with_current_id
             there_are_solutions_with_current_id = false
-            I = sortperm(filter.extra; by = sort_fn, rev = true)
+            #I = sortperm(filter.extra; by = sort_fn, rev = true)
+            I = eachindex(filter.extra)
             for sol_index in I
                 solution_structs = filter.extra[sol_index]
                 !isnothing(solution_structs.status[]) && continue
@@ -433,8 +442,14 @@ function optimize_set(
                 end
             
                 ## update filter
-                if iteration_status.iteration_type == THETA_STEP
+                if iteration_status.iteration_type != FILTER_FAIL
                     trial_sol = copy_solution_structs(solution_structs)
+                    #=
+                    if !_trial_point_accepted(iteration_status)
+                        trial_sol.status[] = InacceptablePoint()
+                    end
+                    =#
+
                     universal_copy!(trial_sol.vals, vals_tmp)
                     add_to_filter!(filter, vals_tmp, trial_sol)
                 end
@@ -544,15 +559,15 @@ function nondominated_caches(ndset, @nospecialize(filter_fn = sol -> !(sol.statu
     sols = filter(filter_fn, ndset.extra)
     return [sol.vals for sol in sols]
 end
-function nondominated_vars(ndset)
-    caches = nondominated_caches(ndset)
+function nondominated_vars(ndset, args...)
+    caches = nondominated_caches(ndset, args...)
     return mapreduce(cached_ξ, hcat, caches)
 end
-function nondominated_objectives(ndset)
-    caches = nondominated_caches(ndset)
+function nondominated_objectives(ndset, args...)
+    caches = nondominated_caches(ndset, args...)
     return mapreduce(cached_fx, hcat, caches)
 end
-function nondominated_thetas(ndset)
-    caches = nondominated_caches(ndset)
+function nondominated_thetas(ndset, args...)
+    caches = nondominated_caches(ndset, args...)
     return map(cached_theta, caches)
 end

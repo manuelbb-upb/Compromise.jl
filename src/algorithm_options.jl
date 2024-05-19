@@ -71,7 +71,7 @@ Base.@kwdef struct AlgorithmOptions{T <: AbstractFloat, SC, SCALER_CFG_TYPE}
 
 	# acceptance test 
 	"Whether to require *all* objectives to be reduced or not."
-	strict_acceptance_test :: Bool = true
+	trial_mode ::Union{Val{:max_diff}, Val{:min_rho}, Val{:max_rho}} = Val(:max_diff)
 	"Acceptance threshold."
 	nu_accept :: T = 1e-4 			# 1e-2 is suggested by Fletcher et. al. 
 	"Success threshold."
@@ -122,7 +122,7 @@ function AlgorithmOptions(
 	gamma_shrink_much,
 	gamma_shrink,
 	gamma_grow,
-	strict_acceptance_test,
+	trial_mode,
 	nu_accept,
 	nu_success,
 	c_delta,
@@ -132,6 +132,9 @@ function AlgorithmOptions(
 	psi_theta,
 ) where {float_type<:AbstractFloat, SC, SCALER_CFG_TYPE}
 	@assert scaler_cfg isa AbstractAffineScaler || scaler_cfg isa Val || scaler_cfg == :box || scaler_cfg == :none
+	if trial_mode isa Symbol
+		trial_mode = Val(Symbol)
+	end
 	return AlgorithmOptions{float_type, SC, SCALER_CFG_TYPE}(
 		float_type,
 		step_config,
@@ -159,7 +162,7 @@ function AlgorithmOptions(
 		gamma_shrink_much,
 		gamma_shrink,
 		gamma_grow,
-		strict_acceptance_test,
+		trial_mode,
 		nu_accept,
 		nu_success,
 		c_delta,

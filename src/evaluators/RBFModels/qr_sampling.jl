@@ -157,13 +157,16 @@ function fit_z_into_box!(
     σ = stepsize_in_box(x0, z, lb, ub)
     z .*= σ
     norm_z = LA.norm(z, norm_p)
-    if iszero(norm_z) 
+    #=if iszero(norm_z) 
         return RBFConstructionImpossible()
     elseif norm_z < th_qr
         ## c * norm_z = th_qr ⇔ c = th_qr / norm_z
         #c = th_qr / norm_z
         #@warn "Incompatible box constraints, changing σ from $σ to $(c*σ)."
         #z .*= c
+        return nothing
+    end=#
+    if norm_z < th_qr
         return nothing
     end
     return z

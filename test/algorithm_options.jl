@@ -92,7 +92,7 @@ end
         @test opts.gamma_shrink_much ≈ .1 rtol=eps(Float16)
         @test opts.gamma_shrink ≈ .5 rtol=eps(Float16)
         @test opts.gamma_grow ≈ 2 rtol=eps(Float16)
-        @test opts.strict_acceptance_test
+        @test opts.trial_mode == :Val{:max_diff}
         @test opts.nu_accept ≈ 1e-4 rtol=eps(Float16)
         @test opts.nu_success ≈ .4 rtol=eps(Float16)
         @test opts.c_delta ≈ .9 rtol=eps(Float16)

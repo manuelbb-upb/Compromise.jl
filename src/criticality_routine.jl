@@ -86,7 +86,9 @@ function criticality_routine!(
         end
         @logmsg log_level """
             $(pad_str) Finished after $j criticality loop(s), 
-            $(pad_str) Δ=$_Δ > Mχ=$(crit_M * χ), now Δ=$Δ."""
+            $(pad_str) Δ=$_Δ > Mχ=$(crit_M * χ), now Δ=$Δ,
+            $(pad_str) Criticality χ=$(step_vals.crit_ref[]), 
+            $(pad_str)  ‖d‖₂=$(LA.norm(step_vals.d)), ‖s‖₂=$(LA.norm(step_vals.s))."""
     end
     if isa(stop_code, AbstractStoppingCriterion)
         return stop_code 

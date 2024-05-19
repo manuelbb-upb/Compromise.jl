@@ -10,7 +10,7 @@ function test_trial_point!(
    
     @unpack log_level = algo_opts
     @logmsg log_level "$(indent_str(indent))* Checking trial point."
-
+    
     # Use `vals_tmp` to hold the true values at `xs`
     copyto!(cached_x(vals_tmp), step_vals.xs)
     @ignoraise eval_mop!(vals_tmp, mop, scaler) indent
@@ -19,12 +19,16 @@ function test_trial_point!(
     (x, fx, θx, Φx, fx_mod, xs, fxs, θxs, Φxs, fxs_mod) = _trial_point_arrays(
         vals, vals_tmp, mod_vals, step_vals)
 
-    @unpack strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success = algo_opts
+    @ignoraise objectives!(fxs_mod, mod, xs) indent # just to be sure
+
+    @unpack trial_mode, kappa_theta, psi_theta, nu_accept, nu_success = algo_opts
     @unpack diff_x, diff_fx, diff_fx_mod = trial_caches
     iteration_type = _test_trial_point!(
         diff_x, diff_fx, diff_fx_mod,
         x, xs, fx, fxs, fx_mod, fxs_mod, θx, fits_filter, 
-        strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success;
+        kappa_theta, psi_theta, nu_accept, nu_success, 
+        trial_mode;
+        log_level, indent=indent+1
     )
     if do_log_trial
         _log_trial_results(θxs, Φxs, iteration_type; indent, log_level)
@@ -67,7 +71,9 @@ end
 function _test_trial_point!(
     diff_x, diff_fx, diff_fx_mod,
     x, xs, fx, fxs, fx_mod, fxs_mod, θx, fits_filter,
-    strict_acceptance_test, kappa_theta, psi_theta, nu_accept, nu_success
+    kappa_theta, psi_theta, nu_accept, nu_success,
+    mode::Union{Val{:max_diff}, Val{:min_rho}, Val{:max_rho}}=Val(:max_diff);
+    log_level, indent
 )
     
     @. diff_x = x - xs
@@ -81,18 +87,14 @@ function _test_trial_point!(
     end
 
     if it_type == INITIALIZATION
-        objf_decrease, model_decrease = if strict_acceptance_test
-            (
-                diff_fx, 
-                diff_fx_mod
-            )
-        else
-            (
-                maximum(fx) - maximum(fxs),
-                maximum(fx_mod) - maximum(fxs_mod) 
-            )
-        end
-        rho = minimum( objf_decrease ./ model_decrease )            
+        objf_decrease, model_decrease, rho = _trial_triplet(mode, fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod)  
+        
+        @logmsg log_level """\n
+        $(indent_str(indent))- mode     = $(mode), 
+        $(indent_str(indent))- fx - fxs = $(pretty_row_vec(diff_fx)), 
+        $(indent_str(indent))- mx - mxs = $(pretty_row_vec(diff_fx_mod))
+        $(indent_str(indent))- rho      = $(pretty_row_vec(rho))
+        """
         sufficient_decrease_condition = rho >= nu_accept
         successful_decrease_condition = rho >= nu_success
         
@@ -112,6 +114,23 @@ function _test_trial_point!(
         end
     end
     return it_type
+end
+
+function _trial_triplet(::Val{:max_diff}, fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod)
+    objf_decrease = maximum(fx) - maximum(fxs)
+    model_decrease = maximum(fx_mod) - maximum(fxs_mod)
+    rho = objf_decrease / model_decrease
+    return objf_decrease, model_decrease, rho
+end
+
+function _trial_triplet(mode::Val{:min_rho}, fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod)
+    rho = minimum( diff_fx ./ diff_fx_mod )
+    return diff_fx, diff_fx_mod, rho
+end
+
+function _trial_triplet(::Val{:max_rho}, fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod)
+    rho = maximum( diff_fx ./ diff_fx_mod )
+    return diff_fx, diff_fx_mod, rho
 end
 
 function _log_trial_results(θxs, Φxs, iteration_type; indent, log_level)
