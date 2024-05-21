@@ -1,5 +1,5 @@
 function CE.process_trial_point!(
-    rbf::RBFModel, xtrial, fxtrial, is_next::Bool;
+    rbf::RBFModel, xtrial, fxtrial, is_next;
     log_level=Info
 )
     if !is_next

@@ -193,7 +193,7 @@ function do_iteration!(
         algo_opts
     ) indent
 
-    @ignoraise process_trial_point!(mod, vals_tmp, iteration_status) indent
+    @ignoraise process_trial_point!(mod, vals_tmp, _trial_point_accepted(iteration_status)) indent
 
     ## update filter
     if iteration_status.iteration_type == THETA_STEP

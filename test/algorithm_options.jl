@@ -28,7 +28,7 @@ import Compromise: SteepestDescentConfig
         @test cfg.backtracking_factor == 1//2
         @test isapprox(cfg.rhs_factor, 1e-3; rtol=eps(Float16))
         @test cfg.normalize_gradients == false
-        @test cfg.strict_backtracking == true
+        @test cfg.backtracking_mode == Val(:max)
         @test cfg.descent_step_norm == Inf
         @test cfg.normal_step_norm == 2
         @test cfg.qp_opt == Compromise.DEFAULT_QP_OPTIMIZER
@@ -92,7 +92,7 @@ end
         @test opts.gamma_shrink_much ≈ .1 rtol=eps(Float16)
         @test opts.gamma_shrink ≈ .5 rtol=eps(Float16)
         @test opts.gamma_grow ≈ 2 rtol=eps(Float16)
-        @test opts.trial_mode == :Val{:max_diff}
+        @test opts.trial_mode == Val{:max_diff}()
         @test opts.nu_accept ≈ 1e-4 rtol=eps(Float16)
         @test opts.nu_success ≈ .4 rtol=eps(Float16)
         @test opts.c_delta ≈ .9 rtol=eps(Float16)

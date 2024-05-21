@@ -482,7 +482,7 @@ function update!(
 end
 
 function process_trial_point!(
-    surr::AbstractSurrogateModel, xtrial, fxtrial, is_next::Bool
+    surr::AbstractSurrogateModel, xtrial, fxtrial, is_next
 )
     return nothing    
 end
