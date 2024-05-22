@@ -41,6 +41,7 @@ function Base.show(io::IO, sstructs::SolutionStructs)
 end
 
 @forward SolutionStructs.vals cached_x(sols::SolutionStructs)
+@forward SolutionStructs.vals cached_ξ(sols::SolutionStructs)
 @forward SolutionStructs.vals cached_fx(sols::SolutionStructs)
 @forward SolutionStructs.vals cached_hx(sols::SolutionStructs)
 @forward SolutionStructs.vals cached_gx(sols::SolutionStructs)
@@ -260,7 +261,7 @@ function singleton_population(sstructs::S) where S
 end
 
 for fname in (
-    :cached_x, :cached_fx, :cached_gx, :cached_hx,
+    :cached_x, :cached_ξ, :cached_fx, :cached_gx, :cached_hx,
     :cached_Ax, :cached_Ex,
     :cached_Ax_min_b, :cached_Ex_min_c,
     :cached_theta
@@ -388,7 +389,6 @@ function propagate_population!(population, ndset, optimizer_caches, algo_opts; g
     
     @logmsg algo_opts.log_level """\n
     ~~~~~~~~~~~~~~~~~~~~~ EVOLUTION ~~~~~~~~~~~~~~~~~~~~~"""
-    
     return propagate_population!(
         population, ndset, 
         mop, scaler, lin_cons, scaled_cons,
@@ -411,7 +411,6 @@ function propagate_population!(
         is_converged(sstructs) && continue
         sstructs.gen_id_ref[] > gen_id && continue
         log_solution_values(sstructs, log_level; normal_step=true)
-
 
         @unpack vals, step_vals, step_cache, iteration_scalars, mod, mod_vals = sstructs
         delta = iteration_scalars.delta
@@ -454,10 +453,9 @@ function propagate_population!(
             step_cache, crit_cache, trial_caches, 
             iteration_status, stop_crits, algo_opts;
             gen_id, indent = 1
-        )
-        remove_stale!(population)
-    
+        ) 
     end
+    remove_stale!(population)
 end
 
 function test_trial_point!(
@@ -586,7 +584,7 @@ function _test_trial_point!(
                         delta_new = min(delta_max, gamma_grow * delta)
                     else
                         # only sligthly decrease radius
-                        gamma_shrink_little = gamma_shrink + (1 - gamma_shrink)/2
+                        gamma_shrink_little = gamma_shrink + ((1 - gamma_shrink)/2)
                         delta_new = gamma_shrink_little * delta
                     end
                 else
