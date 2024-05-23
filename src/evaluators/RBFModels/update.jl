@@ -202,7 +202,7 @@ end
          )
         
         n_X += n_new
-        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) points in radius $(Δ1)."
+        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) points in radius $(@sprintf("%.2e", Δ1))."
 
         ## account for offset indices in chosen_index:
         unfilter_index!(db_index, filter_flags; ix1=_n_X+1, ix2=n_X) 
@@ -218,7 +218,7 @@ end
         _n_X += 1           # account for trust region center
         n_new = _n_X - n_X  # get a number for logging
         n_X = _n_X
-        @logmsg log_level "$(pad_str)RBFModel: Sampled $(n_new) points (now $n_X) in radius $(ΔZ1)."
+        @logmsg log_level "$(pad_str)RBFModel: Sampled $(n_new) points (now $n_X) in radius $(@sprintf("%.2e", ΔZ1))."
     end
     
     if n_X < min_points || min_points < max_points
@@ -251,7 +251,7 @@ end
             xZ, ix1=2, ix2=n_X, norm_p, chosen_index = db_index, th = th_qr,    
         )
         _n_X = n_X + n_new
-        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) points in radius $(Δ2)."
+        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) points in radius $(@sprintf("%.2e", Δ2))."
         
         ## `filter_flags` will be used in cholesky sampling.
         ## to avoid unnecessary checks, unmark chosen indices here already:
@@ -278,7 +278,7 @@ end
             ix1=2, ix2=n_X, norm_p, qr, n_new = min_points - n_X
         )
         n_X += n_new
-        @logmsg log_level "$(pad_str)RBFModel: Sampled $(n_new) points in radius $(ΔZ2)."
+        @logmsg log_level "$(pad_str)RBFModel: Sampled $(n_new) points in radius $(@sprintf("%.2e", ΔZ2))."
     end
 
     return n_X
@@ -367,7 +367,7 @@ function cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent::Int=0)
     if n_new > 0
         indent += 1
         pad_str = lpad("", indent)
-        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) additional points in radius $delta."
+        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) additional points in radius $(@sprintf("%.2e", delta))."
     end
     return n_X
 end

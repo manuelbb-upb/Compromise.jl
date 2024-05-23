@@ -1,7 +1,8 @@
 
 function initialize_structs( 
     MOP::AbstractMOP, ξ0::RVec, algo_opts::AlgorithmOptions,
-    user_callback :: AbstractStoppingCriterion = NoUserCallback(),
+    user_callback :: AbstractStoppingCriterion = NoUserCallback();
+    log_time::Bool=true
 )
 
     @assert !isempty(ξ0) "Starting point array `x0` is empty."
@@ -15,7 +16,9 @@ function initialize_structs(
         mop = initialize(MOP)
         initialize_structs_from_mop(mop, ξ0, algo_opts, user_callback)
     end
-    @logmsg algo_opts.log_level "Initialization complete after $(stats.time) sec."
+    if log_time 
+        @logmsg algo_opts.log_level "Initialization complete after $(stats.time) sec."
+    end
     return stats.value
 end
 

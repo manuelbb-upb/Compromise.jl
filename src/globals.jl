@@ -59,6 +59,7 @@ abstract type AbstractStepCache end
 # #### Stopping
 # An `AbstractStoppingCriterion` is applicable at various points in the algorithm:
 abstract type AbstractStoppingCriterion end
+abstract type AbstractUltimateStoppingCriterion <: AbstractStoppingCriterion end
 abstract type AbstractStopPoint end
 
 # #### Other

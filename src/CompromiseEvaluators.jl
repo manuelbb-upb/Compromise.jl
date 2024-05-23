@@ -52,7 +52,7 @@ function provides_hessians(op::AbstractNonlinearOperator)
 end
 # ## Call Counting
 
-import ..Compromise: AbstractStoppingCriterion, stop_message, @ignoraise
+import ..Compromise: AbstractUltimateStoppingCriterion, stop_message, @ignoraise
 
 Base.@kwdef mutable struct FuncCallCounter
     val :: Int = 0
@@ -79,7 +79,7 @@ end
 func_call_counter(op::AbstractNonlinearOperator, ::Val)=nothing
 max_num_calls(op::AbstractNonlinearOperator, ::Val)::Real=Inf
 
-struct BudgetExhausted <: AbstractStoppingCriterion
+struct BudgetExhausted <: AbstractUltimateStoppingCriterion
     ni :: Int
     mi :: Int
     order :: Int
