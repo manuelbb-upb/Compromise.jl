@@ -120,11 +120,16 @@ function compute_normal_step!(
     Dgx = cached_Dgx(mod_vals)
     hx = cached_hx(mod_vals)
     Dhx = cached_Dhx(mod_vals)
-    n = solve_normal_step_problem(
-        x, lb, ub, Ex_min_c, E, Ax_min_b, A, hx, Dhx, gx, Dgx, qp_optimizer_type(step_cache);
-        step_norm = step_cache.normal_step_norm
-    )
-    Base.copyto!(step_vals.n, n)
+    try
+        n = solve_normal_step_problem(
+            x, lb, ub, Ex_min_c, E, Ax_min_b, A, hx, Dhx, gx, Dgx, qp_optimizer_type(step_cache);
+            step_norm = step_cache.normal_step_norm
+        )
+        Base.copyto!(step_vals.n, n)
+    catch 
+        step_vals.n .= NaN
+    end
+
     nothing 
 end
 
