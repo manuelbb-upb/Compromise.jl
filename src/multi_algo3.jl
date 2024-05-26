@@ -43,7 +43,7 @@ function initialize_filter(F, sol, gamma)
     return _initialize_filter(F, tmp, gamma)
 end
 function _initialize_filter(::Type{F}, tmp::tmpType, gamma) where {F, tmpType}
-    return AugmentedVectorFilter{F, AugmentedVectorElement{F}, tmpType}(;
+    return AugmentedVectorFilter{F, AugmentedVectorElement{F}, tmpType, NoFilterMeta}(;
         print_name="Filter", gamma, tmp)
 end
 
@@ -55,11 +55,20 @@ function initialize_population(
     sol = make_solution(
         vals, step_vals, step_cache, iteration_scalars, mod, mod_vals, ST
     )
-    population = singleton_population(float_type(mop), sol)
+    meta = FilterMetaMOP(;
+        float_type = float_type(mop),
+        dim_vars = dim_vars(mop), 
+        dim_objectives = dim_objectives(mop),
+        dim_nl_eq_constraints = dim_nl_eq_constraints(mop),
+        dim_nl_ineq_constraints = dim_nl_ineq_constraints(mop),
+        dim_lin_eq_constraints = dim_lin_eq_constraints(mop),
+        dim_lin_ineq_constraints = dim_lin_ineq_constraints(mop),
+    )
+    population = singleton_population(float_type(mop), sol, meta)
     for elem in Iterators.drop(nondominated_elements(prepopulation), 1)
         sol = make_solution(
             elem.vals, step_vals, step_cache, iteration_scalars, mod, mod_vals, ST)
-        unconditionally_add_to_set!(population, sol)
+        unconditionally_add_to_set!(population, sol; elem_identifier = get_identifier(elem))
     end
     return sol, population
 end
@@ -70,7 +79,7 @@ function initialize_prepopulation(F, X, mop, scaler, lin_cons, vals; log_level=I
 end
 
 function make_prepopulation(::Type{F}, vals::valsType; log_level=Info) where {F, valsType}
-    prepopulation = AugmentedVectorFilter{F, ValueCacheElement{valsType}, Nothing}()
+    prepopulation = AugmentedVectorFilter{F, ValueCacheElement{valsType}, Nothing, NoFilterMeta}()
     add_to_set!(prepopulation, ValueCacheElement(; vals); log_level)
     return prepopulation
 end
@@ -106,8 +115,9 @@ function make_solution(
     return sstructs
 end
 
-function singleton_population(::Type{F}, sol::S) where {F, S}
-    population = AugmentedVectorFilter{F, S, Nothing}(; print_name="Population")
+function singleton_population(::Type{F}, sol::S, meta::M) where {F, S, M}
+    population = AugmentedVectorFilter{F, S, Nothing, M}(; 
+        print_name="Population", meta)
     unconditionally_add_to_set!(population, sol)
     return population
 end
@@ -134,7 +144,7 @@ function optimize_population!(
         restoration_seeds = AugmentedVectorFilter(;
         elems = empty(population.elems),
         gamma = population.gamma,
-        tmp = deepcopy(population.tmp)
+        tmp = nothing #deepcopy(population.tmp)
     )
     
     stop_optimization = false
@@ -171,6 +181,7 @@ function optimize_population!(
             sol.gen_id_ref[] += 1
             if check_filter
                 if !is_filter_acceptable(ndset, sol)
+                    @logmsg log_level "💀 🦜 marking $(get_identifier(sol)) as stale."
                     mark_stale!(population, sol)
                     continue
                 end
@@ -187,9 +198,9 @@ function optimize_population!(
             if !n_is_compatible
                 @logmsg log_level "… normal step not compatible. 1/2) Augmenting filter."
                 add_to_filter_and_check_population!(ndset, population, sol; log_level)
-
                 @logmsg log_level "2/2) Storing seed."
-                add_to_set!(restoration_seeds, sol; log_level)
+                #abc add_to_set!(restoration_seeds, sol; log_level, elem_identifier=get_identifier(sol))
+                add_to_set!(restoration_seeds, copy_solution_structs(sol); log_level, elem_identifier=get_identifier(sol))
                 remove_stale_elements!(restoration_seeds)
                 continue
             end
@@ -224,6 +235,13 @@ function select_solution(population)
     max_delta = -Inf
     min_gen_id, max_gen_id, _max_gen_id = max_gen_id_for_selection(population) 
     for sol in all_elements(population)
+        #=
+        @info """
+        \nsol_id = $(sol.sol_id_ref[])
+        gen_id = $(sol.gen_id_ref[])
+        θ = $(cached_theta(sol))
+        is_stale = $(is_stale(population, sol))"""
+        =#
         is_stale(population, sol) && continue
         is_empty = false
         is_converged(sol) && continue
@@ -394,7 +412,6 @@ function test_trial_point!(sol, ndset, population, optimizer_caches, algo_opts; 
 
     if augment_filter
         @logmsg log_level "$(indent_str(indent)) Adding $(sol.sol_id_ref[]) to filter."
-        #mark_stale!(population, sol) 
         add_to_filter_and_check_population!(ndset, population, sol; log_level, indent=2)
     end
     return nothing
@@ -520,7 +537,6 @@ function restore!(population, restoration_seeds, ndset, optimizer_caches, algo_o
     @logmsg log_level """\n
     ~~~~~~~~~~~~~~~~~~~~~ RESTORATION ~~~~~~~~~~~~~~~~~~~~~"""
 
-
     #=
     best_index = 0
     best_n_norm = Inf
@@ -544,6 +560,7 @@ function restore!(population, restoration_seeds, ndset, optimizer_caches, algo_o
 
     _, best_index = findmin(cached_theta, restoration_seeds.elems)
     best_sol = restoration_seeds.elems[best_index]
+    log_solution_values(best_sol, log_level)
     status = nothing
 
     @unpack (

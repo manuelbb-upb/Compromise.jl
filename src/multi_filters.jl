@@ -78,7 +78,9 @@ is_nondominated_quicktest(elem::AbstractSetElement, ndset::AbstractNondominatedS
 ## (mandatory)
 "Add `elem` to `ndset` without checking for dominance or removing any other elements."
 function unconditionally_add_to_set!(
-    ndset::AbstractNondominatedSet, elem::AbstractSetElement)
+    ndset::AbstractNondominatedSet, elem::AbstractSetElement;
+    kwargs...
+)
     return false
 end
 ## (optional)
@@ -110,10 +112,11 @@ function add_to_set!(
     for elem_nd in nondominated_elements(ndset)
         if dominates(elem, elem_nd)
             mark_stale!(ndset, elem_nd)
-            @logmsg log_level "$(indent_str(indent)) 💀 Marking `$(get_key(elem_nd))` as stale."
+            sid = get_identifier(elem_nd)
+            !isnothing(sid) && @logmsg log_level "$(indent_str(indent)) 💀 Marking `$(sid)` as stale."
         end
     end
-    return unconditionally_add_to_set!(ndset, elem)
+    return unconditionally_add_to_set!(ndset, elem; kwargs...)
 end
 
 # ## Algorithm Set Types
@@ -128,12 +131,12 @@ scalar_val(elem::AbstractAugmentedSetElement) = 0
 ## (mandatory)
 "Return the vector of values for `elem`."
 vector_vals(elem::AbstractAugmentedSetElement) = []
-## (mandatory)
-"Return an integer identifier for `elem` to index it in some set."
-get_key(elem::AbstractAugmentedSetElement) = 0
-## (mandatory)
-"Set the integer identifier for `elem` to `i` for indexing it in some set."
-set_key!(elem::AbstractAugmentedSetElement, i::Int) = nothing
+## (optional)
+"Return a human-readable identifier for `elem`."
+get_identifier(elem::AbstractAugmentedSetElement) = nothing
+## (optional)
+"Set the identifier for `elem` to `i`."
+set_identifier!(elem::AbstractAugmentedSetElement, i::Int) = nothing
 
 ## (derived)
 function dominates(
@@ -144,6 +147,7 @@ function dominates(
         scalar_val(elem_compare), vector_vals(elem_compare)
     )
 end
+
 ## (helper)
 function augmented_dominates(scalar_test, vec_test, scalar_compare, vec_compare)
     if isempty(vec_test) && isempty(vec_compare)
@@ -167,14 +171,43 @@ end
 
 # ### Implementations
 
+abstract type AbstractFilterMeta end
+struct NoFilterMeta <: AbstractFilterMeta end
+float_type(::AbstractFilterMeta)=DEFAULT_FLOAT_TYPE
+dim_vars(::AbstractFilterMeta)=0
+dim_objectives(::AbstractFilterMeta)=0
+dim_nl_eq_constraints(::AbstractFilterMeta)=0
+dim_nl_ineq_constraints(::AbstractFilterMeta)=0
+dim_lin_eq_constraints(::AbstractFilterMeta)=0
+dim_lin_ineq_constraints(::AbstractFilterMeta)=0
+dim_theta(::AbstractFilterMeta)=1
+
+Base.@kwdef struct FilterMetaMOP{F} <: AbstractFilterMeta
+    float_type :: Type{F} = DEFAULT_FLOAT_TYPE
+    dim_vars :: Int = 0
+    dim_objectives :: Int = 0
+    dim_nl_eq_constraints :: Int = 0
+    dim_nl_ineq_constraints :: Int = 0
+    dim_lin_eq_constraints :: Int = 0
+    dim_lin_ineq_constraints :: Int = 0
+end
+float_type(::FilterMetaMOP{F}) where F = F
+dim_vars(meta::FilterMetaMOP)=meta.dim_vars
+dim_objectives(meta::FilterMetaMOP)=meta.dim_objectives
+dim_nl_eq_constraints(meta::FilterMetaMOP)=meta.dim_nl_eq_constraints
+dim_nl_ineq_constraints(meta::FilterMetaMOP)=meta.dim_nl_ineq_constraints
+dim_lin_eq_constraints(meta::FilterMetaMOP)=meta.dim_lin_eq_constraints
+dim_lin_ineq_constraints(meta::FilterMetaMOP)=meta.dim_lin_ineq_constraints
+
 # We use this type for all of our sets:
 Base.@kwdef struct AugmentedVectorFilter{
-    F<:AbstractFloat, E<:AbstractAugmentedSetElement, tmpType
+    F<:AbstractFloat, E<:AbstractAugmentedSetElement, tmpType,
+    metaType<:AbstractFilterMeta
 } <: AbstractAugmentedNondominatedSet
     "Dictionary of set elements."
-    elems :: Dictionary{Int, E} = Dictionary{Int, AugmentedVectorElement{Float64}}()
+    elems :: Dictionary{UInt64, E} = Dictionary{UInt64, AugmentedVectorElement{Float64}}()
     "Dictionary for marking elements."
-    is_stale :: Dictionary{Int, Bool} = Dictionary{Int, Bool}()
+    is_stale :: Dictionary{UInt64, Bool} = Dictionary{UInt64, Bool}()
     
     "Cache for minimum scalar value for quicktest."
     min_scalar_val :: Base.RefValue{F} = Ref(Inf)
@@ -191,6 +224,8 @@ Base.@kwdef struct AugmentedVectorFilter{
     tmp :: tmpType = nothing
 
     print_name :: Union{Nothing, String} = nothing
+
+    meta :: metaType = NoFilterMeta()
 end
 all_elements(ndset::AugmentedVectorFilter) = values(ndset.elems)
 
@@ -201,14 +236,14 @@ _show_name(ndset::AugmentedVectorFilter, ::Nothing)=_show_defaut_name(ndset)
 _show_name(ndset::AugmentedVectorFilter, print_name::String)=print_name
 
 function is_stale(ndset::AugmentedVectorFilter{F, E}, elem::E) where {F, E} 
-    return get(ndset.is_stale, get_key(elem), false)
+    return get(ndset.is_stale, objectid(elem), false)
 end
 function mark_stale!(ndset::AugmentedVectorFilter{F, E}, elem::E) where {F, E}
-    set!(ndset.is_stale, get_key(elem), true)
+    set!(ndset.is_stale, objectid(elem), true)
     nothing
 end
 function unmark_stale!(ndset::AugmentedVectorFilter{F, E}, elem::E) where {F, E}
-    set!(ndset.is_stale, get_key(elem), false)
+    set!(ndset.is_stale, objectid(elem), false)
     nothing
 end
 
@@ -227,10 +262,17 @@ function is_nondominated_quicktest(
 end
 
 function unconditionally_add_to_set!(
-    ndset::AugmentedVectorFilter{F, E}, elem::E 
+    ndset::AugmentedVectorFilter{F, E}, elem::E;
+    elem_identifier=nothing,
+    kwargs...
 ) where {F, E<:AbstractAugmentedSetElement} 
-    k = ndset.counter[] += 1
-    set_key!(elem, k)
+    
+    ndset.counter[] += 1
+    if isa(elem_identifier, Int) 
+        ndset.counter[] = max(ndset.counter[], elem_identifier + 1)
+    end
+    set_identifier!(elem, ndset.counter[])
+
     prepare_for_set!(elem, ndset)
 
     sv = scalar_val(elem)
@@ -246,6 +288,7 @@ function unconditionally_add_to_set!(
             ndset.min_vector_vals .= vv
         end
     end
+    k = objectid(elem)
     insert!(ndset.elems, k, elem)
     insert!(ndset.is_stale, k, false)
     return true
@@ -264,8 +307,8 @@ end
 
 scalar_val(elem::AugmentedVectorElement) = elem.theta_fx[1]
 vector_vals(elem::AugmentedVectorElement) = @view(elem.theta_fx[2:end])
-get_key(elem::AugmentedVectorElement) = elem.key[]
-set_key!(elem::AugmentedVectorElement, i::Int) = (elem.key[] = i)
+get_identifier(elem::AugmentedVectorElement) = elem.key[]
+set_identifier!(elem::AugmentedVectorElement, i::Int) = (elem.key[] = i)
 
 function prepare_for_set!(elem::AugmentedVectorElement, ndset::AugmentedVectorFilter)
     theta = scalar_val(elem)
@@ -281,8 +324,8 @@ Base.@kwdef struct ValueCacheElement{valsType} <: AbstractAugmentedSetElement
 end
 scalar_val(elem::ValueCacheElement)=cached_theta(elem.vals)
 vector_vals(elem::ValueCacheElement)=cached_fx(elem.vals)
-get_key(elem::ValueCacheElement)=elem.key[]
-set_key!(elem::ValueCacheElement, i::Int)=elem.key[] = i
+get_identifier(elem::ValueCacheElement)=elem.key[]
+set_identifier!(elem::ValueCacheElement, i::Int)=elem.key[] = i
 
 # Element type and cache container for solutions
 struct SolutionStructs{
@@ -307,14 +350,20 @@ function Base.show(io::IO, sstructs::SolutionStructs)
 end
 scalar_val(elem::SolutionStructs) = cached_theta(elem)
 vector_vals(elem::SolutionStructs) = cached_fx(elem)
-get_key(elem::SolutionStructs) = elem.sol_id_ref[]
-set_key!(elem::SolutionStructs, i::Int) = (elem.sol_id_ref[] = i)
+get_identifier(elem::SolutionStructs) = elem.sol_id_ref[]
+set_identifier!(elem::SolutionStructs, i::Int) = (elem.sol_id_ref[] = i)
 
 is_converged(::Any)=false
 is_converged(::AbstractStoppingCriterion)=true
 is_converged(status_ref::Base.RefValue)=is_converged(status_ref[])
 is_converged(sstructs::SolutionStructs)=is_converged(sstructs.status_ref)
 
+@forward SolutionStructs.vals dim_vars(sols::SolutionStructs)
+@forward SolutionStructs.vals dim_objectives(sols::SolutionStructs)
+@forward SolutionStructs.vals dim_nl_eq_constraints(sols::SolutionStructs)
+@forward SolutionStructs.vals dim_nl_ineq_constraints(sols::SolutionStructs)
+@forward SolutionStructs.vals dim_lin_eq_constraints(sols::SolutionStructs)
+@forward SolutionStructs.vals dim_lin_ineq_constraints(sols::SolutionStructs)
 @forward SolutionStructs.vals cached_x(sols::SolutionStructs)
 @forward SolutionStructs.vals cached_fx(sols::SolutionStructs)
 @forward SolutionStructs.vals cached_hx(sols::SolutionStructs)
@@ -324,6 +373,7 @@ is_converged(sstructs::SolutionStructs)=is_converged(sstructs.status_ref)
 @forward SolutionStructs.vals cached_Ex(sols::SolutionStructs)
 @forward SolutionStructs.vals cached_Ex_min_c(sols::SolutionStructs)
 @forward SolutionStructs.vals cached_theta(sols::SolutionStructs)
+dim_theta(::SolutionStructs) = 1
 
 function copy_solution_structs(sstructs)
     @unpack vals, step_vals, step_cache, iteration_scalars, mod, mod_vals, status_ref, 
@@ -400,29 +450,43 @@ end
 
 function add_to_filter_and_check_population!(
     ndset, population, sol;
-    indent=0, log_level=Info
+    indent=0, log_level=Info,
+    elem_identifier=nothing
 )
 
     elem = make_filter_element(sol)
-    add_to_set!(ndset, elem; check_elem=false, log_level, indent)
+    add_to_set!(ndset, elem; check_elem=false, log_level, indent, elem_identifier)
 
     for other_sol in all_elements(population)
         is_stale(population, other_sol) && continue
         if dominates(elem, other_sol)   # it is important to use `elem` here, not `sol`; elem has the filter offset
+            sid = get_identifier(sol)
+            !isnothing(sid) && @logmsg log_level "💀 Marking $(sid) as stale."
             mark_stale!(population, other_sol)
         end
     end
     return elem
 end
 
-for fname in (
-    :cached_x, :cached_ξ, :cached_fx, :cached_gx, :cached_hx,
-    :cached_Ax, :cached_Ex,
-    :cached_Ax_min_b, :cached_Ex_min_c,
-    :cached_theta
+for (dimname, fname) in (
+    (:dim_vars, :cached_x),
+    (:dim_vars, :cached_ξ), 
+    (:dim_objectives, :cached_fx), 
+    (:dim_nl_ineq_constraints, :cached_gx), 
+    (:dim_nl_eq_constraints, :cached_hx),
+    (:dim_lin_ineq_constraints, :cached_Ax), 
+    (:dim_lin_eq_constraints, :cached_Ex),
+    (:dim_lin_ineq_constraints, :cached_Ax_min_b), 
+    (:dim_lin_eq_constraints, :cached_Ex_min_c),
+    (:dim_theta, :cached_theta),
 )
     @eval function $(fname)(population::AugmentedVectorFilter)
-        return array2mat(mapreduce($(fname), hcat, nondominated_elements(population)))
+        return array2mat(
+            mapreduce(
+                $(fname), hcat, nondominated_elements(population);
+                init=Matrix{float_type(population.meta)}(undef, $(dimname)(population.meta), 0)
+            )
+        )
     end
 end
 

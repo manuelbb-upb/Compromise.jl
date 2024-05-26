@@ -217,6 +217,7 @@ function solve_normal_step_problem(
 
     opt = JuMP.Model(qp_opt)
     JuMP.set_silent(opt)
+    JuMP.set_attribute(opt, "time_limit", 2*n_vars)
 
     JuMP.@variable(opt, n[1:n_vars])
 

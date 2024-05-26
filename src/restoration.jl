@@ -234,6 +234,8 @@ function postproccess_restoration(
     copyto!(cached_x(vals_tmp), xr_opt)
     @ignoraise eval_mop!(vals_tmp, mop, scaler)
 
+    @logmsg algo_opts.log_level "Checking restoration result with θ=$(cached_theta(vals_tmp))."
+
     trial_caches.diff_x .= cached_x(vals) .- cached_x(vals_tmp)
     trial_caches.diff_fx .= cached_fx(vals) .- cached_fx(vals_tmp)
     trial_caches.diff_fx_mod .= cached_fx(mod_vals)
