@@ -204,6 +204,7 @@ Base.@kwdef struct RBFTrainingBuffers{T<:Real}
     v2 :: Vector{T}
 end
 
+#=
 function Base.copyto!(dst::RBFTrainingBuffers, src::RBFTrainingBuffers)
   for fn in (
     :lb, :ub, :FX, :xZ, :fxZ, :db_index, :sorting_flags, :Φ, :Q, :R, :Qj, :Rj, #src :Π,
@@ -224,6 +225,7 @@ function Base.copyto!(dst::RBFTrainingBuffers, src::RBFTrainingBuffers)
     copyto!(dst.qr_ws_min_points, src.qr_ws_min_points)
   end
 end
+=#
 
 function Base.show(io::IO, buffers::RBFTrainingBuffers{T}) where T
     iscompact = get(io, :compact, false)

@@ -487,9 +487,9 @@ function CE.copy_model(mod::SimpleMOPSurrogate)
         nl_eq_constraints,
         nl_ineq_constraints,
         num_vars,
-        deepcopy(mod_objectives),
-        deepcopy(mod_nl_eq_constraints),
-        deepcopy(mod_nl_ineq_constraints)
+        CE.copy_model(mod_objectives),
+        CE.copy_model(mod_nl_eq_constraints),
+        CE.copy_model(mod_nl_ineq_constraints)
     )
 end
 

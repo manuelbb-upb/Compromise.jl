@@ -127,8 +127,15 @@ function CE.update!(
         log_level, norm_p=Inf, indent, kwargs...
     )
 end
-#=
-function CE.universal_copy(rbf::RBFModel)
+
+"""
+    copy_model(rbf::RBFModel)
+
+Return a new `RBFModel`, partially copied from `rbf`.
+The new model will have independent parameters (deepcopied), 
+but the same configuration and the same buffer object is shared.
+"""
+function CE.copy_model(rbf::RBFModel)
     @unpack dim_x, dim_y, dim_π, min_points, max_points, delta_max, poly_deg, kernel = rbf
     @unpack shape_parameter_function, enforce_fully_linear, search_factor = rbf
     @unpack max_search_factor, sampling_factor, max_sampling_factor, th_qr, th_cholesky = rbf
@@ -143,6 +150,7 @@ function CE.universal_copy(rbf::RBFModel)
     )
 end
 
+#=
 function CE.universal_copy!(mod_trgt::RBFModel, mod_src::RBFModel)
     copyto!(mod_trgt.params, mod_src.params)
 end
