@@ -27,7 +27,6 @@ function optimize_set(
 
     F = float_type(mop)
     prepopulation = initialize_prepopulation(F, X, mop, scaler, lin_cons, vals; log_level)   
-    
     sol, population = initialize_population(
         prepopulation, mod_vals, step_vals, step_cache, iteration_scalars, mop, mod, stop_crits
     )
@@ -53,7 +52,8 @@ function initialize_population(
     ST = _status_type(mop, mod, stop_crits)
     vals = getfield(first(nondominated_elements(prepopulation)), :vals)
     sol = make_solution(
-        vals, step_vals, step_cache, iteration_scalars, mod, mod_vals, ST
+        vals, step_vals, step_cache, iteration_scalars, mod, mod_vals, ST; 
+        gen_id = 0,
     )
     meta = FilterMetaMOP(;
         float_type = float_type(mop),
@@ -67,15 +67,24 @@ function initialize_population(
     population = singleton_population(float_type(mop), sol, meta)
     for elem in Iterators.drop(nondominated_elements(prepopulation), 1)
         sol = make_solution(
-            elem.vals, step_vals, step_cache, iteration_scalars, mod, mod_vals, ST)
-        unconditionally_add_to_set!(population, sol; elem_identifier = get_identifier(elem))
+            elem.vals, step_vals, step_cache, iteration_scalars, mod, mod_vals, ST;
+            gen_id = 0
+        )
+        unconditionally_add_to_set!(
+            population, sol; 
+            elem_identifier = get_identifier(elem)  # retain ids from prepopulation for consistent logging.
+        )
     end
     return sol, population
 end
 
 function initialize_prepopulation(F, X, mop, scaler, lin_cons, vals; log_level=Info)
     prepopulation = make_prepopulation(F, vals; log_level)
-    return add_columns_to_prepulation!(prepopulation, X, mop, scaler, lin_cons, vals; log_level)
+    return add_columns_to_prepulation!(
+        prepopulation, X, mop, scaler, lin_cons, vals;
+        log_level,
+        offset = 1
+    )
 end
 
 function make_prepopulation(::Type{F}, vals::valsType; log_level=Info) where {F, valsType}
@@ -84,20 +93,29 @@ function make_prepopulation(::Type{F}, vals::valsType; log_level=Info) where {F,
     return prepopulation
 end
 
-function add_columns_to_prepulation!(prepopulation, X, mop, scaler, lin_cons, vals; offset=1, log_level=Info)
-    for ξ0 in Iterators.drop(eachcol(X), offset)
+function add_columns_to_prepulation!(
+    prepopulation, X, mop, scaler, lin_cons, vals; 
+    offset=1, log_level=Info
+)
+    for (i, ξ0) in enumerate(eachcol(X))
+        i <= offset && continue
+
         _vals = deepcopy(vals)
         copyto!(cached_ξ(_vals), ξ0)
         project_into_box!(cached_ξ(_vals), lin_cons)
         scale!(cached_x(_vals), scaler, cached_ξ(_vals))
-        eval_mop!(_vals, mop)
-        add_to_set!(prepopulation, ValueCacheElement(; vals=_vals); log_level)
+        @ignorebreak eval_mop!(_vals, mop)
+        add_to_set!(
+            prepopulation, ValueCacheElement(; vals=_vals); 
+            log_level, check_elem = true,
+            elem_identifier=i
+        )
     end
     return prepopulation
 end
 
 function make_solution(
-    vals, step_vals, step_cache, iteration_scalars, mod, mod_vals, ::Type{status_type}=Any,
+    vals, step_vals, step_cache, iteration_scalars, mod, mod_vals, ::Type{status_type}=Any;
     gen_id::Int=1,
     sol_id::Int=1
 ) where {status_type}
@@ -110,7 +128,7 @@ function make_solution(
         deepcopy(mod_vals),
         Ref{status_type}(nothing),
         Ref(gen_id), 
-        Ref(gen_id)
+        Ref(sol_id)
     )
     return sstructs
 end
@@ -161,7 +179,7 @@ function optimize_population!(
             if population_empty
                 sol, status = restore!(
                     population, restoration_seeds, ndset, optimizer_caches, algo_opts; 
-                    max_gen_id
+                    gen_id = max_gen_id + 1
                 )
                 if status isa AbstractStoppingCriterion
                     log_stop_code(status, log_level)
@@ -197,7 +215,7 @@ function optimize_population!(
 
             if !n_is_compatible
                 @logmsg log_level "… normal step not compatible. 1/2) Augmenting filter."
-                add_to_filter_and_check_population!(ndset, population, sol; log_level)
+                add_to_filter_and_mark_population!(ndset, population, sol; log_level)
                 @logmsg log_level "2/2) Storing seed."
                 #abc add_to_set!(restoration_seeds, sol; log_level, elem_identifier=get_identifier(sol))
                 add_to_set!(restoration_seeds, copy_solution_structs(sol); log_level, elem_identifier=get_identifier(sol))
@@ -376,7 +394,11 @@ function log_solution_values(sstructs, log_level; normal_step=false)
     return nothing
 end
 
-function test_trial_point!(sol, ndset, population, optimizer_caches, algo_opts; indent=0)
+function test_trial_point!(
+    sol, ndset, population, optimizer_caches, algo_opts, ver=Val(:version1); 
+    indent=0,
+    gen_id=nothing
+)
     @unpack log_level = algo_opts
     @unpack vals, step_vals, step_cache, iteration_scalars, mod, mod_vals = sol
     @unpack (
@@ -385,7 +407,7 @@ function test_trial_point!(sol, ndset, population, optimizer_caches, algo_opts; 
     ) = optimizer_caches
  
     @ignoraise delta_new, is_good_trial_point, augment_filter = _test_trial_point!(
-        sol, ndset,
+        ver, sol, ndset,
         population, mop, scaler, trial_caches, vals_tmp, algo_opts; 
         indent
     )
@@ -402,8 +424,13 @@ function test_trial_point!(sol, ndset, population, optimizer_caches, algo_opts; 
     
     if is_good_trial_point
         @logmsg log_level "$(indent_str(indent)) Trial point is accepted..."
+        
         _sol = copy_solution_structs(sol)
         universal_copy!(_sol.vals, vals_tmp)
+        if !isnothing(gen_id)
+            _sol.gen_id_ref[] = gen_id
+        end
+
         add_to_set!(population, _sol; log_level, indent=indent+1)
         @logmsg log_level "$(indent_str(indent)) Trial point id = $(_sol.sol_id_ref[])"
     else
@@ -412,12 +439,13 @@ function test_trial_point!(sol, ndset, population, optimizer_caches, algo_opts; 
 
     if augment_filter
         @logmsg log_level "$(indent_str(indent)) Adding $(sol.sol_id_ref[]) to filter."
-        add_to_filter_and_check_population!(ndset, population, sol; log_level, indent=2)
+        add_to_filter_and_mark_population!(ndset, population, sol; log_level, indent=2)
     end
     return nothing
 end
 
 function _test_trial_point!(
+    ::Val{:version1},
     sol, ndset, 
     population, mop, scaler, trial_caches, vals_tmp , algo_opts;
     indent=0,
@@ -530,7 +558,8 @@ function is_nondominated_with_offset(population, θxs, fxs, offset)
 end
 
 function restore!(population, restoration_seeds, ndset, optimizer_caches, algo_opts; 
-    max_gen_id,
+    gen_id,
+    augment_filter=false,
     indent=0
 )
     @unpack log_level = algo_opts
@@ -560,6 +589,13 @@ function restore!(population, restoration_seeds, ndset, optimizer_caches, algo_o
 
     _, best_index = findmin(cached_theta, restoration_seeds.elems)
     best_sol = restoration_seeds.elems[best_index]
+    if augment_filter
+        add_to_filter_and_mark_population!(
+            ndset, population, best_sol; 
+            indent, log_level,
+            elem_identifier = get_identifier(best_sol)
+        )
+    end
     log_solution_values(best_sol, log_level)
     status = nothing
 
@@ -569,8 +605,9 @@ function restore!(population, restoration_seeds, ndset, optimizer_caches, algo_o
     ) = optimizer_caches 
 
     sol = copy_solution_structs(best_sol)
-    sol.gen_id_ref[] = max_gen_id + 1
+    sol.gen_id_ref[] = gen_id
     unconditionally_add_to_set!(population, sol)
+    @logmsg log_level "$(indent_str(indent))Restoration point has id $(get_identifier(sol))."
 
     @unpack vals, step_vals, step_cache, iteration_scalars, mod, mod_vals = sol
     status = do_restoration(

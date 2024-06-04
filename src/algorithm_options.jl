@@ -79,7 +79,7 @@ Base.@kwdef struct AlgorithmOptions{T <: AbstractFloat, SC, SCALER_CFG_TYPE}
 	
 	# compatibilty parameters
 	"Factor for normal step compatibility test. The smaller `c_delta`, the stricter the test."
-	c_delta :: T = 0.9 				# 0.7 is suggested by Fletcher et. al. 
+	c_delta :: T = 0.99 				# 0.7 is suggested by Fletcher et. al. 
 	"Factor for normal step compatibility test. The smaller `c_mu`, the stricter the test for small radii."
 	c_mu :: T = 100.0 				# 100 is suggested by Fletcher et. al.
 	"Exponent for normal step compatibility test. The larger `mu`, the stricter the test for small radii."
@@ -93,7 +93,7 @@ Base.@kwdef struct AlgorithmOptions{T <: AbstractFloat, SC, SCALER_CFG_TYPE}
 end
 
 ## to be sure that equality is based on field values:
-#@batteries AlgorithmOptions selfconstructor=false
+@batteries AlgorithmOptions selfconstructor=false
 
 ## outer constructor to automatically convert kwarg values to correct type:
 function AlgorithmOptions(
@@ -206,6 +206,7 @@ end
 
 Base.@kwdef struct SequentialOuterAlgorithmOptions{A}
 	sort_by_delta :: Bool = true
+	delta_factor :: Float64 = 0.0
 	initial_nondominance_testing :: Bool = false
 	nondominance_testing_offset :: Int = typemax(Int)
 	log_level :: LogLevel = Info

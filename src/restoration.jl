@@ -14,7 +14,7 @@ function do_restoration(
     
     iteration_status.iteration_type = RESTORATION
 
-    stopval = filter_min_theta(filter)
+    stopval = min(0.05, filter_min_theta(filter))
 
     ret = :TODO
     theta = cached_theta(vals)
@@ -162,7 +162,8 @@ function solve_restoration_problem(mop, vals_tmp, scaler, scaled_cons, x, theta;
     opt.xtol_rel = tol
     opt.xtol_abs = eps(F)
 	opt.maxeval = 50 * n_vars^2
-	opt.stopval = max(stopval - tol, 0)
+	#opt.stopval = max(stopval - tol, 0)
+    opt.stopval = 0
 
     constr! = restoration_constraints(mop, vals_tmp, scaler, scaled_cons)
     n_constr = dim_nl_ineq_constraints(mop) + 2 * dim_nl_eq_constraints(mop) + dim_lin_ineq_constraints(mop) + 2 * dim_lin_eq_constraints(mop)

@@ -101,10 +101,12 @@ function add_to_set!(
     check_elem::Bool=true,
     log_level::LogLevel=Info,
     indent::Int=0,
+    elem_identifier=nothing,
     kwargs...
 )
     if check_elem
         if is_dominated(elem, ndset)
+            @logmsg log_level "$(indent_str(indent)) 💀 Rejecting new element with identifier $(elem_identifier)."
             return false
         end
     end
@@ -269,7 +271,7 @@ function unconditionally_add_to_set!(
     
     ndset.counter[] += 1
     if isa(elem_identifier, Int) 
-        ndset.counter[] = max(ndset.counter[], elem_identifier + 1)
+        ndset.counter[] = max(ndset.counter[], elem_identifier)
     end
     set_identifier!(elem, ndset.counter[])
 
@@ -448,7 +450,7 @@ function make_filter_element(vals_or_sol)
     return AugmentedVectorElement(; theta_fx)
 end
 
-function add_to_filter_and_check_population!(
+function add_to_filter_and_mark_population!(
     ndset, population, sol;
     indent=0, log_level=Info,
     elem_identifier=nothing

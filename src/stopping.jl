@@ -313,6 +313,10 @@ function unwrap_stop_crit(wcrit::WrappedStoppingCriterion)
 end
 unwrap_stop_crit(crit)=crit
 
+function is_ultimate_stop_crit(crit)
+    return unwrap_stop_crit(crit) isa AbstractUltimateStoppingCriterion
+end
+
 # ## Container
 mutable struct DefaultStoppingCriteriaContainer{F, UC, DC<:Tuple} <: AbstractStoppingCriterion
     x_norm2 :: F

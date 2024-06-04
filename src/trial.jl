@@ -124,12 +124,36 @@ function _trial_triplet(::Val{:max_diff}, fx, fxs, fx_mod, fxs_mod, diff_fx, dif
 end
 
 function _trial_triplet(mode::Val{:min_rho}, fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod)
-    rho = minimum( diff_fx ./ diff_fx_mod )
+    rho = Inf
+    for i = eachindex(diff_fx)
+        mxi = diff_fx_mod[i]
+        mxi <= 0 && continue
+        fxi = diff_fx[i]
+        rhoi = fxi / mxi
+        if rhoi <= rho
+            rho = rhoi
+        end
+    end
+    if isinf(rho) || isnan(rho)
+        rho = 0
+    end
     return diff_fx, diff_fx_mod, rho
 end
 
 function _trial_triplet(::Val{:max_rho}, fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod)
-    rho = maximum( diff_fx ./ diff_fx_mod )
+    rho = 0
+    for i = eachindex(diff_fx)
+        mxi = diff_fx_mod[i]
+        mxi <= 0 && continue
+        fxi = diff_fx[i]
+        rhoi = fxi / mxi
+        if rhoi >= rho
+            rho = rhoi
+        end
+    end
+    if isinf(rho) || isnan(rho)
+        rho = 0
+    end
     return diff_fx, diff_fx_mod, rho
 end
 

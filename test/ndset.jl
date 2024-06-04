@@ -19,3 +19,4 @@ algo_opts = C.AlgorithmOptions(;
 )
 
 population = C.optimize_set(X, _mop; algo_opts);
+population2 = C.optimize_many(X, _mop; algo_opts);

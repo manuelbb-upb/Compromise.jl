@@ -195,7 +195,7 @@ function filter_offset_values(ndset, fx, theta, gamma=nothing)
     return theta_j, fx_j
 end
 
-function add_to_filter_and_check_population!(ndset, population, sstructs;indent=0, log_level=Info)
+function add_to_filter_and_mark_population!(ndset, population, sstructs;indent=0, log_level=Info)
     ## assume that without `sstructs` all elements of `population` that
     ## are not stale are filter-acceptable
     theta_new, fx_new = filter_offset_values(ndset, cached_fx(sstructs), cached_theta(sstructs))
@@ -510,7 +510,7 @@ function test_trial_point!(
     if augment_filter
         @logmsg log_level "$(indent_str(indent)) Adding $(sstructs.sol_id_ref[]) to filter."
         #mark_stale!(sstructs) 
-        add_to_filter_and_check_population!(ndset, population, sstructs; log_level, indent=2)
+        add_to_filter_and_mark_population!(ndset, population, sstructs; log_level, indent=2)
     end
     return nothing
 end
@@ -750,7 +750,7 @@ function step_normally!(
 
         if !n_is_compatible
             @logmsg log_level "… normal step not compatible. Augmenting filter."
-            add_to_filter_and_check_population!(ndset, population, sstructs; log_level)
+            add_to_filter_and_mark_population!(ndset, population, sstructs; log_level)
         end
     end
     #remove_stale!(population)

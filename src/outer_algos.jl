@@ -66,7 +66,8 @@ function optimize_with_algo(
         end
     end
 
-    sort_by = opt_cache -> opt_cache.iteration_scalars.delta
+    delta_func = opt_cache -> opt_cache.iteration_scalars.delta
+    crit_func = opt_cache -> opt_cache.step_vals.crit_ref[]
     I = collect(1:length(all_optimizer_caches))
     
     outer_it_index = 0
@@ -75,17 +76,47 @@ function optimize_with_algo(
     while any(is_running)
         outer_it_index += 1
         is_nd_tested = false
-        sortperm!(I, all_optimizer_caches; by = sort_by, rev = true)
-        for (i, ξ0_i) in enumerate(eachcol(_ξ0))
+        
+        if outer_opts.sort_by_delta
+            sortperm!(I, all_optimizer_caches; by = delta_func, rev = true)
+        end
+        
+        Δ_largest = mapreduce(delta_func, max, @view(all_optimizer_caches[is_running]); init=0)
+        crit_largest = -Inf
+        for i in I
+            !is_running[i] && continue
+            opt_cache_i = all_optimizer_caches[i]
+            opt_cache_i.iteration_scalars.it_index < 1 && continue
+            χ = crit_func(opt_cache_i)
+            if χ > crit_largest
+                crit_largest = χ
+            end
+        end
+        
+        counter = 0
+        for i in I
             if flags_dominated[i]
                 is_running[i] = false
             end
+        
             !is_running[i] && continue
+            opt_cache_i = all_optimizer_caches[i]
+            if (
+                #counter > dim_objectives(MOP) && 
+                delta_func(opt_cache_i) <= Δ_largest * outer_opts.delta_factor
+                #!isinf(crit_largest) &&
+                #false
+                #crit_func(opt_cache_i) < 0.05 * crit_largest
+            )
+                continue
+            end
+            counter += 1
+            ξ0_i = @view(_ξ0[:, i])
             @logmsg log_level """\n
             #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!
             # COLUMN $(i).
             #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!"""
-            stop_code = do_inner_iteration!(all_optimizer_caches[i], algo_opts)
+            stop_code = do_inner_iteration!(opt_cache_i, algo_opts)
             if stop_code isa AbstractStoppingCriterion
                 is_running[i] = false
 
@@ -102,12 +133,22 @@ function optimize_with_algo(
         if outer_it_index % nd_offset == 0
             @logmsg log_level "NONDOMINANCE TESTING"
             flags_dominated = _flags_of_dominated_caches(flags_dominated, all_optimizer_caches)
-            is_nd_tested = true
+            for i = eachindex(all_optimizer_caches)
+                if flags_dominated[i]
+                    is_running[i] = false
+                end
+            end
+                is_nd_tested = true
         end
     end
     if outer_opts.final_nondominance_testing && !is_nd_tested
         @logmsg log_level "NONDOMINANCE TESTING"
-        flags_dominated = _flags_of_dominated_caches(flags_dominated, all_optimizer_caches)
+        flags_dominated = _flags_of_dominated_caches(flags_dominated, all_optimizer_caches)        
+        for i = eachindex(all_optimizer_caches)
+            if flags_dominated[i]
+                is_running[i] = false
+            end
+        end
     end
 
     deleteat!(all_return_objects, flags_dominated)
