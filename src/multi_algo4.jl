@@ -149,15 +149,8 @@ function optimize_population!(
         end
 
         stop_optimization && continue
-        
-        stop_optimization = restoration_required = true
-        for sol in population.elems
-            is_stale(population, sol) && continue
-            restoration_required = false
-            is_converged(sol) && continue
-            stop_optimization = false
-            break
-        end
+
+        restoration_required, stop_optimization = check_population(population)
         
     end
     @logmsg log_level "🏁 🏁 🏁 🏁 🏁 FINISHED 🏁 🏁 🏁 🏁 🏁 ."
@@ -174,6 +167,37 @@ end
 function solution_sorting_vector(sol)
     @unpack vals, iteration_scalars = sol
     return vcat(cached_theta(vals), iteration_scalars.delta, -sol.gen_id_ref[])
+end
+
+function check_population(population)
+    ## if all elements are (stale or converged): stop
+    ## ⇔ if there is an element neither stale nor converged: don't stop
+
+    ## if all elements are stale, and there is no converged solution: restoration
+    ## ⇔ if there is a nonstale element or there is a converged solution: dont do restoration
+
+    stop_optimization = true
+    any_converged = false
+    for sol in population.elems
+        if is_converged(sol)
+            any_converged = true
+            continue
+        end
+        is_stale(population, sol) && continue
+        ## element not stale nor converged: don't stop
+        stop_optimization = false
+        break
+    end
+
+    do_restoration = false
+    if stop_optimization
+        if !any_converged
+            do_restoration = true
+            stop_optimization = false
+        end
+    end
+
+    return do_restoration, stop_optimization
 end
 
 
@@ -265,9 +289,10 @@ function _test_trial_point!(
                     is_good_trial_point = true
 
                     delta_new = gamma_shrink * delta
-                    if minimum( diff_fx[is_pos] ./ diff_fx_mod[is_pos] ) >= nu_success
+                    rho_success = minimum( diff_fx[is_pos] ./ diff_fx_mod[is_pos] )
+                    if rho_success >= nu_success
                         if delta < delta_max 
-                            delta = min(delta_max, gamma_grow * delta)
+                            delta_new = min(delta_max, gamma_grow * delta)
                         end
                     end
                 else

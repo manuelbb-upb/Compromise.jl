@@ -42,7 +42,7 @@
     enforce_fully_linear :: Bool = true
 
     "Enlargement factor for trust region to look for affinely independent points in."
-    search_factor :: T = 2.0
+    search_factor :: T = 2 + 1e-6
     sampling_factor :: T = 1.0
     
     "Enlargement factor for maximum trust region to look for affinely independent points in."

@@ -126,7 +126,8 @@ function compute_normal_step!(
             step_norm = step_cache.normal_step_norm
         )
         Base.copyto!(step_vals.n, n)
-    catch 
+    catch err
+        @warn "Error in normal step computation." exception=(err, catch_backtrace())
         step_vals.n .= NaN
     end
 
@@ -217,7 +218,7 @@ function solve_normal_step_problem(
 
     opt = JuMP.Model(qp_opt)
     JuMP.set_silent(opt)
-    JuMP.set_attribute(opt, "time_limit", 2*n_vars)
+    JuMP.set_attribute(opt, "time_limit", Float64(2*n_vars))
 
     JuMP.@variable(opt, n[1:n_vars])
 
