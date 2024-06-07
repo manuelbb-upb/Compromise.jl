@@ -128,7 +128,8 @@ function make_solution(
         deepcopy(mod_vals),
         Ref{status_type}(nothing),
         Ref(gen_id), 
-        Ref(sol_id)
+        Ref(sol_id),
+        Ref(false)
     )
     return sstructs
 end
@@ -359,7 +360,10 @@ function step_normally!(sol, ndset, optimizer_caches, algo_opts; indent=0)
 
     @logmsg log_level "* Updating Surrogates."
     
-    @ignoraise update_models!(mod, delta, scaler, vals, scaled_cons; log_level, indent) indent
+    if !sol.is_restored_ref[]
+        @ignoraise update_models!(mod, delta, scaler, vals, scaled_cons; log_level, indent) indent
+    end
+    sol.is_restored_ref[] = false
     @ignoraise eval_and_diff_mod!(mod_vals, mod, cached_x(vals)) indent
 
     do_normal_step!(

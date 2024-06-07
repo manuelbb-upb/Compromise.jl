@@ -79,6 +79,7 @@ function optimize_population!(
                 sol.status_ref[] = status
                 stop_optimization = true
             end
+            sol.is_restored_ref[] = true
             restoration_required = false
             continue
         end
@@ -115,7 +116,7 @@ function optimize_population!(
                 #@logmsg log_level "… normal step not compatible. 1/2) Augmenting filter."
                 #add_to_filter_and_mark_population!(ndset, population, sol; log_level)
                 mark_stale!(population, sol)
-                @logmsg log_level "Storing seed."
+                @logmsg log_level "Normal step incompatible, storing seed."
                 add_to_set!(
                     restoration_seeds, 
                     copy_solution_structs(sol);     # I think copying is very important, but I can't remember why

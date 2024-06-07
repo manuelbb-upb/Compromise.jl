@@ -345,6 +345,8 @@ struct SolutionStructs{
     status_ref :: Base.RefValue{statusType}
     gen_id_ref :: Base.RefValue{Int}
     sol_id_ref :: Base.RefValue{Int}
+
+    is_restored_ref :: Base.RefValue{Bool}
 end
 function Base.show(io::IO, sstructs::SolutionStructs)
     @unpack sol_id_ref = sstructs
@@ -379,7 +381,7 @@ dim_theta(::SolutionStructs) = 1
 
 function copy_solution_structs(sstructs)
     @unpack vals, step_vals, step_cache, iteration_scalars, mod, mod_vals, status_ref, 
-        gen_id_ref, sol_id_ref = sstructs
+        gen_id_ref, sol_id_ref, is_restored_ref = sstructs
     return SolutionStructs(
         deepcopy(vals),
         deepcopy(step_vals),
@@ -389,7 +391,8 @@ function copy_solution_structs(sstructs)
         deepcopy(mod_vals),
         deepcopy(status_ref),
         deepcopy(gen_id_ref),
-        deepcopy(sol_id_ref)
+        deepcopy(sol_id_ref),
+        deepcopy(is_restored_ref)
     )
 end
 
