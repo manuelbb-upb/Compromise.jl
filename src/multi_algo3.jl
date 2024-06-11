@@ -358,9 +358,8 @@ function step_normally!(sol, ndset, optimizer_caches, algo_opts; indent=0)
    
     log_solution_values(sol, log_level)
 
-    @logmsg log_level "* Updating Surrogates."
-    
     if !sol.is_restored_ref[]
+        @logmsg log_level "* Updating Surrogates."
         @ignoraise update_models!(mod, delta, scaler, vals, scaled_cons; log_level, indent) indent
     end
     sol.is_restored_ref[] = false
@@ -410,7 +409,7 @@ function test_trial_point!(
         crit_cache, trial_caches, iteration_status,
     ) = optimizer_caches
  
-    @ignoraise delta_new, is_good_trial_point, augment_filter = _test_trial_point!(
+    @ignoraise delta_new, is_good_trial_point, augment_filter, delta_child = _test_trial_point!(
         ver, sol, ndset,
         population, mop, scaler, trial_caches, vals_tmp, algo_opts; 
         indent
@@ -431,6 +430,7 @@ function test_trial_point!(
         
         _sol = copy_solution_structs(sol)
         universal_copy!(_sol.vals, vals_tmp)
+        _sol.iteration_scalars.delta = delta_child
         if !isnothing(gen_id)
             _sol.gen_id_ref[] = gen_id
         end
@@ -545,7 +545,7 @@ function _test_trial_point!(
     end
     iteration_scalars.delta = delta_new
     @logmsg log_level "$(indent_str(indent)) Δ_new = $(delta_new) (was Δ = $(delta))"
-    return delta_new, is_good_trial_point, augment_filter
+    return delta_new, is_good_trial_point, augment_filter, delta_new
 end
 
 function is_nondominated_with_offset(population, θxs, fxs, offset)

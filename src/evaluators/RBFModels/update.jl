@@ -46,7 +46,7 @@ function update_rbf_model!(
             unlock_read(rwlock)
             return nothing
         else
-            @logmsg log_level "$(pad_str)RBFModel: Starting surrogate update."
+            @logmsg log_level "$(pad_str)RBFModel: Starting surrogate update for Δ=$(Δ)."
         end
     unlock_read(rwlock)
 

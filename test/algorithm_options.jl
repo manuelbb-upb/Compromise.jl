@@ -80,9 +80,9 @@ end
         @test opts.stop_crit_tol_abs == -Inf
         @test opts.stop_theta_tol_abs.val ≈ eps(float_type)
         @test opts.stop_theta_tol_abs.is_default
-        @test opts.stop_max_crit_loops == 10
+        @test opts.stop_max_crit_loops == 100
         @test opts.eps_crit ≈ .01 rtol=eps(Float16)
-        @test opts.eps_theta ≈ .05 rtol=eps(Float16)
+        @test opts.eps_theta ≈ 1e-6 rtol=eps(Float16)
         @test opts.crit_B ≈ 100 rtol=eps(Float16)
         @test opts.crit_M ≈ 3*opts.crit_B rtol=eps(Float16)
         @test opts.crit_alpha ≈ .1 rtol=eps(Float16)
@@ -95,7 +95,7 @@ end
         @test opts.trial_mode == Val{:max_diff}()
         @test opts.nu_accept ≈ 1e-4 rtol=eps(Float16)
         @test opts.nu_success ≈ .4 rtol=eps(Float16)
-        @test opts.c_delta ≈ .9 rtol=eps(Float16)
+        @test opts.c_delta ≈ .99 rtol=eps(Float16)
         @test opts.c_mu ≈ 100 rtol=eps(Float16)
         @test opts.mu ≈ .01 rtol=eps(Float16)
         @test opts.kappa_theta ≈ 1e-4 rtol=eps(Float16)

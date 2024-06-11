@@ -65,7 +65,10 @@ function optimize_population!(
         remove_stale_elements!(ndset)
         stop_optimization && break
 
-        @logmsg log_level "🕐 ITERATION $(it_id), len pop = $(length(population.elems))"
+        @logmsg log_level """\n
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        ~ 🕐 ITERATION $(it_id), len pop = $(length(population.elems))
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"""
 
         if restoration_required
             sol, status = restore!(
@@ -116,7 +119,7 @@ function optimize_population!(
                 #@logmsg log_level "… normal step not compatible. 1/2) Augmenting filter."
                 #add_to_filter_and_mark_population!(ndset, population, sol; log_level)
                 mark_stale!(population, sol)
-                @logmsg log_level "Normal step incompatible, storing seed."
+                @logmsg log_level "Normal step incompatible, storing seed $(get_identifier(sol))."
                 add_to_set!(
                     restoration_seeds, 
                     copy_solution_structs(sol);     # I think copying is very important, but I can't remember why
@@ -190,15 +193,15 @@ function check_population(population)
         break
     end
 
-    do_restoration = false
+    restoration_required = false
     if stop_optimization
         if !any_converged
-            do_restoration = true
+            restoration_required = true
             stop_optimization = false
         end
     end
 
-    return do_restoration, stop_optimization
+    return restoration_required, stop_optimization
 end
 
 
@@ -218,7 +221,7 @@ function _test_trial_point!(
     is_good_trial_point = false
     augment_filter = false
     
-    tol = 2*mapreduce(eps, min, step_vals.s)
+    tol = 1.1*mapreduce(eps, min, step_vals.s)
     if _delta_too_small(step_vals.s, tol)
         @logmsg log_level "Zero step. No trial point."
         
@@ -227,7 +230,7 @@ function _test_trial_point!(
         diff_fx .= 0
         diff_fx_mod .= 0
 
-        delta_new = gamma_shrink_much * delta
+        delta_child = delta_new = gamma_shrink_much * delta
         is_good_trial_point = false
         augment_filter = false
     else
@@ -250,13 +253,13 @@ function _test_trial_point!(
         @. diff_fx = fx - fxs
         @. diff_fx_mod = mx - mxs
 
-
+        θx = cached_theta(vals)
         @logmsg log_level """
             \n$(indent_str(indent))- x - xs = $(pretty_row_vec(diff_x)), 
             $(indent_str(indent))- fx - fxs = $(pretty_row_vec(diff_fx)), 
-            $(indent_str(indent))- mx - mxs = $(pretty_row_vec(diff_fx_mod))"""
-
-        θx = cached_theta(vals)
+            $(indent_str(indent))- mx - mxs = $(pretty_row_vec(diff_fx_mod)),
+            $(indent_str(indent))- theta(xs)= $(cached_theta(vals_tmp)),
+            $(indent_str(indent))- κθ^ψ     = $(kappa_theta * θx^psi_theta)"""
     
         is_pos = zeros(Bool, length(diff_fx_mod))
         Δmx = Inf
@@ -268,32 +271,37 @@ function _test_trial_point!(
             end
         end
 
-        if !(is_filter_acceptable(ndset, vals_tmp, vals)) || isinf(Δmx)
+        if !(is_filter_acceptable(ndset, vals_tmp, vals))
             ## trial point rejected
             ## radius is reduced
+            @logmsg log_level "$(indent_str(indent)) Trial point not filter-compatible."
             is_good_trial_point = false
-            delta_new = gamma_shrink_much * delta
+            delta_child = delta_new = gamma_shrink_much * delta
         else
+            #=
             ## if m(x) ⪨ m(x+s) + κ⋅θ(x)^ψ
-            if vector_dominates(mx, mxs .+ (kappa_theta * θx^psi_theta))
+            mxs_θ =  mxs .+(kappa_theta * θx^psi_theta)
+            if vector_dominates(mx[is_pos], mxs_θ[is_pos])
+            =#
+            if !isinf(Δmx) && Δmx < kappa_theta * θx^psi_theta
                 ## (theta step)
                 ## trial point is accepted    
                 is_good_trial_point = true
-                delta_new = delta
+                delta_child = delta_new = delta
                 ## sol is added to filter (sync population!)
                 ## (adding sol to filter makes it incompatible with filter, 
                 ## it is removed from population
                 augment_filter = true
             else
                 offset = Δmx * nu_accept
-                if is_nondominated_with_offset(population, θxs, fxs, offset)
+                if !isinf(Δmx) && trial_point_population_acceptable(fxs, θxs, population, offset)
                     is_good_trial_point = true
 
-                    delta_new = gamma_shrink * delta
+                    delta_child = delta_new = gamma_shrink * delta
                     rho_success = minimum( diff_fx[is_pos] ./ diff_fx_mod[is_pos] )
-                    if rho_success >= nu_success
+                    if all(is_pos) && rho_success >= nu_success
                         if delta < delta_max 
-                            delta_new = min(delta_max, gamma_grow * delta)
+                            delta_child = min(delta_max, gamma_grow * delta)
                         end
                     end
                 else
@@ -301,14 +309,14 @@ function _test_trial_point!(
                     ## trial point is rejected
                     is_good_trial_point = false
                     ## radius is reduced much
-                    delta_new = gamma_shrink_much * delta
+                    delta_child = delta_new = gamma_shrink_much * delta
                 end
             end        
         end
     end
     iteration_scalars.delta = delta_new
-    @logmsg log_level "$(indent_str(indent)) Δ_new = $(delta_new) (was Δ = $(delta))"
-    return delta_new, is_good_trial_point, augment_filter
+    @logmsg log_level "$(indent_str(indent)) Δ_new = $(delta_new), Δ_child = $(delta_child), (was Δ = $(delta))"
+    return delta_new, is_good_trial_point, augment_filter, delta_child
 end
 
 function vector_dominates(lhs, rhs)
@@ -317,4 +325,17 @@ end
 
 function cosine_similarity(p1, p2)
     return LA.dot(p1, p2) / (LA.norm(p1) * LA.norm(p2))
+end
+
+function trial_point_population_acceptable(fxs, θxs, population, offset=0)
+    fxs = fxs .+ offset     # TODO cache
+    for sol in nondominated_elements(population)
+        if augmented_dominates(
+            cached_theta(sol), cached_fx(sol),
+            θxs, fxs, 
+        )
+            return false
+        end
+    end
+    return true
 end

@@ -39,13 +39,13 @@ Base.@kwdef struct AlgorithmOptions{T <: AbstractFloat, SC, SCALER_CFG_TYPE}
 	stop_theta_tol_abs :: NumberWithDefault{T} = NumberWithDefault(eps(float_type), true)
 	
 	"Stop after the criticality routine has looped `stop_max_crit_loops` times."
-	stop_max_crit_loops :: Int = 10
+	stop_max_crit_loops :: Int = 100
 
 	# criticality test thresholds
 	"Lower bound for criticality before entering Criticality Routine."
 	eps_crit :: T = 0.01
 	"Lower bound for feasibility before entering Criticality Routine."
-	eps_theta :: T = 0.05
+	eps_theta :: T = 1e-6
 	"At the end of the Criticality Routine the radius is possibly set to `crit_B * χ`."
 	crit_B :: T = 100
 	"Criticality Routine runs until `Δ ≤ crit_M * χ`."

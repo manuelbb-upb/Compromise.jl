@@ -25,7 +25,7 @@ function do_restoration(
     universal_copy!(vals_tmp, vals) # we use `cached_x(vals_tmp)` as a starting point for nonlinear restoration
                                     # this array might be changed by a prior check to see whether `step_vals.xn` 
                                     # is a suitable point.
-                                     
+
     @ignoraise Δ = restore_with_normal_step!(
         mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
         mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
@@ -78,11 +78,13 @@ function restore_with_normal_step!(
     check_for_compatibility = false
     xr_opt = cached_x(vals_tmp)
     if !any(isnan.(step_vals.n))
+        @logmsg log_level "$(indent_str(indent)) Trying `xn` as next iterate."
         copyto!(xr_opt, step_vals.xn)
         @ignoraise eval_mop!(vals_tmp, mop, scaler)
         if is_filter_acceptable(filter, vals_tmp)
-            @logmsg log_level "$(indent_str(indent)) Trying `xn` as next iterate."
             check_for_compatibility = true
+        else
+            @logmsg log_level "$(indent_str(indent)) Not filter acceptable (θ = $(cached_theta(vals_tmp)))..."
         end
     end
 

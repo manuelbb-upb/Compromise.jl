@@ -118,7 +118,7 @@ function add_to_set!(
             !isnothing(sid) && @logmsg log_level "$(indent_str(indent)) 💀 Marking `$(sid)` as stale."
         end
     end
-    return unconditionally_add_to_set!(ndset, elem; kwargs...)
+    return unconditionally_add_to_set!(ndset, elem; elem_identifier, kwargs...)
 end
 
 # ## Algorithm Set Types
@@ -269,11 +269,12 @@ function unconditionally_add_to_set!(
     kwargs...
 ) where {F, E<:AbstractAugmentedSetElement} 
     
-    ndset.counter[] += 1
+    eid = ndset.counter[] += 1
     if isa(elem_identifier, Int) 
-        ndset.counter[] = max(ndset.counter[], elem_identifier)
+        eid = elem_identifier
+        ndset.counter[] = max(ndset.counter[], eid)
     end
-    set_identifier!(elem, ndset.counter[])
+    set_identifier!(elem, eid)
 
     prepare_for_set!(elem, ndset)
 

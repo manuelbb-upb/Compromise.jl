@@ -18,7 +18,7 @@ function criticality_routine!(
     θ = cached_theta(vals)
     stop_code = nothing
     if θ < eps_theta && (χ < eps_crit && Δ > crit_M * χ )
-        @logmsg log_level "$(pad_str)ITERATION $(it_index): CRITICALITY ROUTINE."
+        @logmsg log_level "$(pad_str)ITERATION $(it_index): CRITICALITY ROUTINE (θ = $θ)."
         ## init
         Δj = Δ_init = Δ
         j=0
