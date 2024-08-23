@@ -55,25 +55,20 @@ end
 import ..Compromise: AbstractUltimateStoppingCriterion, stop_message, @ignoraise
 
 Base.@kwdef mutable struct FuncCallCounter
-    val :: Int = 0
-    lock :: ReentrantLock = ReentrantLock()
+    val :: Threads.Atomic{Int} = Threads.Atomic{Int}(0)
 end
 
 function read_counter(fcc::FuncCallCounter) 
-    lock(fcc.lock) do 
-        fcc.val
-    end
+    fcc.val[]
 end
 
 function set_counter!(fcc::FuncCallCounter, v::Int)
-    lock(fcc.lock) do
-        fcc.val = v
-    end
+    Threads.atomic_xchg!(fcc.val, v)
     return v
 end
 
 function inc_counter!(fcc::FuncCallCounter)
-    return set_counter!(fcc, read_counter(fcc) + 1)
+    return Threads.atomic_add!(fcc.val, 1) + 1
 end
 
 func_call_counter(op::AbstractNonlinearOperator, ::Val)=nothing
@@ -96,16 +91,14 @@ end
 request_func_calls(::Nothing, op::AbstractNonlinearOperator, v::Val, N::Integer)=Inf
 function request_func_calls(fcc::FuncCallCounter, op::AbstractNonlinearOperator, v::Val{i}, N::Integer) where i
     mfc = max_num_calls(op, v)
-    lock(fcc.lock) do
-        cfc = fcc.val
-        rem = min(mfc - cfc, N)
-        #show cfc, mfc, N, rem
-        if rem <= 0
-            return BudgetExhausted(cfc, mfc, i)
-        end
-        fcc.val += rem
-        return rem
+    
+    cfc = read_counter(fcc)
+    rem = min(mfc - cfc, N)
+    if rem <= 0
+        return BudgetExhausted(cfc, mfc, i)
     end
+    set_counter!(fcc, cfc + rem)
+    return rem
 end
 
 # In certain situations (nonlinear subproblems relying on minimization of scalar-valued 
