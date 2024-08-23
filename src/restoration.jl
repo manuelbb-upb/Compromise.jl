@@ -151,8 +151,15 @@ function restoration_constraints(mop, vals_tmp, scaler, scaled_cons)
 
         ξ = cached_ξ(vals_tmp)
         unscale!(ξ, scaler, xr)
-        @ignoraise nl_eq_constraints!(cached_hx(vals_tmp), mop, ξ)
-        @ignoraise nl_ineq_constraints!(cached_gx(vals_tmp), mop, ξ)
+        stop_code = nl_eq_constraints!(cached_hx(vals_tmp), mop, ξ)
+        if !isa(stop_code, AbstractStoppingCriterion)
+            stop_code = nl_ineq_constraints!(cached_gx(vals_tmp), mop, ξ)
+        end
+        if isa(stop_code, AbstractStoppingCriterion)
+            @error("Stopped in NLopt.")
+            throw(NLopt.ForcedStop())
+        end
+
         lin_cons!(cached_Ex_min_c(vals_tmp), cached_Ex(vals_tmp), E, c, xr)
         lin_cons!(cached_Ax_min_b(vals_tmp), cached_Ax(vals_tmp), A, b, xr)
         
