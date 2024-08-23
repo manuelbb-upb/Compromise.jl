@@ -219,6 +219,7 @@ function solve_normal_step_problem(
     opt = JuMP.Model(qp_opt)
     JuMP.set_silent(opt)
     JuMP.set_attribute(opt, "time_limit", Float64(2*n_vars))
+    JuMP.set_attribute(opt, MOI.NumberOfThreads(), 1)
 
     JuMP.@variable(opt, n[1:n_vars])
 
@@ -301,6 +302,7 @@ function solve_steepest_descent_problem(
     dir = zero(xn)
     try
         opt = JuMP.Model(qp_opt)
+        JuMP.set_attribute(opt, MOI.NumberOfThreads(), 1)
         β, d = setup_steepest_descent_problem!(
             opt, xn, Dfx, lb, ub, E, Axn, A, Dhx, Dgx_n, Dgx; 
             ball_norm, normalize_gradients
@@ -316,6 +318,8 @@ function solve_steepest_descent_problem(
         χ = -min(0, maximum(dir'Dfx))
     catch err
         @error "Exception in Descent Step Computation." exception=(err, catch_backtrace())
+        χ = 0
+        dir = zero(xn)
     end
     return χ, dir
 end
