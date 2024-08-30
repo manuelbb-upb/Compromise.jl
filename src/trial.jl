@@ -15,7 +15,7 @@ function test_trial_point!(
     copyto!(cached_x(vals_tmp), step_vals.xs)
     @ignoraise eval_mop!(vals_tmp, mop, scaler) indent
     
-    fits_filter = is_filter_acceptable(filter, vals, vals_tmp)
+    fits_filter = is_filter_acceptable(filter, vals_tmp, vals)
     (x, fx, θx, Φx, fx_mod, xs, fxs, θxs, Φxs, fxs_mod) = _trial_point_arrays(
         vals, vals_tmp, mod_vals, step_vals)
 

@@ -65,10 +65,20 @@ function update_rbf_model!(
         val!(shape_parameter_ref, model_shape_parameter(rbf, Δ))
     
         n_X_affine_sampling = n_X
-        @unpack max_search_factor = rbf
 
         if n_X == min_points
+            @unpack max_search_factor, database, buffers, delta_max = rbf
+            @unpack lb, ub, filter_flags, db_index = buffers
             delta = delta_max * max_search_factor
+            
+            trust_region_bounds!(lb, ub, x0, delta, global_lb, global_ub)
+
+            box_search!(filter_flags, database, lb, ub; xor=false)
+            for ix in 1:n_X 
+                ci = db_index[ix]
+                ci < 1 && continue
+                filter_flags[ci] = false
+            end
             n_X = cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent)
         end
        
@@ -221,7 +231,8 @@ end
         @logmsg log_level "$(pad_str)RBFModel: Sampled $(n_new) points (now $n_X) in radius $(@sprintf("%.2e", ΔZ1))."
     end
     
-    if n_X < min_points || min_points < max_points
+    is_not_fully_linear = n_X < min_points 
+    if is_not_fully_linear
         Δ2 = max_search_factor .* delta_max
         trust_region_bounds!(lb, ub, x0, Δ2, global_lb, global_ub)
 
@@ -232,8 +243,9 @@ end
             filter_flags[ci] = false
         end
     end
-
-    if n_X < min_points
+    
+    if is_not_fully_linear
+        val!(is_fully_linear_ref, false)
         if enforce_fully_linear
             @warn "$(pad_str)Cannot make model fully linear."
         end
@@ -284,18 +296,6 @@ end
     return n_X
 end
 
-function find_additional_points!(
-    rbf, x0, n_X;
-    log_level, delta, indent::Int=0
-)
-    if n_X != rbf.min_points
-        least_squares_model!(rbf, n_X; log_level, indent)
-        return n_X
-    else
-        return cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent)
-    end
-end
-
 function least_squares_model!(rbf, n_X; log_level, indent::Int=0)
     @unpack params, buffers, min_points, dim_y, dim_π, kernel, poly_deg = rbf
     @unpack X = params
@@ -322,7 +322,7 @@ function cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent::Int=0)
     @unpack min_points, max_points, dim_x, dim_y, dim_π, kernel, poly_deg, th_cholesky = rbf
     @unpack X = params
     @unpack FX, Φ, L, Linv, Q, R, qr_ws_min_points, Qj, filter_flags = buffers
-    
+   
     ε = val(params.shape_parameter_ref)
     
     initial_qr_for_cholesky_test!(
