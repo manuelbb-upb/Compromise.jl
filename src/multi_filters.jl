@@ -377,7 +377,9 @@ is_converged(sstructs::SolutionStructs)=is_converged(sstructs.status_ref)
 @forward SolutionStructs.vals cached_Ax(sols::SolutionStructs)
 @forward SolutionStructs.vals cached_Ex(sols::SolutionStructs)
 @forward SolutionStructs.vals cached_Ex_min_c(sols::SolutionStructs)
+@forward SolutionStructs.vals cached_Ax_min_b(sols::SolutionStructs)
 @forward SolutionStructs.vals cached_theta(sols::SolutionStructs)
+@forward SolutionStructs.vals cached_Phi(sols::SolutionStructs)
 dim_theta(::SolutionStructs) = 1
 
 function copy_solution_structs(sstructs)

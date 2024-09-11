@@ -18,11 +18,13 @@ Base.@kwdef struct SimpleValueCache{
 
 	Ax_min_b :: Vector{F}
 	Ex_min_c :: Vector{F}
-	
+
+    #=
 	"Reference to maximum constraint violation."
     theta_ref :: Base.RefValue{F}
 	"Reference to maximum function value."
     phi_ref :: Base.RefValue{F}
+    =#
 end
 
 struct SimpleSurrogateValueCache{
@@ -83,14 +85,15 @@ function init_simple_value_caches_for_mop(T, nx, nfx, nhx, ngx, nE, nA)
     Ax_min_b = similar(Ax)
     Ex_min_c = similar(Ex)
 
+    #=
     ## constraint violation and filter value
-    theta_ref = Ref(zero(T))
-    phi_ref = Ref(zero(T))
-
+    theta_ref = Ref(T(NaN))
+    phi_ref = Ref(T(NaN))
+    =#
     return SimpleValueCache(; 
         ξ, x, fx, hx, gx, 
         Ax, Ex, Ax_min_b, Ex_min_c, 
-        theta_ref, phi_ref
+    #    theta_ref, phi_ref
     )
 end
 

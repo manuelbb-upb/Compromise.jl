@@ -647,6 +647,8 @@ function optimize_many(
         iteration_status, iteration_scalars,
     ) = optimizer_caches
 
+    # for the moment, only use minimum radius stopping (and max_iter)
+    # TODO re-enable other criteria
     @unpack stop_delta_min = algo_opts
     stop_crits = MinimumRadiusStopping(; delta_min = stop_delta_min)
     @reset optimizer_caches.stop_crits = stop_crits
@@ -888,7 +890,12 @@ function _test_trial_point!(
             $(indent_str(indent))- mx - mxs = $(pretty_row_vec(diff_fx_mod)),
             $(indent_str(indent))- theta(xs)= $(cached_theta(vals_tmp)),
             $(indent_str(indent))- κθ^ψ     = $(kappa_theta * θx^psi_theta)"""
-    
+   
+        
+        ## `is_pos` is an index vector for the positive entries of the difference
+        ## vector `del_mx`.
+        ## We use it in case of partial descent.
+        ## `Δmx` is the minimum surrogate objective reduction.
         is_pos = zeros(Bool, length(diff_fx_mod))
         Δmx = Inf
         for (l, del_mx) in enumerate(diff_fx_mod)
@@ -906,31 +913,40 @@ function _test_trial_point!(
             is_good_trial_point = false
             delta_child = delta_new = gamma_shrink_much * delta
         else
-            #=
-            ## if m(x) ⪨ m(x+s) + κ⋅θ(x)^ψ
-            mxs_θ =  mxs .+(kappa_theta * θx^psi_theta)
-            if vector_dominates(mx[is_pos], mxs_θ[is_pos])
-            =#
-            if !isinf(Δmx) && Δmx < kappa_theta * θx^psi_theta
+            ## The single-objective f-step test is 
+            ## m(x) - m(x+s) ≥ κ θ(x)^ψ
+            ## ⇔
+            ## m(x + s) + κ θ(x)^ψ ≤ m(x)
+            ## In the multi-objective case, let's try
+            ## m(x+s) + κθ(x)^ψ ≼ m(x).
+            ## If this test fails, we deem the constraint violation too high and
+            ## have a θ-step.
+            ## For sake of simplicity, we test 
+            ## any( m(x+s) + κθ(x)^ψ .> m(x) )
+            ## If that is true, then we have θ-step.
+            ##
+            ## In case of partial descent, we have to respect the index set `is_pos`.
+            theta_step_test_offset = kappa_theta * θx^psi_theta
+            if isinf(Δmx) || any( mxs[is_pos] .+ theta_step_test_offset .> mx[is_pos] )
                 ## (theta step)
                 ## trial point is accepted    
                 is_good_trial_point = true
+                ## do not change radius # TODO could be smarter
                 delta_child = delta_new = delta
                 ## sol is added to filter (sync population!)
                 ## (adding sol to filter makes it incompatible with filter, 
-                ## it is removed from population
+                ##   it should be/is (?) removed from population)
                 augment_filter = true
             else
-                offset = Δmx * nu_accept
-                if !isinf(Δmx) && trial_point_population_acceptable(fxs, θxs, population, offset)
+                offset = zero(fxs)  # TODO cache
+                offset[is_pos] .= diff_fx_mod[is_pos] .* nu_accept
+                if trial_point_population_acceptable(fxs, θxs, population, offset)
                     is_good_trial_point = true
 
                     delta_child = delta_new = gamma_shrink * delta
-                    rho_success = minimum( diff_fx[is_pos] ./ diff_fx_mod[is_pos] )
-                    if all(is_pos) && rho_success >= nu_success
-                        if delta < delta_max 
-                            delta_child = min(delta_max, gamma_grow * delta)
-                        end
+                    rho_success = minimum( diff_fx[is_pos] ./ diff_fx_mod[is_pos]; init=-Inf )
+                    if rho_success >= nu_success
+                        delta_child = min(delta_max, gamma_grow * delta)
                     end
                 else
                     ## (innacceptable)
@@ -956,11 +972,11 @@ function cosine_similarity(p1, p2)
 end
 
 function trial_point_population_acceptable(fxs, θxs, population, offset=0)
-    fxs = fxs .+ offset     # TODO cache
+    fxs_shifted = fxs .+ offset     # TODO cache
     for sol in nondominated_elements(population)
         if augmented_dominates(
             cached_theta(sol), cached_fx(sol),
-            θxs, fxs, 
+            θxs, fxs_shifted, 
         )
             return false
         end

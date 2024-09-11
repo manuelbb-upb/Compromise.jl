@@ -180,7 +180,7 @@ function eval_mop!(mop_cache, mop)
         cached_Ax(mop_cache), 
         mop, ξ
     )
-    return nothing
+    return θ, Φ
 end
 
 "Evaluate `mop` at unscaled site `ξ` and modify result arrays in place."

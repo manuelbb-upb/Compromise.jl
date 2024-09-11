@@ -37,17 +37,20 @@ dim_lin_ineq_constraints(c::AbstractValueCache)=length(cached_Ax(c))
 
 struct WrappedMOPCache{F, cacheType<:AbstractMOPCache{F}}<:AbstractMOPCache{F}
 	cache :: cacheType
-	xhash :: Base.RefValue{UInt64}
+	hash_theta :: Base.RefValue{UInt64}
+	hash_Phi :: Base.RefValue{UInt64}
 	theta_ref :: Base.RefValue{F}
 	Phi_ref :: Base.RefValue{F}
 end
 
 function WrappedMOPCache(cache::AbstractMOPCache{F}) where F
+    NaNF = F(NaN)
     return WrappedMOPCache(
         cache,
-        Ref(zero(UInt64)),
-        Ref(F(NaN)),
-        Ref(F(NaN)),
+        Ref(hash(NaNF)),
+        Ref(hash(NaNF)),
+        Ref(NaNF),
+        Ref(NaNF),
     )
 end
 
@@ -68,35 +71,33 @@ end
 @forward WrappedMOPCache.cache dim_lin_eq_constraints(wcache::WrappedMOPCache)
 @forward WrappedMOPCache.cache dim_lin_ineq_constraints(wcache::WrappedMOPCache)
 
-function cached_theta(wcache::WrappedMOPCache, step_down=true)
+function cached_theta(wcache::WrappedMOPCache)
     cache = wcache.cache
     x = cached_x(cache)
-    xhash = wcache.xhash[]
-    inhash = hash(x)
-    if xhash != inhash
+    hash_old = wcache.hash_theta[]
+    hash_x = hash(x)
+    if hash_old != hash_x
         theta = constraint_violation(
             cached_hx(cache),
             cached_gx(cache),
             cached_Ex_min_c(cache),
             cached_Ax_min_b(cache)
         )
-        step_down && cached_Phi(wcache, false)
         wcache.theta_ref[] = theta
-        wcache.xhash[] = inhash
+        wcache.hash_theta[] = hash_x
     end
     return wcache.theta_ref[]
 end
 
-function cached_Phi(wcache::WrappedMOPCache, step_down=true)
+function cached_Phi(wcache::WrappedMOPCache)
     cache = wcache.cache
     x = cached_x(cache)
-    xhash = wcache.xhash[]
-    inhash = hash(x)
-    if xhash != inhash
+    hash_old = wcache.hash_Phi[]
+    hash_x = hash(x)
+    if hash_old != hash_x
         Phi = maximum(cached_fx(cache))
-        step_down && cached_theta(wcache, false)
         wcache.Phi_ref[] = Phi
-        wcache.xhash[] = inhash
+        wcache.hash_Phi[] = hash_x
     end
     return wcache.Phi_ref[]
 end
