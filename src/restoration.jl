@@ -20,7 +20,7 @@ function do_restoration(
     pad_str = lpad("", indent)
     @logmsg log_level "$(pad_str)Starting restoration."
     
-    iteration_status.iteration_type = RESTORATION   # set this to avoid model updates in subsequent iteration of the main algo
+    iteration_status.iteration_classification = IT_RESTORATION   # set this to avoid model updates in subsequent iteration of the main algo
 
     universal_copy!(vals_tmp, vals) # we use `cached_x(vals_tmp)` as a starting point for nonlinear restoration
                                     # this array might be changed by a prior check to see whether `step_vals.xn` 

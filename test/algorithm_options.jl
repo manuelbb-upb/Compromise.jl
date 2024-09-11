@@ -31,7 +31,7 @@ import Compromise: SteepestDescentConfig
         @test cfg.backtracking_mode == Val(:max)
         @test cfg.descent_step_norm == Inf
         @test cfg.normal_step_norm == 2
-        @test cfg.qp_opt == Compromise.DEFAULT_QP_OPTIMIZER
+        @test_broken cfg.qp_opt == Compromise.DEFAULT_QP_OPTIMIZER
     end
     
     cfg_default = SteepestDescentConfig()

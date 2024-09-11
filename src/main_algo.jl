@@ -102,16 +102,18 @@ function do_iteration!(
     ξ = $(pretty_row_vec(cached_ξ(vals)))
     x = $(pretty_row_vec(cached_x(vals)))
     fx = $(pretty_row_vec(cached_fx(vals)))
+    gx = $(pretty_row_vec(cached_gx(vals)))
+    hx = $(pretty_row_vec(cached_hx(vals)))
     """
     ## The models are valid
     ## - the last iteration was a successfull restoration iteration.
     ## - if the point has not changed and the models do not depend on the radius or  
     ##   radius has not changed neither.
     radius_has_changed = Int8(iteration_status.radius_update_result) >= 0
-    models_valid = if iteration_status.iteration_type == INITIALIZATION
+    models_valid = if iteration_status.iteration_classification == IT_INITIALIZATION
         false
     else
-        if iteration_status.iteration_type == RESTORATION
+        if iteration_status.iteration_classification == IT_RESTORATION
             true
         elseif (
             !_trial_point_accepted(iteration_status) && 
@@ -196,7 +198,7 @@ function do_iteration!(
     @ignoraise process_trial_point!(mod, vals_tmp, _trial_point_accepted(iteration_status)) indent
 
     ## update filter
-    if iteration_status.iteration_type == THETA_STEP
+    if iteration_status.iteration_classification == IT_THETA_STEP
         add_to_filter!(filter, vals)
     end
    

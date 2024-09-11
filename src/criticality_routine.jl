@@ -75,7 +75,7 @@ function criticality_routine!(
             j+=1
         end       
         _Δ = Δ  # storred for logging only
-        Δ = min(max(_Δ, algo_opts.crit_B*χ), Δ_init)
+        Δ = min(max(_Δ, crit_B*χ), Δ_init)
 
         # make sure we have compatible steps
         universal_copy!(step_vals, crit_cache.step_vals)
@@ -86,7 +86,7 @@ function criticality_routine!(
         end
         @logmsg log_level """
             $(pad_str) Finished after $j criticality loop(s), 
-            $(pad_str) Δ=$_Δ > Mχ=$(crit_M * χ), now Δ=$Δ,
+            $(pad_str) Δ=$_Δ <= Mχ=$(crit_M * χ), now Δ=$Δ,
             $(pad_str) Criticality χ=$(step_vals.crit_ref[]), 
             $(pad_str)  ‖d‖₂=$(LA.norm(step_vals.d)), ‖s‖₂=$(LA.norm(step_vals.s))."""
     end

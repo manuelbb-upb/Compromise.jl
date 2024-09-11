@@ -568,7 +568,7 @@ function restore!(population, restoration_seeds, ndset, optimizer_caches, algo_o
 )
     @unpack log_level = algo_opts
     @logmsg log_level """\n
-    ~~~~~~~~~~~~~~~~~~~~~ RESTORATION ~~~~~~~~~~~~~~~~~~~~~"""
+    ~~~~~~~~~~~~~~~~~~~~~ IT_RESTORATION ~~~~~~~~~~~~~~~~~~~~~"""
 
     #=
     best_index = 0
@@ -622,7 +622,7 @@ function restore!(population, restoration_seeds, ndset, optimizer_caches, algo_o
     )
     
     @logmsg log_level """\n
-    ~~~~~~~~~~~~~~~~~~~~~ END RESTORATION ~~~~~~~~~~~~~~~~~"""
+    ~~~~~~~~~~~~~~~~~~~~~ END IT_RESTORATION ~~~~~~~~~~~~~~~~~"""
     
     return sol, status
 end

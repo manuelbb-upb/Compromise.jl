@@ -68,7 +68,8 @@ end
             qr = do_qr!(qr_ws, XJ, QRbuff)
         end
     end
-    return n_X - _n_X, qr
+    n_new = n_X - _n_X
+    return n_new, qr
 end
 
 copy_col!(mat_trgt, mat_src, j_trgt, j_src)=nothing

@@ -31,9 +31,8 @@ import Accessors: PropertyLens
 # extensions to choose from:
 import JuMP     # LP and QP modelling for descent and normal steps
 #src import COSMO    # actual QP solver
-#src const DEFAULT_QP_OPTIMIZER=COSMO.Optimizer
-import HiGHS
-const DEFAULT_QP_OPTIMIZER=HiGHS.Optimizer
+import OSQP
+
 # For restoration we currently use `NLopt`. This is also meant to become 
 # configurable...
 import NLopt

@@ -1,6 +1,9 @@
+include("test_preamble.jl")
+
 using Compromise
 import ForwardDiff as FD
 using Test
+#%%
 #let
 begin
 mop = MutableMOP(; 

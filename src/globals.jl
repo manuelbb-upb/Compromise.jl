@@ -163,33 +163,46 @@ function init_lin_cons(::Type{F}, lb, ub, A, b, E, c) where F
 	)
 end
 
-@enum RADIUS_UPDATE :: Int8 begin
-	NO_CHANGE = -3
-	SHRINK_FAIL = -2
-	GROW_FAIL = -1
-	INITIAL_RADIUS = 0
-	SHRINK = 1
-	GROW = 2
+@enum RADIUS_UPDATE_TYPE :: Int8 begin
+	RADIUS_NO_CHANGE = -3
+	RADIUS_GROW_FAIL = -1
+	RADIUS_INITIAL = 0
+	RADIUS_SHRINK = 1
+	RADIUS_GROW = 2
 end
 
-@enum ITERATION_TYPE :: UInt8 begin
-	INITIALIZATION = 0
-	RESTORATION = 1
-	FILTER_FAIL = 2
-	INACCEPTABLE = 3
-	F_STEP_ACCEPTABLE = 4
-	F_STEP_SUCCESSFUL = 5
-	THETA_STEP = 6
+@enum ITERATION_CLASSIFICATION_TYPE :: UInt8 begin
+	IT_INITIALIZATION = 0
+	IT_RESTORATION = 1
+	IT_FILTER_FAIL = 2
+	IT_F_STEP = 3
+	IT_THETA_STEP = 4
 end
 
-Base.@kwdef mutable struct IterationStatus
-	iteration_type :: ITERATION_TYPE
-	radius_update_result :: RADIUS_UPDATE
+@enum RHO_CLASSIFICATION_TYPE :: UInt8 begin
+	RHO_NAN
+	RHO_FAIL
+	RHO_ACCEPT
+	RHO_SUCCESS
 end
 
-_trial_point_accepted(it_type::ITERATION_TYPE)=(UInt8(it_type) >= 4)
-function _trial_point_accepted(it_status::IterationStatus)
-	return _trial_point_accepted(it_status.iteration_type)
+Base.@kwdef mutable struct IterationStatus{F<:AbstractFloat}
+	iteration_classification :: ITERATION_CLASSIFICATION_TYPE
+	rho :: F
+	rho_classification :: RHO_CLASSIFICATION_TYPE
+	radius_update_result :: RADIUS_UPDATE_TYPE
+end
+
+function _trial_point_accepted(iteration_status::IterationStatus)
+	@unpack iteration_classification, rho_classification = iteration_status
+	iteration_classification == IT_RESTORATION && return true
+	iteration_classification == IT_THETA_STEP && return true
+	if iteration_classification == IT_F_STEP
+		if rho_classification == RHO_ACCEPT || rho_classification == RHO_SUCCESS
+			return true
+		end
+	end
+	return false
 end
 
 Base.@kwdef mutable struct IterationScalars{F}

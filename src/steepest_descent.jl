@@ -1,4 +1,81 @@
-Base.@kwdef struct SteepestDescentConfig{F, QPTYPE} <: AbstractStepConfig
+init_jump_model(qp_cfg::Type{<:MOI.AbstractOptimizer}, vals) = JuMP.Model(qp_cfg)
+function init_jump_model(qp_cfg::JuMP.Model, vals)
+    empty!(qp_cfg)
+    return qp_cfg
+end
+
+abstract type AbstractJuMPModelConfig end
+init_jump_model(::AbstractJuMPModelConfig, vals)=nothing
+
+function HiGHSOptimizerConfig(args...; kwargs...)
+    highs_ext = Base.get_extension(@__MODULE__, :HiGHSStepsExt)
+    if isnothing(highs_ext)
+        @warn "Could not load HiGHS extension."
+        return nothing
+    end
+    return highs_ext.HiGHSOptimizerConfig(args...; kwargs...)
+end
+
+Base.@kwdef struct OSQPOptimizerConfig <: AbstractJuMPModelConfig
+    silent :: Bool = true
+    polishing :: Bool = true
+    max_time :: Union{Int, Nothing} = nothing
+    eps_rel :: Union{Float64, Nothing} = eps(Float64) * 10
+    eps_abs :: Union{Nothing, Missing, Float64} = missing
+    max_iter :: Union{Nothing, Int} = nothing
+end
+@batteries OSQPOptimizerConfig selfconstructor=false
+
+function default_qp_normal_cfg()
+    return OSQPOptimizerConfig()
+end
+function default_qp_descent_cfg()
+    return OSQPOptimizerConfig()
+end
+
+function init_jump_model(osqp_jump_cfg::OSQPOptimizerConfig, vals)
+    opt = JuMP.Model(OSQP.Optimizer)
+    if osqp_jump_cfg.silent
+        JuMP.set_silent(opt)
+    end
+    time_limit = if !isnothing(osqp_jump_cfg.max_time) && osqp_jump_cfg.max_time > 0
+        osqp_jump_cfg.max_time
+    else
+        num_vars = dim_vars(vals)
+        max(10, 2*num_vars)
+    end |> Float64
+    JuMP.set_attribute(opt, "time_limit", time_limit)
+    
+    JuMP.set_attribute(opt, "adaptive_rho_interval", 25)
+
+    if osqp_jump_cfg.polishing
+        JuMP.set_attribute(opt, "polishing", time_limit)
+    end
+
+    if !isnothing(osqp_jump_cfg.max_iter) && osqp_jump_cfg.max_iter > 0
+        JuMP.set_attribute(opt, "max_iter", osqp_jump_cfg.max_iter)
+    end
+
+    if !isnothing(osqp_jump_cfg.eps_rel) && osqp_jump_cfg.eps_rel > 0
+        JuMP.set_attribute(opt, "eps_rel", osqp_jump_cfg.eps_rel)
+    end
+    if !isnothing(osqp_jump_cfg.eps_abs) 
+        eps_abs = if ismissing(osqp_jump_cfg.eps_abs)
+            mapreduce(eps, max, cached_x(vals))
+        else
+            osqp_jump_cfg.eps_abs
+        end
+        JuMP.set_attribute(opt, "eps_abs", eps_abs)
+    end
+    
+    return opt
+end
+
+Base.@kwdef struct SteepestDescentConfig{
+    F,
+    qp_normal_cfgType,
+    qp_descent_cfgType,
+} <: AbstractStepConfig
     float_type :: Type{F} = DEFAULT_FLOAT_TYPE
     backtracking_factor :: F = 0.5
     rhs_factor :: F = 1e-3
@@ -8,9 +85,12 @@ Base.@kwdef struct SteepestDescentConfig{F, QPTYPE} <: AbstractStepConfig
     descent_step_norm :: F = Inf
     normal_step_norm :: F = 2
 
-    qp_opt :: Type{QPTYPE} = DEFAULT_QP_OPTIMIZER
+    guard_backtracking :: Bool = false
+
+    qp_normal_cfg :: qp_normal_cfgType = default_qp_normal_cfg()
+    qp_descent_cfg :: qp_descent_cfgType = default_qp_descent_cfg()
 end
-#@batteries SteepestDescentConfig selfconstructor=false
+@batteries SteepestDescentConfig selfconstructor=false
 
 function SteepestDescentConfig(
     ::Type{float_type}, 
@@ -20,12 +100,12 @@ function SteepestDescentConfig(
     backtracking_mode,
     descent_step_norm,
     normal_step_norm,
-    qp_opt::Type{QPTYPE},
-) where {float_type, QPTYPE}
+    guard_backtracking,
+    qp_normal_cfg::qp_normal_cfgType,
+    qp_descent_cfg::qp_descent_cfgType,
+) where {float_type, qp_normal_cfgType, qp_descent_cfgType}
     @assert 0 < backtracking_factor < 1 "`backtracking_factor` must be in (0,1)."
     @assert 0 < rhs_factor < 1 "`rhs_factor` must be in (0,1)."
-    @assert descent_step_norm == Inf    # TODO enable other norms
-    @assert normal_step_norm == 2 || isinf(normal_step_norm) # TODO enable other norms
     
     if backtracking_mode isa Symbol
         backtracking_mode = Val(backtracking_mode)
@@ -33,7 +113,7 @@ function SteepestDescentConfig(
     if !isa(backtracking_mode, Union{Val{:all},Val{:any},Val{:max}})
         backtracking_mode = Val(:max)
     end
-    return SteepestDescentConfig{float_type, QPTYPE}(
+    return SteepestDescentConfig{float_type, qp_normal_cfgType, qp_normal_cfgType}(
         float_type, 
         backtracking_factor,
         rhs_factor,
@@ -41,7 +121,9 @@ function SteepestDescentConfig(
         backtracking_mode,
         descent_step_norm,
         normal_step_norm,
-        qp_opt
+        guard_backtracking,
+        qp_normal_cfg,
+        qp_descent_cfg
     )
 end
 
@@ -53,7 +135,8 @@ end
 
 Base.@kwdef struct SteepestDescentCache{
     F<:AbstractFloat, 
-    QPOPT
+    qp_normal_cfgType,
+    qp_descent_cfgType,
 } <: AbstractStepCache
     ## static information
     backtracking_factor :: F
@@ -62,6 +145,8 @@ Base.@kwdef struct SteepestDescentCache{
     backtracking_mode :: Union{Val{:all},Val{:any},Val{:max}}
     descent_step_norm :: F
     normal_step_norm :: F
+
+    guard_backtracking :: Bool
     
     ## caches for intermediate values
     fxn :: Vector{F}
@@ -74,11 +159,14 @@ Base.@kwdef struct SteepestDescentCache{
     Axn :: Vector{F}    # Aξ + _A*n
     Dgx_n :: Vector{F}  # g(x) + ∇g(x) * n
 
-    qp_opt :: Type{QPOPT}
+    ## caches for normal step backtracking
+    xn :: Union{Nothing, Vector{F}}     # TODO remove because unused
+    gxn :: Union{Nothing, Vector{F}}
+    hxn :: Union{Nothing, Vector{F}}
+    
+    qp_normal_cfg :: qp_normal_cfgType = HiGHSOptimizerConfig()
+    qp_descent_cfg :: qp_descent_cfgType = qp_normal_cfg
 end
-
-qp_optimizer_type(::SteepestDescentCache{F, QPOPT}) where {F, QPOPT} = QPOPT
-qp_optimizer_type(::SteepestDescentConfig{F, QPOPT}) where {F, QPOPT} = QPOPT
 
 function init_step_cache(
     cfg::SteepestDescentConfig, vals, mod_vals
@@ -91,7 +179,7 @@ function init_step_cache(
     rhs_factor = F(cfg.rhs_factor)
 
     @unpack normalize_gradients, backtracking_mode, descent_step_norm, 
-        normal_step_norm = cfg
+        normal_step_norm, qp_normal_cfg, qp_descent_cfg, guard_backtracking = cfg
 
     lb_tr = array(F, dim_vars(vals))
     ub_tr = similar(lb_tr)
@@ -99,11 +187,19 @@ function init_step_cache(
     Axn = array(F, dim_lin_ineq_constraints(vals))
     Dgx_n = array(F, dim_nl_ineq_constraints(vals))
 
+    if guard_backtracking
+        xn = array(F, dim_vars(vals))
+        gxn = array(F, dim_nl_ineq_constraints(vals))
+        hxn = array(F, dim_nl_eq_constraints(vals))
+    else
+        xn = gxn = hxn = nothing
+    end
     return SteepestDescentCache(;
         backtracking_factor, rhs_factor, normalize_gradients, 
         backtracking_mode, descent_step_norm, normal_step_norm, 
         fxn, fx_tmp, lb_tr, ub_tr, Axn, Dgx_n, 
-        qp_opt=qp_optimizer_type(cfg)
+        qp_normal_cfg, qp_descent_cfg, 
+        xn, gxn, hxn, guard_backtracking
     )
 end
 
@@ -120,9 +216,12 @@ function compute_normal_step!(
     Dgx = cached_Dgx(mod_vals)
     hx = cached_hx(mod_vals)
     Dhx = cached_Dhx(mod_vals)
+
+    qp_cfg = step_cache.qp_normal_cfg
+    opt = init_jump_model(qp_cfg, vals)
     try
         n = solve_normal_step_problem(
-            x, lb, ub, Ex_min_c, E, Ax_min_b, A, hx, Dhx, gx, Dgx, qp_optimizer_type(step_cache);
+            x, lb, ub, Ex_min_c, E, Ax_min_b, A, hx, Dhx, gx, Dgx, opt;
             step_norm = step_cache.normal_step_norm
         )
         Base.copyto!(step_vals.n, n)
@@ -140,10 +239,13 @@ function compute_descent_step!(
     log_level
 )
 
-    return compute_steepest_descent_step!(step_cache, step_vals, mod, scaled_cons, vals, mod_vals)
+    return compute_steepest_descent_step!(
+        step_cache, step_vals, mod, scaled_cons, vals, mod_vals)
 end
 
-function compute_steepest_descent_step!(step_cache, step_vals, mod, scaled_cons, vals, mod_vals)
+function compute_steepest_descent_step!(
+    step_cache, step_vals, mod, scaled_cons, vals, mod_vals
+)
     x = cached_x(vals)
     Dfx = cached_Dfx(mod_vals)
     @unpack n = step_vals
@@ -160,9 +262,10 @@ function compute_steepest_descent_step!(step_cache, step_vals, mod, scaled_cons,
 
     @unpack xn = step_vals
     Dhx = cached_Dhx(mod_vals)
-    @unpack normalize_gradients = step_cache
+    @unpack normalize_gradients, qp_descent_cfg = step_cache
+    opt = init_jump_model(qp_descent_cfg, vals)
     χ, _d = solve_steepest_descent_problem(
-        xn, Dfx, lb, ub, E, Axn, A, Dhx, Dgx_n, Dgx, qp_optimizer_type(step_cache);
+        xn, Dfx, lb, ub, E, Axn, A, Dhx, Dgx_n, Dgx, opt;
         normalize_gradients, ball_norm = step_cache.descent_step_norm
     )
     
@@ -189,12 +292,13 @@ function finalize_step_vals!(
         _χ = 0
         d .= 0
     else    
-        @unpack fxn, fx_tmp, rhs_factor, backtracking_mode, backtracking_factor = step_cache
+        @unpack fxn, fx_tmp, rhs_factor, backtracking_mode, backtracking_factor, gxn, hxn = step_cache
         @unpack xs = step_vals
         χ = step_vals.crit_ref[]
         @ignoraise _χ = backtrack!(
             d, xs, fxn, fxs,
-            mod, xn, lb_tr, ub_tr, χ, backtracking_factor, rhs_factor, backtracking_mode;
+            mod, xn, lb_tr, ub_tr, χ, backtracking_factor, rhs_factor, backtracking_mode,
+            gxn, hxn;
             fx_tmp, σ_init=σ
         )
     end
@@ -211,16 +315,11 @@ function solve_normal_step_problem(
     Ex_min_c::RVec, E::Union{RMat, Nothing}, 
     Ax_min_b::RVec, A::Union{RMat, Nothing},
     hx::RVec, Dhx::RMat, gx::RVec, Dgx::RMat,
-    qp_opt;
+    opt;
     step_norm::Real=2
 )
+
     n_vars = length(x)
-
-    opt = JuMP.Model(qp_opt)
-    JuMP.set_silent(opt)
-    JuMP.set_attribute(opt, "time_limit", Float64(2*n_vars))
-    JuMP.set_attribute(opt, MOI.NumberOfThreads(), 1)
-
     JuMP.@variable(opt, n[1:n_vars])
 
     normal_step_objective!(opt, n, step_norm)
@@ -246,7 +345,9 @@ function solve_normal_step_problem(
     if MOI.get(opt, MOI.TerminationStatus()) == MOI.INFEASIBLE
         return fill(eltype(x)(NaN), length(n))
     end
-    return JuMP.value.(n)
+   
+    _n = JuMP.value.(n)
+    return _n
 end
 
 function normal_step_objective!(opt, n, p)
@@ -293,7 +394,7 @@ function solve_steepest_descent_problem(
     E::Union{RMat, Nothing},
     Axn::RVec, A::Union{RMat, Nothing},
     Dhx::RMat, Dgx_n::RVec, Dgx::RMat,
-    qp_opt, #::Type{<:MOI.AbstractOptimizer};
+    opt, #::Type{<:MOI.AbstractOptimizer};
     ;
     ball_norm::Real,
     normalize_gradients::Bool
@@ -301,8 +402,6 @@ function solve_steepest_descent_problem(
     χ = 0
     dir = zero(xn)
     try
-        opt = JuMP.Model(qp_opt)
-        JuMP.set_attribute(opt, MOI.NumberOfThreads(), 1)
         β, d = setup_steepest_descent_problem!(
             opt, xn, Dfx, lb, ub, E, Axn, A, Dhx, Dgx_n, Dgx; 
             ball_norm, normalize_gradients
@@ -316,6 +415,7 @@ function solve_steepest_descent_problem(
         #χ = abs(JuMP.value(β))
         dir .= JuMP.value.(d)
         χ = -min(0, maximum(dir'Dfx))
+
     catch err
         @error "Exception in Descent Step Computation." exception=(err, catch_backtrace())
         χ = 0
@@ -329,7 +429,6 @@ function setup_steepest_descent_problem!(
     ball_norm, normalize_gradients
 )
     n_vars = length(xn)
-    JuMP.set_silent(opt)
 
     JuMP.@variable(opt, β <= 0)
     JuMP.@variable(opt, d[1:n_vars])
@@ -379,7 +478,8 @@ function backtrack!(
     d, xs, fxn, fxs, 
     mod, xn, lb_tr, ub_tr, 
     χ, backtracking_factor, rhs_factor,
-    mode :: Union{Val{:all}, Val{:any}, Val{:max}};
+    mode :: Union{Val{:all}, Val{:any}, Val{:max}},
+    gxs, hxs;
     fx_tmp = copy(fxn),
     σ_init = one(eltype(xs))
 )
@@ -415,17 +515,21 @@ function backtrack!(
     phi_xn = _armijo_Phi_xn(mode, fxn)
 
     ## shrink stepsize until armijo condition is fullfilled
+    θ0 = _model_theta(gxs, hxs, mod, xn)
     while true 
         if σ <= 0
             set_to_zero = true
             break
         end
+        θs = _model_theta(gxs, hxs, mod, xs)
         armijo_result = _armijo_condition(mode, fx_tmp, phi_xn, fxs, rhs, fx_tol_rel)
         if armijo_result == ARMIJO_ABBORTED
             set_to_zero = true
             break
         elseif armijo_result == ARMIJO_TEST_PASSED
-            break
+            if θ0 > 0 || θ0 <= 0 && θs <= 0
+                break
+            end
         end
         
         ## shrink `σ`, `rhs` and `d` by multiplication with `backtracking_factor`
@@ -449,6 +553,13 @@ function backtrack!(
     end
    
     return χ
+end
+
+_model_theta(gx::Nothing, hx::Nothing, mod, x)=0
+function _model_theta(gx::AbstractVector, hx::AbstractVector, mod, x)
+    nl_ineq_constraints!(gx, mod, x)
+    nl_eq_constraints!(hx, mod, x)
+    return max( maximum(gx; init=0), maximum(hx; init=0) )
 end
 
 _armijo_Phi_xn(::Val{:all}, fxn)=fxn
@@ -483,7 +594,6 @@ _delta_too_small(xdel::Real, tol) = (abs(xdel) <= tol)
 function _delta_too_small(xdel, tol)
     return all( _d -> abs(_d) <= tol, xdel)
 end
-
 
 function descent_step_unit_constraint!(opt, d, p)
     if p == 2
