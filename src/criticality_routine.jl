@@ -22,7 +22,6 @@ function criticality_routine!(
         ## init
         Δj = Δ_init = Δ
         j=0
-        Δj = Δ_init
         
         stop_code=nothing
         while Δ > crit_M * χ
@@ -54,13 +53,17 @@ function criticality_routine!(
                 ) indent
             end
             if !compatibility_test(step_vals.n, algo_opts, Δj)
+                # make sure we have compatible steps after exiting the loop
+                universal_copy!(step_vals, crit_cache.step_vals)
+
                 break
             end
             @ignorebreak stop_code = do_descent_step!(
                 step_cache, step_vals, Δj, mop, mod, scaler, lin_cons, scaled_cons, vals,
                 mod_vals; log_level, finalize=backtrack_in_crit_routine
             ) indent
-            
+           
+            ## read criticality value to local var
             χ = step_vals.crit_ref[]
             Δ = Δj
            
@@ -74,20 +77,17 @@ function criticality_routine!(
 
             j+=1
         end       
-        _Δ = Δ  # storred for logging only
+        _Δ = Δ  # `_Δ` storred for logging only
         Δ = min(max(_Δ, crit_B*χ), Δ_init)
-
-        # make sure we have compatible steps
-        universal_copy!(step_vals, crit_cache.step_vals)
-
-        if !backtrack_in_crit_routine
+        
+        if !backtrack_in_crit_routine            
             @ignoraise finalize_step_vals!(
                 step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals; log_level) indent
         end
         @logmsg log_level """
             $(pad_str) Finished after $j criticality loop(s), 
             $(pad_str) Δ=$_Δ <= Mχ=$(crit_M * χ), now Δ=$Δ,
-            $(pad_str) Criticality χ=$(step_vals.crit_ref[]), 
+            $(pad_str) Criticality χ=$(step_vals.crit_ref[]), $(χ), 
             $(pad_str)  ‖d‖₂=$(LA.norm(step_vals.d)), ‖s‖₂=$(LA.norm(step_vals.s))."""
     end
     if isa(stop_code, AbstractStoppingCriterion)

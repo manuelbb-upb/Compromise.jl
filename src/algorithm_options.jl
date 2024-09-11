@@ -43,11 +43,11 @@ Base.@kwdef struct AlgorithmOptions{T <: AbstractFloat, SC, SCALER_CFG_TYPE}
 
 	# criticality test thresholds
 	"Lower bound for criticality before entering Criticality Routine."
-	eps_crit :: T = 0.01
+	eps_crit :: T = 1e-4
 	"Lower bound for feasibility before entering Criticality Routine."
 	eps_theta :: T = 1e-6
 	"At the end of the Criticality Routine the radius is possibly set to `crit_B * χ`."
-	crit_B :: T = 100
+	crit_B :: T = 1000
 	"Criticality Routine runs until `Δ ≤ crit_M * χ`."
 	crit_M :: T = 3*crit_B
 	"Trust region shrinking factor in criticality loops."
@@ -73,9 +73,9 @@ Base.@kwdef struct AlgorithmOptions{T <: AbstractFloat, SC, SCALER_CFG_TYPE}
 	"Whether to require *all* objectives to be reduced or not."
 	trial_mode ::Union{Val{:max_diff}, Val{:min_rho}, Val{:max_rho}} = Val(:max_diff)
 	"Acceptance threshold."
-	nu_accept :: T = 1e-4 			# 1e-2 is suggested by Fletcher et. al. 
+	nu_accept :: T = 1e-2 			# 1e-2 is suggested by Fletcher et. al. 
 	"Success threshold."
-	nu_success :: T = 0.4 			# 0.9 is suggested by Fletcher et. al. 
+	nu_success :: T = 0.9 			# 0.9 is suggested by Fletcher et. al. 
 	
 	# compatibilty parameters
 	"Factor for normal step compatibility test. The smaller `c_delta`, the stricter the test."

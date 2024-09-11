@@ -130,10 +130,28 @@ function _trial_analysis(
     fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod,
     f_step_test_rhs
 )
-    objf_decrease = maximum(fx) - maximum(fxs)
-    model_decrease = maximum(fx_mod) - maximum(fxs_mod)
-    rho = objf_decrease / model_decrease
+    ## following suggestions from “Trust Region Methods” by Conn et. al.,
+    ## Subsec. 17.4.2
+    eps_k = eps(eltype(fx)) * 10
+    max_fx = maximum(fx)
+    del_k = eps_k * max_fx
+
+    max_fxs = maximum(fxs)
+    max_fxs_mod = maximum(fxs_mod)
+    objf_decrease = maximum(fx) - max_fxs - del_k
+    model_decrease = maximum(fx_mod) - max_fxs_mod
     is_f_step = model_decrease >= f_step_test_rhs
+    model_decrease -= del_k
+    rho = if (
+        max_fxs == max_fxs_mod || 
+        (
+            abs(objf_decrease) < eps_k && abs(model_decrease) < eps_k
+        )
+    )   
+        1
+    else
+        objf_decrease / model_decrease
+    end
     return rho, is_f_step
 end
 
@@ -142,7 +160,7 @@ function _trial_analysis(
     fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod,
     f_step_test_rhs
 )
-    return __trial_analysis(<=, Inf, diff_fx, diff_fx_mod, f_step_test_rhs)
+    return __trial_analysis(<=, Inf, fxs, fxs_mod, diff_fx, diff_fx_mod, f_step_test_rhs)
 end
 
 function _trial_analysis(
@@ -150,20 +168,35 @@ function _trial_analysis(
     fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod,
     f_step_test_rhs
 )
-    return __trial_analysis(>=, -Inf, diff_fx, diff_fx_mod, f_step_test_rhs)
+    return __trial_analysis(>=, -Inf, fxs, fxs_mod, diff_fx, diff_fx_mod, f_step_test_rhs)
 end
 
 function __trial_analysis(
     comp_op, rho0, 
-    diff_fx, diff_fx_mod,
+    fxs, fxs_mod, diff_fx, diff_fx_mod,
     f_step_test_rhs
 )
+    ## following suggestions from “Trust Region Methods” by Conn et. al.,
+    ## Subsec. 17.4.2
+    eps_k = eps(eltype(fx)) * 10
+    del_k = eps_k * mapreduce(abs, max, fx)
+    
     rho = rho0
     _i = 0
     for i = eachindex(diff_fx)
-        mx_i = diff_fx_mod[i]
-        mx_i <= 0 && continue
-        fx_i = diff_fx[i]
+        diff_mod = diff_fx_mod[i] - del_k
+        diff_mod <= 0 && continue
+        diff_func = diff_fx[i] - del_k
+        rho_i = if (
+            fxs[i] == fxs_mod[i] ||
+            (
+                abs(diff_mod) < del_k && abs(diff_func) < del_k
+            )
+        )
+            1
+        else
+            diff_func / diff_mod
+        end
         rho_i = fx_i / mx_i
         if comp_op(rho_i , rho)
             _i = i
@@ -204,7 +237,7 @@ function _log_radius_update(delta, delta_new, radius_update; indent, log_level)
 end
 
 function _update_radius(
-    delta, 
+    delta,
     iteration_classification, rho, rho_classification,
     gamma_grow, gamma_shrink, gamma_shrink_much, delta_max,
     nu_accept, nu_success

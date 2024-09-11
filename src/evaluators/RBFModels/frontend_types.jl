@@ -53,7 +53,7 @@
     th_qr :: T = 1/(2*search_factor)
 
     "Threshold for accepting additional points based on the Cholesky factors."
-    th_cholesky :: T = 1e-7
+    th_cholesky :: T = 1e-9
 
     ## TODO `max_evals` (soft limit on maximum number of evaluations)
     @assert isnothing(poly_deg) || poly_deg in (0,1)
