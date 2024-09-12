@@ -108,6 +108,12 @@ function _test_trial_point!(
         
         if is_f_step
             iteration_classification = IT_F_STEP
+           
+        else
+            # constraint violation significant compared to predicted decrease
+            iteration_classification = IT_THETA_STEP
+        end
+        if !isnan(rho)
             if rho >= nu_accept
                 if rho >= nu_success
                     rho_classification = RHO_SUCCESS
@@ -117,9 +123,6 @@ function _test_trial_point!(
             else
                 rho_classification = RHO_FAIL
             end
-        else
-            # constraint violation significant compared to predicted decrease
-            iteration_classification = IT_THETA_STEP
         end
     end
     return iteration_classification, rho, rho_classification
@@ -243,8 +246,8 @@ function _update_radius(
     nu_accept, nu_success
 )
     radius_update = nothing
-    if iteration_classification == IT_F_STEP ||
-        iteration_classification == IT_THETA_STEP
+    if iteration_classification == IT_F_STEP 
+        #iteration_classification == IT_THETA_STEP
         if rho_classification == RHO_ACCEPT
             gamma_factor = gamma_shrink
             if nu_success > nu_accept
@@ -261,12 +264,10 @@ function _update_radius(
                 delta_new = delta
                 radius_update = RADIUS_GROW_FAIL
             end
-        end 
-    #=
+        end
     elseif iteration_classification == IT_THETA_STEP
         delta_new = delta
         radius_update = RADIUS_NO_CHANGE
-    =#
     end
 
     if isnothing(radius_update)

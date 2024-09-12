@@ -107,9 +107,8 @@ function log_stop_code(crit, log_level)
     @logmsg log_level stop_message(crit)
 end
 
-
 function compatibility_test_rhs(c_delta, c_mu, mu, Δ)
-    return c_delta * min(Δ, c_mu + Δ^(1+mu))
+    return c_delta * min(Δ, c_mu * Δ^(1+mu))
 end
 
 function compatibility_test(n, c_delta, c_mu, mu, Δ)
