@@ -55,7 +55,7 @@ function update_rbf_model!(
             rbf, Δ, x0, fx0, global_lb, global_ub; 
             delta_max, norm_p, log_level, indent
         )
-        @ignoraise n_X = eval_missing_values!(rbf, op, x0, n_X)
+        @ignoraise n_X = eval_missing_values!(rbf, op, x0, n_X, global_lb, global_ub)
         
         if n_X < rbf.min_points
             @warn "$(pad_str)Cannot make a fully linear RBF model."
@@ -435,15 +435,20 @@ function model_shape_parameter(rbf::RBFModel, Δ)
     return _shape_parameter(rbf.kernel)
 end
 
-function eval_missing_values!(rbf, op, x0, n_X; ix1 = 2)
+function eval_missing_values!(rbf, op, x0, n_X, global_lb=nothing, global_ub=nothing; ix1 = 2)
     @unpack buffers, params = rbf
     @unpack X = params
     @unpack db_index, sorting_flags, FX, xZ, fxZ = buffers
 
-    return eval_missing_values!(X, FX, xZ, fxZ, db_index, sorting_flags, ix1, n_X, op, x0)
+    return eval_missing_values!(
+        X, FX, xZ, fxZ, db_index, sorting_flags, ix1, n_X, op, x0, global_lb, global_ub
+    )
 end
 
-@views function eval_missing_values!(X, FX, xtmp, fxtmp, db_index, sorting_flags, istart, iend, op, x0)
+@views function eval_missing_values!(
+    X, FX, xtmp, fxtmp, db_index, sorting_flags, istart, iend, op, x0,
+    global_lb=nothing, global_ub=nothing    
+)
 
     # `presort_eval_arrays!` will sort columns `istart:iend` in `X`, `FX` and `db_index` such that
     # indices `istart:i0` have database values already.
@@ -457,6 +462,7 @@ end
     _FX = FX[:, i0:iend]
     
     _X .+= x0       # for evaluation, undo shift
+    project_into_box!.(eachcol(_X), Ref(global_lb), Ref(global_ub))
     _FX .= NaN
     
     @ignoraise func_vals!(_FX, op, _X)

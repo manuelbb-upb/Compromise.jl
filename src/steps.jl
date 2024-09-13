@@ -12,7 +12,7 @@ function compute_normal_step!(
     log_level
 )
     ## set `step_vals.n` to hold normal step
-    nothing
+    return error("`compute_normal_step!` not yet implemented.")
 end
 
 function compute_descent_step!(
@@ -22,7 +22,7 @@ function compute_descent_step!(
 )
     ## set `step_vals.d` to hold descent step
     ## set `step_vals.crit_ref` to hold criticality measure
-    return nothing
+    return error("`compute_descent_step!` not yet implemented.")
 end
 
 function do_normal_step!(
@@ -39,6 +39,9 @@ function do_normal_step!(
             scaled_cons, vals, mod_vals; log_level
         )
         step_vals.xn .= cached_x(vals) .+ step_vals.n
+        project_into_box!(step_vals.xn, scaled_cons.lb, scaled_cons.ub)
+        step_vals.n .= step_vals.xn .- cached_x(vals)
+
         @logmsg log_level """
             $(pad_str) Found normal step $(pretty_row_vec(step_vals.n; cutoff=60)). 
             $(pad_str) \t Hence xn=$(pretty_row_vec(step_vals.xn; cutoff=60)).""" 
@@ -56,10 +59,6 @@ function finalize_step_vals!(
     log_level
 )
     ## find stepsize and scale `step_vals.d`
-    ## set `step_vals.s`, `step_vals.xs`, `step_vals.fxs`
-    @. step_vals.s = step_vals.n + step_vals.d
-    step_vals.xs .= cached_x(vals) .+ step_vals.s
-    @ignoraise objectives!(step_vals.fxs, mod, step_vals.xs)
     return nothing
 end
 
@@ -77,6 +76,16 @@ function do_descent_step!(
             step_cache, step_vals, Δ, mop, mod, scaler, lin_cons,
             scaled_cons, vals, mod_vals; log_level
         )
+    
+        @. step_vals.s = step_vals.n + step_vals.d
+        @. step_vals.xs = step_vals.xn + step_vals.d
+
+        project_into_box!(step_vals.xs, scaled_cons.lb, scaled_cons.ub)
+        step_vals.s .= step_vals.xs .- cached_x(vals)
+        step_vals.d .= step_vals.s .- step_vals.n
+
+        @ignoraise objectives!(step_vals.fxs, mod, step_vals.xn)
+
     end
     return nothing
 end

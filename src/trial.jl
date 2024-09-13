@@ -38,7 +38,8 @@ function test_trial_point!(
     delta = iteration_scalars.delta
     @unpack gamma_grow, gamma_shrink, gamma_shrink_much, delta_max = algo_opts
     delta_new, radius_update = _update_radius(
-        delta, 
+        algo_opts.trial_update,
+        delta, LA.norm(step_vals.s, Inf),
         iteration_classification, rho, rho_classification,
         gamma_grow, gamma_shrink, gamma_shrink_much, delta_max,
         nu_accept, nu_success
@@ -163,7 +164,7 @@ function _trial_analysis(
     fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod,
     f_step_test_rhs
 )
-    return __trial_analysis(<=, Inf, fxs, fxs_mod, diff_fx, diff_fx_mod, f_step_test_rhs)
+    return __trial_analysis(<=, Inf, fx, fxs, fxs_mod, diff_fx, diff_fx_mod, f_step_test_rhs)
 end
 
 function _trial_analysis(
@@ -171,12 +172,12 @@ function _trial_analysis(
     fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod,
     f_step_test_rhs
 )
-    return __trial_analysis(>=, -Inf, fxs, fxs_mod, diff_fx, diff_fx_mod, f_step_test_rhs)
+    return __trial_analysis(>=, -Inf, fx, fxs, fxs_mod, diff_fx, diff_fx_mod, f_step_test_rhs)
 end
 
 function __trial_analysis(
     comp_op, rho0, 
-    fxs, fxs_mod, diff_fx, diff_fx_mod,
+    fx, fxs, fxs_mod, diff_fx, diff_fx_mod,
     f_step_test_rhs
 )
     ## following suggestions from “Trust Region Methods” by Conn et. al.,
@@ -200,10 +201,9 @@ function __trial_analysis(
         else
             diff_func / diff_mod
         end
-        rho_i = fx_i / mx_i
         if comp_op(rho_i , rho)
             _i = i
-            rho = rhoi
+            rho = rho_i
         end
     end
     
@@ -238,9 +238,60 @@ function _log_radius_update(delta, delta_new, radius_update; indent, log_level)
     end
     return nothing
 end
-
 function _update_radius(
-    delta,
+    ::Val{:stepsize},
+    delta, len_s,
+    iteration_classification, rho, rho_classification,
+    gamma_grow, gamma_shrink, gamma_shrink_much, delta_max,
+    nu_accept, nu_success
+)
+    radius_update = nothing
+    if iteration_classification == IT_F_STEP 
+        #iteration_classification == IT_THETA_STEP
+        if rho_classification == RHO_ACCEPT
+            gamma_factor = gamma_shrink
+            if nu_success > nu_accept
+                rho_frac = (rho - nu_accept) / (nu_success - nu_accept)
+                gamma_factor += rho_frac * (1 - gamma_shrink)
+            end
+            delta_new = max(
+                gamma_factor * delta,
+                len_s
+            )
+            radius_update = RADIUS_SHRINK
+        elseif rho_classification == RHO_SUCCESS
+            delta_new = min(
+                delta_max,
+                max(
+                    gamma_grow * len_s,
+                    (1 + (1 - gamma_grow)/2) * delta
+                )
+            )
+            if delta_new > delta
+                radius_update = RADIUS_GROW
+            else
+                radius_update = RADIUS_GROW_FAIL
+            end
+        end
+    elseif iteration_classification == IT_THETA_STEP
+        delta_new = delta
+        radius_update = RADIUS_NO_CHANGE
+    end
+
+    if isnothing(radius_update)
+        if rho >= 0
+            delta_new = len_s * gamma_shrink
+        else
+            delta_new = len_s * gamma_shrink_much
+        end 
+        radius_update = RADIUS_SHRINK
+    end
+
+    return delta_new, radius_update
+end
+function _update_radius(
+    ::Val{:classic},
+    delta, len_s,
     iteration_classification, rho, rho_classification,
     gamma_grow, gamma_shrink, gamma_shrink_much, delta_max,
     nu_accept, nu_success

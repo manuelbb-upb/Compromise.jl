@@ -314,7 +314,7 @@ function step_tangentially!(sol, ndset, optimizer_caches, algo_opts; indent=0)
     
     @logmsg log_level "* Computing a descent step."
     
-    do_descent_step!(
+    @ignoraise do_descent_step!(
         step_cache, step_vals, delta, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
         log_level
     )
@@ -944,7 +944,7 @@ function _test_trial_point!(
                     is_good_trial_point = true
 
                     delta_child = delta_new = gamma_shrink * delta
-                    rho_success = minimum( diff_fx[is_pos] ./ diff_fx_mod[is_pos]; init=-Inf )
+                    rho_success = !any(is_pos) ? -Inf : minimum( diff_fx[is_pos] ./ diff_fx_mod[is_pos] )
                     if rho_success >= nu_success
                         delta_child = min(delta_max, gamma_grow * delta)
                     end

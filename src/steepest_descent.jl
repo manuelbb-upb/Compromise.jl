@@ -226,7 +226,7 @@ function compute_normal_step!(
         )
         Base.copyto!(step_vals.n, n)
     catch err
-        @warn "Error in normal step computation." exception=(err, catch_backtrace())
+        @warn "Error in normal step computation." exception=err #(err, catch_backtrace())
         step_vals.n .= NaN
     end
 
@@ -287,11 +287,11 @@ function finalize_step_vals!(
     @unpack lb_tr, ub_tr, Axn, Dgx_n = step_cache
     trust_region_bounds!(lb_tr, ub_tr, x, Δ, lb, ub)
     _, σ = initial_steplength(xn, d, lb_tr, ub_tr, Axn, A, gx, Dgx_n, Dgx)
-    
     if isnan(σ) || σ <= 0
-        _χ = 0
+        #src #del _χ = 0
+        _χ = step_vals.crit_ref[]
         d .= 0
-    else    
+    else
         @unpack fxn, fx_tmp, rhs_factor, backtracking_mode, backtracking_factor, gxn, hxn = step_cache
         @unpack xs = step_vals
         χ = step_vals.crit_ref[]
@@ -303,9 +303,7 @@ function finalize_step_vals!(
         )
     end
     step_vals.crit_ref[] = _χ
-    @. step_vals.s = step_vals.n + d
-    @. step_vals.xs = step_vals.xn + d
-    @ignoraise objectives!(step_vals.fxs, mod, step_vals.xn)
+  
     return nothing
 end
 
@@ -417,7 +415,7 @@ function solve_steepest_descent_problem(
         χ = -min(0, maximum(dir'Dfx))
 
     catch err
-        @error "Exception in Descent Step Computation." exception=(err, catch_backtrace())
+        @warn "Exception in Descent Step Computation." exception=err
         χ = 0
         dir = zero(xn)
     end
@@ -496,7 +494,7 @@ function backtrack!(
 
     if set_to_zero
         d .= 0
-        return 0
+        return χ
     end
     
     ## pre-compute RHS for Armijo test
@@ -549,7 +547,6 @@ function backtrack!(
 
     if set_to_zero
         d .= 0
-        return 0
     end
    
     return χ
@@ -649,7 +646,6 @@ function initial_steplength(
     
     T = eltype(xn)
     σ_min, σ_max = intersect_box(xn, d, lb_tr, ub_tr)
-        
     if !isnothing(A)
         for (i, ai) = enumerate(eachrow(A))
             # Axn + σ * A*d .<= b
@@ -659,7 +655,8 @@ function initial_steplength(
     end
     for (i, dgi) = enumerate(eachcol(Dgx))
         # gx + Dgx_n + σ * Dgx * d .<= 0
-        σl, σr = intersect_bound(gx[i] + Dgx_n[i], LA.dot(dgi, d), 0, T)
+        #src #del σl, σr = intersect_bound(@show(gx[i] + Dgx_n[i]), LA.dot(dgi, d), 0, T)
+        σl, σr = intersect_bound(Dgx_n[i], LA.dot(dgi, d), 0, T)
         σ_min, σ_max = intersect_intervals(σ_min, σ_max, σl, σr, T)
     end
     return σ_min, σ_max

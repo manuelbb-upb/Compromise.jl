@@ -53,7 +53,7 @@ Base.@kwdef struct AlgorithmOptions{T <: AbstractFloat, SC, SCALER_CFG_TYPE}
 	"Trust region shrinking factor in criticality loops."
 	crit_alpha :: T = 0.1
 
-	backtrack_in_crit_routine :: Bool = true
+	backtrack_in_crit_routine :: Bool = false
 	
 	# initialization
 	"Initial trust region radius."
@@ -75,7 +75,9 @@ Base.@kwdef struct AlgorithmOptions{T <: AbstractFloat, SC, SCALER_CFG_TYPE}
 	"Acceptance threshold."
 	nu_accept :: T = 1e-2 			# 1e-2 is suggested by Fletcher et. al. 
 	"Success threshold."
-	nu_success :: T = 0.9 			# 0.9 is suggested by Fletcher et. al. 
+	nu_success :: T = 0.9 			# 0.9 is suggested by Fletcher et. al.
+	
+	trial_update :: Union{Val{:classic}, Val{:stepsize}} = Val(:classic)
 	
 	# compatibilty parameters
 	"Factor for normal step compatibility test. The smaller `c_delta`, the stricter the test."
@@ -125,6 +127,7 @@ function AlgorithmOptions(
 	trial_mode,
 	nu_accept,
 	nu_success,
+	trial_update,
 	c_delta,
 	c_mu,
 	mu,
@@ -165,6 +168,7 @@ function AlgorithmOptions(
 		trial_mode,
 		nu_accept,
 		nu_success,
+		trial_update,
 		c_delta,
 		c_mu,
 		mu,
