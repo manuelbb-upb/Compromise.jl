@@ -1,11 +1,11 @@
-init_jump_model(qp_cfg::Type{<:MOI.AbstractOptimizer}, vals) = JuMP.Model(qp_cfg)
-function init_jump_model(qp_cfg::JuMP.Model, vals)
+init_jump_model(qp_cfg::Type{<:MOI.AbstractOptimizer}, vals, delta) = JuMP.Model(qp_cfg)
+function init_jump_model(qp_cfg::JuMP.Model, vals, delta)
     empty!(qp_cfg)
     return qp_cfg
 end
 
 abstract type AbstractJuMPModelConfig end
-init_jump_model(::AbstractJuMPModelConfig, vals)=nothing
+init_jump_model(::AbstractJuMPModelConfig, vals, delta)=nothing
 
 function HiGHSOptimizerConfig(args...; kwargs...)
     highs_ext = Base.get_extension(@__MODULE__, :HiGHSStepsExt)
@@ -20,8 +20,8 @@ Base.@kwdef struct OSQPOptimizerConfig <: AbstractJuMPModelConfig
     silent :: Bool = true
     polishing :: Bool = true
     max_time :: Union{Int, Nothing} = nothing
-    eps_rel :: Union{Float64, Nothing} = eps(Float64) * 10
-    eps_abs :: Union{Nothing, Missing, Float64} = missing
+    eps_rel :: Union{Float64, Nothing, Missing} = missing
+    eps_abs :: Union{Float64, Nothing, Missing} = missing
     max_iter :: Union{Nothing, Int} = nothing
 end
 @batteries OSQPOptimizerConfig selfconstructor=false
@@ -33,7 +33,7 @@ function default_qp_descent_cfg()
     return OSQPOptimizerConfig()
 end
 
-function init_jump_model(osqp_jump_cfg::OSQPOptimizerConfig, vals)
+function init_jump_model(osqp_jump_cfg::OSQPOptimizerConfig, vals, delta)
     opt = JuMP.Model(OSQP.Optimizer)
     if osqp_jump_cfg.silent
         JuMP.set_silent(opt)
@@ -49,23 +49,33 @@ function init_jump_model(osqp_jump_cfg::OSQPOptimizerConfig, vals)
     JuMP.set_attribute(opt, "adaptive_rho_interval", 25)
 
     if osqp_jump_cfg.polishing
-        JuMP.set_attribute(opt, "polishing", time_limit)
+        JuMP.set_attribute(opt, "polishing", true)
     end
 
     if !isnothing(osqp_jump_cfg.max_iter) && osqp_jump_cfg.max_iter > 0
         JuMP.set_attribute(opt, "max_iter", osqp_jump_cfg.max_iter)
     end
 
-    if !isnothing(osqp_jump_cfg.eps_rel) && osqp_jump_cfg.eps_rel > 0
-        JuMP.set_attribute(opt, "eps_rel", osqp_jump_cfg.eps_rel)
-    end
-    if !isnothing(osqp_jump_cfg.eps_abs) 
-        eps_abs = if ismissing(osqp_jump_cfg.eps_abs)
-            mapreduce(eps, max, cached_x(vals))
+    if !isnothing(osqp_jump_cfg.eps_rel)
+        if !ismissing(osqp_jump_cfg.eps_rel) 
+            if osqp_jump_cfg.eps_rel > 0
+                JuMP.set_attribute(opt, "eps_rel", osqp_jump_cfg.eps_rel)
+            end
         else
-            osqp_jump_cfg.eps_abs
+            eps_rel = delta >= 1e-3 ? 1e-4 : delta >= 1e-6 ? 1e-5 : 1e-6
+            JuMP.set_attribute(opt, "eps_rel", eps_rel)
         end
-        JuMP.set_attribute(opt, "eps_abs", eps_abs)
+    end
+
+    if !isnothing(osqp_jump_cfg.eps_abs)
+        if !ismissing(osqp_jump_cfg.eps_abs) 
+            if osqp_jump_cfg.eps_abs > 0
+                JuMP.set_attribute(opt, "eps_abs", osqp_jump_cfg.eps_abs)
+            end
+        else
+            eps_abs = delta >= 1e-3 ? 1e-4 : delta >= 1e-6 ? 1e-5 : 1e-6
+            JuMP.set_attribute(opt, "eps_abs", eps_abs)
+        end
     end
     
     return opt
@@ -218,7 +228,7 @@ function compute_normal_step!(
     Dhx = cached_Dhx(mod_vals)
 
     qp_cfg = step_cache.qp_normal_cfg
-    opt = init_jump_model(qp_cfg, vals)
+    opt = init_jump_model(qp_cfg, vals, Δ)
     try
         n = solve_normal_step_problem(
             x, lb, ub, Ex_min_c, E, Ax_min_b, A, hx, Dhx, gx, Dgx, opt;
@@ -240,11 +250,11 @@ function compute_descent_step!(
 )
 
     return compute_steepest_descent_step!(
-        step_cache, step_vals, mod, scaled_cons, vals, mod_vals)
+        step_cache, step_vals, mod, scaled_cons, vals, mod_vals, Δ)
 end
 
 function compute_steepest_descent_step!(
-    step_cache, step_vals, mod, scaled_cons, vals, mod_vals
+    step_cache, step_vals, mod, scaled_cons, vals, mod_vals, Δ
 )
     x = cached_x(vals)
     Dfx = cached_Dfx(mod_vals)
@@ -263,7 +273,7 @@ function compute_steepest_descent_step!(
     @unpack xn = step_vals
     Dhx = cached_Dhx(mod_vals)
     @unpack normalize_gradients, qp_descent_cfg = step_cache
-    opt = init_jump_model(qp_descent_cfg, vals)
+    opt = init_jump_model(qp_descent_cfg, vals, Δ)
     χ, _d = solve_steepest_descent_problem(
         xn, Dfx, lb, ub, E, Axn, A, Dhx, Dgx_n, Dgx, opt;
         normalize_gradients, ball_norm = step_cache.descent_step_norm
@@ -351,6 +361,8 @@ end
 function normal_step_objective!(opt, n, p)
     if p == 2
         return normal_step_objective_2!(opt, n)
+    elseif p==1
+        return normal_step_objective_1!(opt, n)
     elseif isinf(p)
         return normal_step_objective_inf!(opt, n)
     end
@@ -366,6 +378,12 @@ function normal_step_objective_inf!(opt, n)
     JuMP.@objective(opt, Min, norm_n)
     JuMP.@constraint(opt, -norm_n .<= n)
     JuMP.@constraint(opt, n .<= norm_n)
+end
+
+function normal_step_objective_1!(opt, n)
+    JuMP.@variable(opt, norm_n)
+    JuMP.@objective(opt, Min, norm_n)
+    JuMP.@constraint(opt, [norm_n; n] ∈ MOI.NormOneCone(length(n)+1))
 end
 
 function postprocess_normal_step_results!(
@@ -595,6 +613,8 @@ end
 function descent_step_unit_constraint!(opt, d, p)
     if p == 2
         return descent_step_unit_constraint_2!(opt, d)
+    elseif p == 1
+        return descent_step_unit_constraint_1!(opt, d)
     elseif isinf(p)
         return descent_step_unit_constraint_inf!(opt, d)
     end
@@ -608,6 +628,11 @@ end
 
 function descent_step_unit_constraint_2!(opt, d)
     JuMP.@constraint(opt, sum( d.^2 ) <= 1)
+end
+
+function descent_step_unit_constraint_1!(opt, d)
+    JuMP.@variable(opt, norm_d)
+    JuMP.@constraint(opt, [norm_d; d] ∈ MOI.NormOneCone(length(d) + 1))
 end
 
 # # Helpers

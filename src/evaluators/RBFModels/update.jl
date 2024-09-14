@@ -420,7 +420,7 @@ function model_shape_parameter(rbf::RBFModel, Δ)
         try 
             ε = rbf.shape_parameter_function(Δ)
         catch err
-            @error "Could not compute shape parameter." exception=(err, catch_backtrace())
+            @warn "Could not compute shape parameter." exception=(err, catch_backtrace())
         end
         if ε > 0
             return ε

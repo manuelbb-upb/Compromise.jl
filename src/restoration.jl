@@ -156,7 +156,7 @@ function restoration_constraints(mop, vals_tmp, scaler, scaled_cons)
             stop_code = nl_ineq_constraints!(cached_gx(vals_tmp), mop, ξ)
         end
         if isa(stop_code, AbstractStoppingCriterion)
-            @error("Stopped in NLopt.")
+            @warn("Stopped in NLopt.")
             throw(NLopt.ForcedStop())
         end
 

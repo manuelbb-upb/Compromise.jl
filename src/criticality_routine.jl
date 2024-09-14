@@ -53,24 +53,30 @@ function criticality_routine!(
                     log_level, indent
                 ) indent
             end
+            
             if !compatibility_test(step_vals.n, algo_opts, Δj)
                 # make sure we have compatible steps after exiting the loop
                 universal_copy!(step_vals, crit_cache.step_vals)
                 break_because_incompatible = true
-
-                break
+                # do not exit just yet;
+                # before, we recompute the descent direction in case we have to do 
+                # backtracking after exiting the while loop
+            else
+                Δ = Δj
             end
+            
             @ignorebreak stop_code = do_descent_step!(
-                step_cache, step_vals, Δj, mop, mod, scaler, lin_cons, scaled_cons, vals,
+                step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals,
                 mod_vals; log_level, finalize=backtrack_in_crit_routine
             ) indent
-           
+
+            break_because_incompatible && break
+
             ## read criticality value to local var
             χ = step_vals.crit_ref[]
-            Δ = Δj
            
-            @ignorebreak stop_code =  check_stopping_criterion(
-                stop_crits, CheckPreCritLoop(), 
+            @ignorebreak stop_code = check_stopping_criterion(
+                stop_crits, CheckPostCritLoop(), 
                 mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
                 mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
                 iteration_status, iteration_scalars, stop_crits,
@@ -82,7 +88,7 @@ function criticality_routine!(
         _Δ = Δ  # `_Δ` storred for logging only
         Δ = min(max(_Δ, crit_B*χ), Δ_init)
         
-        if !backtrack_in_crit_routine            
+        if !backtrack_in_crit_routine           
             @ignoraise finalize_step_vals!(
                 step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals; log_level) indent
         end

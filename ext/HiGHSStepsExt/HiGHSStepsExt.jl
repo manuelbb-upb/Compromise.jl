@@ -14,7 +14,7 @@ Base.@kwdef struct HiGHSOptimizerConfig <: C.AbstractJuMPModelConfig
 end
 @batteries HiGHSOptimizerConfig selfconstructor=false
 
-function C.init_jump_model(highs_jump_cfg::HiGHSOptimizerConfig, vals)
+function C.init_jump_model(highs_jump_cfg::HiGHSOptimizerConfig, vals, delta)
     opt = JuMP.Model(HiGHS.Optimizer)
 
     if highs_jump_cfg.silent

@@ -120,7 +120,7 @@ function optimize_with_algo(
             opt_cache_i = all_optimizer_caches[i]
             if (
                 #counter > dim_objectives(MOP) && 
-                delta_func(opt_cache_i) <= Δ_largest * outer_opts.delta_factor
+                Δ_largest > 0 && (delta_func(opt_cache_i) <= Δ_largest * outer_opts.delta_factor)
                 #!isinf(crit_largest) &&
                 #false
                 #crit_func(opt_cache_i) < 0.05 * crit_largest

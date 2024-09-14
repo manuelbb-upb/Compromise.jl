@@ -32,7 +32,8 @@ function test_trial_point!(
     )
 
     if do_log_trial
-        _log_trial_results(θxs, Φxs, iteration_classification, rho_classification; indent, log_level)
+        _log_trial_results(
+            θxs, Φxs, iteration_classification, rho_classification; indent, log_level)
     end
 
     delta = iteration_scalars.delta
@@ -98,7 +99,10 @@ function _test_trial_point!(
 
     if iteration_classification == IT_INITIALIZATION
         f_step_test_rhs = kappa_theta * θx^psi_theta
-        rho, is_f_step = _trial_analysis(mode, fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod, f_step_test_rhs)  
+        rho, is_f_step = _trial_analysis(
+            mode, fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod, f_step_test_rhs, θx;
+            rho_fallback = nu_accept
+        )  
         
         @logmsg log_level """\n
         $(indent_str(indent))- mode     = $(mode), 
@@ -109,7 +113,6 @@ function _test_trial_point!(
         
         if is_f_step
             iteration_classification = IT_F_STEP
-           
         else
             # constraint violation significant compared to predicted decrease
             iteration_classification = IT_THETA_STEP
@@ -132,7 +135,8 @@ end
 function _trial_analysis(
     ::Val{:max_diff}, 
     fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod,
-    f_step_test_rhs
+    f_step_test_rhs, θx;
+    rho_fallback = 1
 )
     ## following suggestions from “Trust Region Methods” by Conn et. al.,
     ## Subsec. 17.4.2
@@ -143,8 +147,8 @@ function _trial_analysis(
     max_fxs = maximum(fxs)
     max_fxs_mod = maximum(fxs_mod)
     objf_decrease = maximum(fx) - max_fxs - del_k
-    model_decrease = maximum(fx_mod) - max_fxs_mod
-    is_f_step = model_decrease >= f_step_test_rhs
+    @show model_decrease = maximum(fx_mod) - max_fxs_mod
+    is_f_step = θx <= 0 ? true : model_decrease >= f_step_test_rhs
     model_decrease -= del_k
     rho = if (
         max_fxs == max_fxs_mod || 
@@ -152,7 +156,7 @@ function _trial_analysis(
             abs(objf_decrease) < eps_k && abs(model_decrease) < eps_k
         )
     )   
-        1
+        rho_fallback
     else
         objf_decrease / model_decrease
     end
@@ -162,23 +166,32 @@ end
 function _trial_analysis(
     mode::Val{:min_rho}, 
     fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod,
-    f_step_test_rhs
+    f_step_test_rhs, θx;
+    rho_fallback = 1
 )
-    return __trial_analysis(<=, Inf, fx, fxs, fxs_mod, diff_fx, diff_fx_mod, f_step_test_rhs)
+    return __trial_analysis(
+        <=, Inf, fx, fxs, fxs_mod, diff_fx, diff_fx_mod, f_step_test_rhs, θx;
+        rho_fallback
+    )
 end
 
 function _trial_analysis(
     mode::Val{:max_rho}, 
     fx, fxs, fx_mod, fxs_mod, diff_fx, diff_fx_mod,
-    f_step_test_rhs
+    f_step_test_rhs, θx;
+    rho_fallback = 1
 )
-    return __trial_analysis(>=, -Inf, fx, fxs, fxs_mod, diff_fx, diff_fx_mod, f_step_test_rhs)
+    return __trial_analysis(
+        >=, -Inf, fx, fxs, fxs_mod, diff_fx, diff_fx_mod, f_step_test_rhs, θx;
+        rho_fallback
+    )
 end
 
 function __trial_analysis(
     comp_op, rho0, 
     fx, fxs, fxs_mod, diff_fx, diff_fx_mod,
-    f_step_test_rhs
+    f_step_test_rhs, θx;
+    rho_fallback=1
 )
     ## following suggestions from “Trust Region Methods” by Conn et. al.,
     ## Subsec. 17.4.2
@@ -188,7 +201,10 @@ function __trial_analysis(
     rho = rho0
     _i = 0
     for i = eachindex(diff_fx)
-        diff_mod = diff_fx_mod[i] - del_k
+        diff_mod = diff_fx_mod[i]
+        diff_mod <= 0 && continue
+        _i = i
+        diff_mod -= del_k
         diff_mod <= 0 && continue
         diff_func = diff_fx[i] - del_k
         rho_i = if (
@@ -197,7 +213,7 @@ function __trial_analysis(
                 abs(diff_mod) < del_k && abs(diff_func) < del_k
             )
         )
-            1
+            rho_fallback
         else
             diff_func / diff_mod
         end
@@ -207,8 +223,8 @@ function __trial_analysis(
         end
     end
     
-    is_f_step = false
-    if _i > 0
+    is_f_step = θx <= 0
+    if !is_f_step &&_i > 0
         is_f_step = diff_fx_mod[_i] >= f_step_test_rhs
     end
 
@@ -283,7 +299,9 @@ function _update_radius(
             delta_new = len_s * gamma_shrink
         else
             delta_new = len_s * gamma_shrink_much
-        end 
+        end
+        ## safe-guard against zero steps
+        delta_new = max(delta_new, delta * gamma_shrink_much / 10) 
         radius_update = RADIUS_SHRINK
     end
 
