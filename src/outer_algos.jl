@@ -97,17 +97,25 @@ function optimize_with_algo(
         if outer_opts.sort_by_delta
             sortperm!(I, all_optimizer_caches; by = sort_func)
         end
-        
-        Δ_largest = mapreduce(delta_func, max, @view(all_optimizer_caches[is_running]); init=0)
-        crit_largest = -Inf
+       
+        ## determine largest radius and criticality of running solutions
+        Δ_largest = crit_largest = 0
         for i in I
+            if flags_dominated[i]
+                ## just to be sure that we don't waste time one dominated solutions
+                is_running[i] = false
+            end
             !is_running[i] && continue
             opt_cache_i = all_optimizer_caches[i]
             opt_cache_i.iteration_scalars.it_index < 1 && continue
             χ = crit_func(opt_cache_i)
+            Δ = delta_func(opt_cache_i) 
             if χ > crit_largest
                 crit_largest = χ
             end
+            if Δ > Δ_largest
+                Δ_largest = Δ
+            end                
         end
         
         counter = 0
@@ -122,7 +130,6 @@ function optimize_with_algo(
                 #counter > dim_objectives(MOP) && 
                 Δ_largest > 0 && (delta_func(opt_cache_i) <= Δ_largest * outer_opts.delta_factor)
                 #!isinf(crit_largest) &&
-                #false
                 #crit_func(opt_cache_i) < 0.05 * crit_largest
             )
                 continue

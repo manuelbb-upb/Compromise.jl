@@ -7,76 +7,42 @@ end
 abstract type AbstractJuMPModelConfig end
 init_jump_model(::AbstractJuMPModelConfig, vals, delta)=nothing
 
-function HiGHSOptimizerConfig(args...; kwargs...)
-    highs_ext = Base.get_extension(@__MODULE__, :HiGHSStepsExt)
+function OSQPOptimizerConfig(args...; kwargs...)
+    highs_ext = Base.get_extension(@__MODULE__, :OSQPStepsExt)
     if isnothing(highs_ext)
-        @warn "Could not load HiGHS extension."
+        @warn "Could not load OSQP extension."
         return nothing
     end
-    return highs_ext.HiGHSOptimizerConfig(args...; kwargs...)
+    return highs_ext.OSQPOptimizerConfig(args...; kwargs...)
 end
 
-Base.@kwdef struct OSQPOptimizerConfig <: AbstractJuMPModelConfig
+Base.@kwdef struct HiGHSOptimizerConfig <: AbstractJuMPModelConfig
     silent :: Bool = true
-    polishing :: Bool = true
-    max_time :: Union{Int, Nothing} = nothing
-    eps_rel :: Union{Float64, Nothing, Missing} = missing
-    eps_abs :: Union{Float64, Nothing, Missing} = missing
-    max_iter :: Union{Nothing, Int} = nothing
+    ## restricting the number of threads might be necessary for thread-safety in case
+    ## of parallel solver runs
+    num_threads :: Union{Nothing, Int} = 1
 end
-@batteries OSQPOptimizerConfig selfconstructor=false
+@batteries HiGHSOptimizerConfig selfconstructor=false
 
 function default_qp_normal_cfg()
-    return OSQPOptimizerConfig()
+    return HiGHSOptimizerConfig()
 end
 function default_qp_descent_cfg()
-    return OSQPOptimizerConfig()
+    return HiGHSOptimizerConfig()
 end
 
-function init_jump_model(osqp_jump_cfg::OSQPOptimizerConfig, vals, delta)
-    opt = JuMP.Model(OSQP.Optimizer)
-    if osqp_jump_cfg.silent
+function init_jump_model(highs_jump_cfg::HiGHSOptimizerConfig, vals, delta)
+    opt = JuMP.Model(HiGHS.Optimizer)
+
+    if highs_jump_cfg.silent
         JuMP.set_silent(opt)
     end
-    time_limit = if !isnothing(osqp_jump_cfg.max_time) && osqp_jump_cfg.max_time > 0
-        osqp_jump_cfg.max_time
-    else
-        num_vars = dim_vars(vals)
-        max(10, 2*num_vars)
-    end |> Float64
-    JuMP.set_attribute(opt, "time_limit", time_limit)
-    
-    JuMP.set_attribute(opt, "adaptive_rho_interval", 25)
-
-    if osqp_jump_cfg.polishing
-        JuMP.set_attribute(opt, "polishing", true)
+    if !isnothing(highs_jump_cfg.num_threads) && highs_jump_cfg.num_threads > 0
+        JuMP.set_attribute(opt, MOI.NumberOfThreads(), highs_jump_cfg.num_threads)
     end
 
-    if !isnothing(osqp_jump_cfg.max_iter) && osqp_jump_cfg.max_iter > 0
-        JuMP.set_attribute(opt, "max_iter", osqp_jump_cfg.max_iter)
-    end
-
-    if !isnothing(osqp_jump_cfg.eps_rel)
-        if !ismissing(osqp_jump_cfg.eps_rel) 
-            if osqp_jump_cfg.eps_rel > 0
-                JuMP.set_attribute(opt, "eps_rel", osqp_jump_cfg.eps_rel)
-            end
-        else
-            eps_rel = delta >= 1e-3 ? 1e-4 : delta >= 1e-6 ? 1e-5 : 1e-6
-            JuMP.set_attribute(opt, "eps_rel", eps_rel)
-        end
-    end
-
-    if !isnothing(osqp_jump_cfg.eps_abs)
-        if !ismissing(osqp_jump_cfg.eps_abs) 
-            if osqp_jump_cfg.eps_abs > 0
-                JuMP.set_attribute(opt, "eps_abs", osqp_jump_cfg.eps_abs)
-            end
-        else
-            eps_abs = delta >= 1e-3 ? 1e-4 : delta >= 1e-6 ? 1e-5 : 1e-6
-            JuMP.set_attribute(opt, "eps_abs", eps_abs)
-        end
-    end
+    num_vars = dim_vars(vals)
+    JuMP.set_attribute(opt, "time_limit", max(10, Float64(2*num_vars)))
     
     return opt
 end
@@ -92,8 +58,8 @@ Base.@kwdef struct SteepestDescentConfig{
     
     normalize_gradients :: Bool = false
     backtracking_mode :: Union{Val{:all}, Val{:any}, Val{:max}} = Val(:max)
-    descent_step_norm :: F = Inf
-    normal_step_norm :: F = 2
+    descent_step_norm :: F = 1
+    normal_step_norm :: F = 1
 
     guard_backtracking :: Bool = false
 

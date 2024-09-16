@@ -31,7 +31,8 @@ import Accessors: PropertyLens
 # extensions to choose from:
 import JuMP     # LP and QP modelling for descent and normal steps
 #src import COSMO    # actual QP solver
-import OSQP
+#src import OSQP
+import HiGHS
 
 # For restoration we currently use `NLopt`. This is also meant to become 
 # configurable...

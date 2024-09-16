@@ -147,7 +147,7 @@ function _trial_analysis(
     max_fxs = maximum(fxs)
     max_fxs_mod = maximum(fxs_mod)
     objf_decrease = maximum(fx) - max_fxs - del_k
-    @show model_decrease = maximum(fx_mod) - max_fxs_mod
+    model_decrease = maximum(fx_mod) - max_fxs_mod
     is_f_step = θx <= 0 ? true : model_decrease >= f_step_test_rhs
     model_decrease -= del_k
     rho = if (

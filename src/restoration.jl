@@ -21,6 +21,7 @@ function do_restoration(
     @logmsg log_level "$(pad_str)Starting restoration."
     
     iteration_status.iteration_classification = IT_RESTORATION   # set this to avoid model updates in subsequent iteration of the main algo
+    iteration_status.rho_classification = RHO_NAN
 
     universal_copy!(vals_tmp, vals) # we use `cached_x(vals_tmp)` as a starting point for nonlinear restoration
                                     # this array might be changed by a prior check to see whether `step_vals.xn` 
@@ -52,6 +53,11 @@ function do_restoration(
     
     if isnothing(Δ)
         return InfeasibleStopping()
+    end
+    if Δ == iteration_scalars.delta
+        iteration_status.radius_update_result = RADIUS_NO_CHANGE
+    else
+        iteration_status.radius_update_result = RADIUS_GROW
     end
     @logmsg log_level "$(pad_str)Restoration worked!"
     # If we are here, then restoration was successfull
@@ -128,6 +134,11 @@ function restore_nonlinearly!(
             indent,
             evaluate_mop = true
         ) indent
+        if Δ == iteration_scalars.delta
+            iteration_status.radius_update_result = RADIUS_NO_CHANGE
+        else
+            iteration_status.radius_update_result = RADIUS_GROW
+        end
         return Δ
     end
     return nothing
