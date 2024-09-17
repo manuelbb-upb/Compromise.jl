@@ -180,11 +180,13 @@ function optimize_with_algo(
     if outer_opts.final_nondominance_testing && !is_nd_tested
         @logmsg log_level "NONDOMINANCE TESTING"
         flags_dominated = _flags_of_dominated_caches(flags_dominated, all_optimizer_caches)        
+        #=
         for i = eachindex(all_optimizer_caches)
             if flags_dominated[i]
                 is_running[i] = false
             end
         end
+        =#
     end
 
     deleteat!(all_return_objects, flags_dominated)
