@@ -1,5 +1,6 @@
 module RBFModels
 
+import ..Compromise
 using ..Compromise.CompromiseEvaluators
 const CE = CompromiseEvaluators
 import ..Compromise: @ignoraise, DEFAULT_FLOAT_TYPE, project_into_box!
@@ -28,6 +29,11 @@ mutable struct MutableNumber{T}
   val :: T
 end
 @batteries MutableNumber
+
+function Compromise.universal_copy!(trgt::MutableNumber, src::MutableNumber)
+    trgt.val = src.val
+    nothing
+end
 
 val(m::MutableNumber) = m.val
 val!(m::MutableNumber, v) = (m.val = v)

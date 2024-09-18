@@ -185,8 +185,19 @@ pretty_row_vec(x)=string(x)
 function universal_copy!(::Nothing, ::Nothing)
 	return nothing
 end
+
+function universal_copy!(::Number, ::Number)
+	return nothing
+end
+
 function universal_copy!(trgt::TT, src::ST) where {TT,ST}
 	error("universal_copy! not defined for types $TT and $ST")
+end
+
+function universal_copy!(trgt::AbstractVector{T}, src::AbstractVector{F}) where{T, F}
+	empty!(trgt)
+	append!(trgt, src)
+	nothing
 end
 function universal_copy!(trgt::AbstractArray{T, N}, src::AbstractArray{F, N}) where{T, F, N}
 	copyto!(trgt, src)
