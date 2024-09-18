@@ -82,6 +82,9 @@ function SteepestDescentConfig(
 ) where {float_type, qp_normal_cfgType, qp_descent_cfgType}
     @assert 0 < backtracking_factor < 1 "`backtracking_factor` must be in (0,1)."
     @assert 0 < rhs_factor < 1 "`rhs_factor` must be in (0,1)."
+
+    @assert normal_step_norm == 1 || normal_step_norm == 2 || normal_step_norm == Inf "`normal_step_norm` must be 1, 2 or Inf."
+    @assert descent_step_norm == 1 || descent_step_norm == 2 || descent_step_norm == Inf "`descent_step_norm` must be 1, 2 or Inf."
     
     if backtracking_mode isa Symbol
         backtracking_mode = Val(backtracking_mode)
