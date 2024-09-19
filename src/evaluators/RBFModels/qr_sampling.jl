@@ -68,7 +68,8 @@ end
             qr = do_qr!(qr_ws, XJ, QRbuff)
         end
     end
-    return n_X - _n_X, qr
+    n_new = n_X - _n_X
+    return n_new, qr
 end
 
 copy_col!(mat_trgt, mat_src, j_trgt, j_src)=nothing
@@ -157,13 +158,16 @@ function fit_z_into_box!(
     σ = stepsize_in_box(x0, z, lb, ub)
     z .*= σ
     norm_z = LA.norm(z, norm_p)
-    if iszero(norm_z) 
+    #=if iszero(norm_z) 
         return RBFConstructionImpossible()
     elseif norm_z < th_qr
         ## c * norm_z = th_qr ⇔ c = th_qr / norm_z
         #c = th_qr / norm_z
         #@warn "Incompatible box constraints, changing σ from $σ to $(c*σ)."
         #z .*= c
+        return nothing
+    end=#
+    if norm_z < th_qr
         return nothing
     end
     return z

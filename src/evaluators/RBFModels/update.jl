@@ -1,5 +1,5 @@
 function CE.process_trial_point!(
-    rbf::RBFModel, xtrial, fxtrial, is_next::Bool;
+    rbf::RBFModel, xtrial, fxtrial, is_next;
     log_level=Info
 )
     if !is_next
@@ -46,7 +46,7 @@ function update_rbf_model!(
             unlock_read(rwlock)
             return nothing
         else
-            @logmsg log_level "$(pad_str)RBFModel: Starting surrogate update."
+            @logmsg log_level "$(pad_str)RBFModel: Starting surrogate update for Δ=$(Δ)."
         end
     unlock_read(rwlock)
 
@@ -55,7 +55,7 @@ function update_rbf_model!(
             rbf, Δ, x0, fx0, global_lb, global_ub; 
             delta_max, norm_p, log_level, indent
         )
-        @ignoraise n_X = eval_missing_values!(rbf, op, x0, n_X)
+        @ignoraise n_X = eval_missing_values!(rbf, op, x0, n_X, global_lb, global_ub)
         
         if n_X < rbf.min_points
             @warn "$(pad_str)Cannot make a fully linear RBF model."
@@ -65,10 +65,20 @@ function update_rbf_model!(
         val!(shape_parameter_ref, model_shape_parameter(rbf, Δ))
     
         n_X_affine_sampling = n_X
-        @unpack max_search_factor = rbf
 
         if n_X == min_points
+            @unpack max_search_factor, database, buffers, delta_max = rbf
+            @unpack lb, ub, filter_flags, db_index = buffers
             delta = delta_max * max_search_factor
+            
+            trust_region_bounds!(lb, ub, x0, delta, global_lb, global_ub)
+
+            box_search!(filter_flags, database, lb, ub; xor=false)
+            for ix in 1:n_X 
+                ci = db_index[ix]
+                ci < 1 && continue
+                filter_flags[ci] = false
+            end
             n_X = cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent)
         end
        
@@ -202,7 +212,7 @@ end
          )
         
         n_X += n_new
-        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) points in radius $(Δ1)."
+        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) points in radius $(@sprintf("%.2e", Δ1))."
 
         ## account for offset indices in chosen_index:
         unfilter_index!(db_index, filter_flags; ix1=_n_X+1, ix2=n_X) 
@@ -218,10 +228,11 @@ end
         _n_X += 1           # account for trust region center
         n_new = _n_X - n_X  # get a number for logging
         n_X = _n_X
-        @logmsg log_level "$(pad_str)RBFModel: Sampled $(n_new) points (now $n_X) in radius $(ΔZ1)."
+        @logmsg log_level "$(pad_str)RBFModel: Sampled $(n_new) points (now $n_X) in radius $(@sprintf("%.2e", ΔZ1))."
     end
     
-    if n_X < min_points || min_points < max_points
+    is_not_fully_linear = n_X < min_points 
+    if is_not_fully_linear
         Δ2 = max_search_factor .* delta_max
         trust_region_bounds!(lb, ub, x0, Δ2, global_lb, global_ub)
 
@@ -232,8 +243,9 @@ end
             filter_flags[ci] = false
         end
     end
-
-    if n_X < min_points
+    
+    if is_not_fully_linear
+        val!(is_fully_linear_ref, false)
         if enforce_fully_linear
             @warn "$(pad_str)Cannot make model fully linear."
         end
@@ -251,7 +263,7 @@ end
             xZ, ix1=2, ix2=n_X, norm_p, chosen_index = db_index, th = th_qr,    
         )
         _n_X = n_X + n_new
-        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) points in radius $(Δ2)."
+        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) points in radius $(@sprintf("%.2e", Δ2))."
         
         ## `filter_flags` will be used in cholesky sampling.
         ## to avoid unnecessary checks, unmark chosen indices here already:
@@ -278,22 +290,10 @@ end
             ix1=2, ix2=n_X, norm_p, qr, n_new = min_points - n_X
         )
         n_X += n_new
-        @logmsg log_level "$(pad_str)RBFModel: Sampled $(n_new) points in radius $(ΔZ2)."
+        @logmsg log_level "$(pad_str)RBFModel: Sampled $(n_new) points in radius $(@sprintf("%.2e", ΔZ2))."
     end
 
     return n_X
-end
-
-function find_additional_points!(
-    rbf, x0, n_X;
-    log_level, delta, indent::Int=0
-)
-    if n_X != rbf.min_points
-        least_squares_model!(rbf, n_X; log_level, indent)
-        return n_X
-    else
-        return cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent)
-    end
 end
 
 function least_squares_model!(rbf, n_X; log_level, indent::Int=0)
@@ -322,7 +322,7 @@ function cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent::Int=0)
     @unpack min_points, max_points, dim_x, dim_y, dim_π, kernel, poly_deg, th_cholesky = rbf
     @unpack X = params
     @unpack FX, Φ, L, Linv, Q, R, qr_ws_min_points, Qj, filter_flags = buffers
-    
+   
     ε = val(params.shape_parameter_ref)
     
     initial_qr_for_cholesky_test!(
@@ -367,7 +367,7 @@ function cholesky_point_search!(rbf, x0, n_X; log_level, delta, indent::Int=0)
     if n_new > 0
         indent += 1
         pad_str = lpad("", indent)
-        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) additional points in radius $delta."
+        @logmsg log_level "$(pad_str)RBFModel: Found $(n_new) additional points in radius $(@sprintf("%.2e", delta))."
     end
     return n_X
 end
@@ -420,7 +420,7 @@ function model_shape_parameter(rbf::RBFModel, Δ)
         try 
             ε = rbf.shape_parameter_function(Δ)
         catch err
-            @error "Could not compute shape parameter." exception=(err, catch_backtrace())
+            @warn "Could not compute shape parameter." exception=(err, catch_backtrace())
         end
         if ε > 0
             return ε
@@ -435,15 +435,20 @@ function model_shape_parameter(rbf::RBFModel, Δ)
     return _shape_parameter(rbf.kernel)
 end
 
-function eval_missing_values!(rbf, op, x0, n_X; ix1 = 2)
+function eval_missing_values!(rbf, op, x0, n_X, global_lb=nothing, global_ub=nothing; ix1 = 2)
     @unpack buffers, params = rbf
     @unpack X = params
     @unpack db_index, sorting_flags, FX, xZ, fxZ = buffers
 
-    return eval_missing_values!(X, FX, xZ, fxZ, db_index, sorting_flags, ix1, n_X, op, x0)
+    return eval_missing_values!(
+        X, FX, xZ, fxZ, db_index, sorting_flags, ix1, n_X, op, x0, global_lb, global_ub
+    )
 end
 
-@views function eval_missing_values!(X, FX, xtmp, fxtmp, db_index, sorting_flags, istart, iend, op, x0)
+@views function eval_missing_values!(
+    X, FX, xtmp, fxtmp, db_index, sorting_flags, istart, iend, op, x0,
+    global_lb=nothing, global_ub=nothing    
+)
 
     # `presort_eval_arrays!` will sort columns `istart:iend` in `X`, `FX` and `db_index` such that
     # indices `istart:i0` have database values already.
@@ -457,6 +462,7 @@ end
     _FX = FX[:, i0:iend]
     
     _X .+= x0       # for evaluation, undo shift
+    project_into_box!.(eachcol(_X), Ref(global_lb), Ref(global_ub))
     _FX .= NaN
     
     @ignoraise func_vals!(_FX, op, _X)

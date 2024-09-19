@@ -39,21 +39,21 @@ Base.@kwdef struct AlgorithmOptions{T <: AbstractFloat, SC, SCALER_CFG_TYPE}
 	stop_theta_tol_abs :: NumberWithDefault{T} = NumberWithDefault(eps(float_type), true)
 	
 	"Stop after the criticality routine has looped `stop_max_crit_loops` times."
-	stop_max_crit_loops :: Int = 10
+	stop_max_crit_loops :: Int = 100
 
 	# criticality test thresholds
 	"Lower bound for criticality before entering Criticality Routine."
-	eps_crit :: T = 0.01
+	eps_crit :: T = 1e-4
 	"Lower bound for feasibility before entering Criticality Routine."
-	eps_theta :: T = 0.05
+	eps_theta :: T = 1e-6
 	"At the end of the Criticality Routine the radius is possibly set to `crit_B * χ`."
-	crit_B :: T = 100
+	crit_B :: T = 1000
 	"Criticality Routine runs until `Δ ≤ crit_M * χ`."
 	crit_M :: T = 3*crit_B
 	"Trust region shrinking factor in criticality loops."
 	crit_alpha :: T = 0.1
 
-	backtrack_in_crit_routine :: Bool = true
+	backtrack_in_crit_routine :: Bool = false
 	
 	# initialization
 	"Initial trust region radius."
@@ -71,15 +71,17 @@ Base.@kwdef struct AlgorithmOptions{T <: AbstractFloat, SC, SCALER_CFG_TYPE}
 
 	# acceptance test 
 	"Whether to require *all* objectives to be reduced or not."
-	strict_acceptance_test :: Bool = true
+	trial_mode ::Union{Val{:max_diff}, Val{:min_rho}, Val{:max_rho}} = Val(:max_diff)
 	"Acceptance threshold."
-	nu_accept :: T = 1e-4 			# 1e-2 is suggested by Fletcher et. al. 
+	nu_accept :: T = 1e-2 			# 1e-2 is suggested by Fletcher et. al. 
 	"Success threshold."
-	nu_success :: T = 0.4 			# 0.9 is suggested by Fletcher et. al. 
+	nu_success :: T = 0.9 			# 0.9 is suggested by Fletcher et. al.
+	
+	trial_update :: Union{Val{:classic}, Val{:stepsize}} = Val(:classic)
 	
 	# compatibilty parameters
 	"Factor for normal step compatibility test. The smaller `c_delta`, the stricter the test."
-	c_delta :: T = 0.9 				# 0.7 is suggested by Fletcher et. al. 
+	c_delta :: T = 0.99 				# 0.7 is suggested by Fletcher et. al. 
 	"Factor for normal step compatibility test. The smaller `c_mu`, the stricter the test for small radii."
 	c_mu :: T = 100.0 				# 100 is suggested by Fletcher et. al.
 	"Exponent for normal step compatibility test. The larger `mu`, the stricter the test for small radii."
@@ -93,7 +95,7 @@ Base.@kwdef struct AlgorithmOptions{T <: AbstractFloat, SC, SCALER_CFG_TYPE}
 end
 
 ## to be sure that equality is based on field values:
-#@batteries AlgorithmOptions selfconstructor=false
+@batteries AlgorithmOptions selfconstructor=false
 
 ## outer constructor to automatically convert kwarg values to correct type:
 function AlgorithmOptions(
@@ -122,9 +124,10 @@ function AlgorithmOptions(
 	gamma_shrink_much,
 	gamma_shrink,
 	gamma_grow,
-	strict_acceptance_test,
+	trial_mode,
 	nu_accept,
 	nu_success,
+	trial_update,
 	c_delta,
 	c_mu,
 	mu,
@@ -132,6 +135,9 @@ function AlgorithmOptions(
 	psi_theta,
 ) where {float_type<:AbstractFloat, SC, SCALER_CFG_TYPE}
 	@assert scaler_cfg isa AbstractAffineScaler || scaler_cfg isa Val || scaler_cfg == :box || scaler_cfg == :none
+	if trial_mode isa Symbol
+		trial_mode = Val(Symbol)
+	end
 	return AlgorithmOptions{float_type, SC, SCALER_CFG_TYPE}(
 		float_type,
 		step_config,
@@ -159,9 +165,10 @@ function AlgorithmOptions(
 		gamma_shrink_much,
 		gamma_shrink,
 		gamma_grow,
-		strict_acceptance_test,
+		trial_mode,
 		nu_accept,
 		nu_success,
+		trial_update,
 		c_delta,
 		c_mu,
 		mu,
@@ -203,6 +210,7 @@ end
 
 Base.@kwdef struct SequentialOuterAlgorithmOptions{A}
 	sort_by_delta :: Bool = true
+	delta_factor :: Float64 = 0.0
 	initial_nondominance_testing :: Bool = false
 	nondominance_testing_offset :: Int = typemax(Int)
 	log_level :: LogLevel = Info

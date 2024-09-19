@@ -1,7 +1,7 @@
 name = "Compromise"
 uuid = "254bc946-86ae-484f-a9da-8147cb79ba93"
 authors = ["Manuel Berkemeier <manuelbb@mail.uni-paderborn.de> and contributors"]
-version = "0.3.0-DEV"
+version = "0.3.0"
 
 [deps]
 Accessors = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
@@ -29,21 +29,24 @@ UnPack = "3a884ed6-31ef-47d7-9d2a-63182c4928ed"
 [weakdeps]
 ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+OSQP = "ab2f91bb-94b4-55e3-9ba0-7f65df51de79"
 
 [extensions]
 ConcurrentRWLockExt = "ConcurrentUtils"
 ForwardDiffBackendExt = "ForwardDiff"
+OSQPStepsExt = "OSQP"
 
 [compat]
-julia = "1.6"
+julia = "1.9"
 
 [extras]
 ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+HiGHS = "87dc4568-4c63-4d18-b0c0-bb2238e4078b"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["SafeTestsets", "Test", "ConcurrentUtils", "ForwardDiff", "Random", "LinearAlgebra"]
+test = ["SafeTestsets", "Test", "ConcurrentUtils", "ForwardDiff", "Random", "LinearAlgebra", "OSQP"]

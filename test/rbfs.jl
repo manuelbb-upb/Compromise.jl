@@ -10,7 +10,6 @@ using Test
 import LinearAlgebra as LA
 
 import Random
-
 #import FiniteDiff: finite_difference_jacobian
 #%%
 function eval_rbf(x, φ, centers, coeff_φ, coeff_π, ε)
@@ -155,10 +154,10 @@ C.CE.operator_dim_out(op::RBFDummyOp) = op.dim_out
     @test cfg.database_size === nothing
     @test cfg.database_chunk_size === nothing
     @test cfg.enforce_fully_linear
-    @test cfg.search_factor == 2
-    @test cfg.max_search_factor == 2
-    @test cfg.th_qr == 1/4
-    @test cfg.th_cholesky == 1e-7
+    @test cfg.search_factor ≈ 2 + 1e-6
+    @test cfg.max_search_factor ≈ 2 + 1e-6
+    @test cfg.th_qr ≈ 1/(2*cfg.search_factor)
+    @test cfg.th_cholesky ≈ 1e-9
 
     dim_x = 2
     dim_y = 3
@@ -390,8 +389,14 @@ import Logging: Debug
             end
 
             _rbf = C.init_surrogate(cfg, op, nothing, Real)
-            copyto!(_rbf.params, rbf.params)
-            copyto!(_rbf.buffers, rbf.buffers)
+            for fn in fieldnames(typeof(rbf.params))
+                C.universal_copy!(getfield(_rbf.params, fn), getfield(rbf.params, fn))
+            end
+            for fn in fieldnames(typeof(rbf.buffers))
+                C.universal_copy!(getfield(_rbf.buffers, fn), getfield(rbf.buffers, fn))
+            end
+            #C.custom_copy!(_rbf.params, rbf.params)
+            #C.custom_copy!(_rbf.buffers, rbf.buffers)
             Dy = zeros(dim_x, dim_y)
             for _=1:10
                 xi = randx()

@@ -1,6 +1,6 @@
 using Compromise
 import ConcurrentUtils as CU
-
+import Logging
 function make_objf()
     objf_counter = Compromise.FuncCallCounter()
     return  objf_counter, function (y, x)
@@ -13,21 +13,25 @@ function make_objf()
 end
 
 ξ0 = rand(2, 10)
-opts = Compromise.ThreadedOuterAlgorithmOptions()
+opts = Compromise.ThreadedOuterAlgorithmOptions(;
+    inner_opts = AlgorithmOptions(;
+        log_level = Logging.Debug
+    )
+)
 
 mop = MutableMOP(; num_vars=2, reset_call_counters = false)
 objf_counter, o! = make_objf()
 add_objectives!(mop, o!, :rbfLocked; dim_out=2, func_iip=true, max_func_calls=10)
 r = Compromise.optimize_with_algo(mop, opts, ξ0);
 
-@test objf_counter.val <= 10
+@test Compromise.CE.read_counter(objf_counter) <= 10
 
 mop = MutableMOP(; num_vars=2, reset_call_counters = true)
 objf_counter, o! = make_objf()
 add_objectives!(mop, o!, :rbfLocked; dim_out=2, func_iip=true, max_func_calls=10)
 r = Compromise.optimize_with_algo(mop, opts, ξ0);
 
-@test objf_counter.val <= 10 * 10
+@test Compromise.CE.read_counter(objf_counter) <= 10 * 10
 
 rbf_db = Compromise.RBFModels.init_rbf_database(
     2, 2, nothing, nothing, Float64, Compromise.init_rw_lock(CU.ReadWriteLock)
@@ -40,7 +44,7 @@ objf_counter, o! = make_objf()
 add_objectives!(mop, o!, cfg; dim_out=2, func_iip=true, max_func_calls=50)
 r = Compromise.optimize_with_algo(mop, opts, ξ0);
 
-@test objf_counter.val <= 50
+@test Compromise.CE.read_counter(objf_counter) <= 50
 
 rbf_db = Compromise.RBFModels.init_rbf_database(
     2, 2, nothing, nothing, Float64, Compromise.init_rw_lock(CU.ReadWriteLock)
@@ -52,7 +56,7 @@ mop = MutableMOP(; num_vars=2, reset_call_counters = true)
 objf_counter, o! = make_objf()
 add_objectives!(mop, o!, cfg; dim_out=2, func_iip=true, max_func_calls=10)
 r = Compromise.optimize_with_algo(mop, opts, ξ0);
-@test objf_counter.val <= 10 * 10
+@test Compromise.CE.read_counter(objf_counter) <= 10 * 10
 
 rbf_db = Compromise.RBFModels.init_rbf_database(
     2, 2, nothing, nothing, Float64, Compromise.ConcurrentRWLock()
@@ -65,6 +69,6 @@ objf_counter, o! = make_objf()
 add_objectives!(mop, o!, cfg; dim_out=2, func_iip=true, max_func_calls=10)
 r = Any[]
 for ξi = eachcol(ξ0)
-    push!(r, optimize(mop, ξi))
+    push!(r, optimize(mop, ξi; algo_opts = AlgorithmOptions(; log_level = Logging.Debug)))
 end
-@test objf_counter.val <= 10 * 10
+@test Compromise.CE.read_counter(objf_counter) <= 10 * 10

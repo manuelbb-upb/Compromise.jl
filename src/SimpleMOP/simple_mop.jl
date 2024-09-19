@@ -487,15 +487,15 @@ function CE.copy_model(mod::SimpleMOPSurrogate)
         nl_eq_constraints,
         nl_ineq_constraints,
         num_vars,
-        deepcopy(mod_objectives),
-        deepcopy(mod_nl_eq_constraints),
-        deepcopy(mod_nl_ineq_constraints)
+        CE.copy_model(mod_objectives),
+        CE.copy_model(mod_nl_eq_constraints),
+        CE.copy_model(mod_nl_ineq_constraints)
     )
 end
 
 # The float_type is again fixed:
 float_type(mod::SimpleMOPSurrogate)=Float64
-stop_type(mod::SimpleMOPSurrogate)=Union{}
+stop_type(mod::SimpleMOPSurrogate)=Union{BudgetExhausted, RBFModels.RBFConstructionImpossible}
 
 # Getters are generated automatically:
 dim_vars(mod::SimpleMOPSurrogate)=mod.num_vars::Int
@@ -617,9 +617,9 @@ function update_models!(
     return nothing
 end
 
-function process_trial_point!(mod::SimpleMOPSurrogate, vals_trial, iteration_status)
+function process_trial_point!(mod::SimpleMOPSurrogate, vals_trial, isnext)
     xtrial = cached_x(vals_trial)
-    isnext = _trial_point_accepted(iteration_status)
+    #isnext = _trial_point_accepted(iteration_status)
     if !isnothing(mod.mod_objectives)
         CE.process_trial_point!(
             mod.mod_objectives, xtrial, cached_fx(vals_trial), isnext)

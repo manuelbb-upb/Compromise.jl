@@ -36,6 +36,7 @@ xopt = opt_vars(ret)
 #%%
 tp = TP._test_problem(Val(5), 3, Float64)
 mop = TP.to_mutable_mop(tp; mcfg=:rbf)
+#ret = optimize(mop, tp.x0; algo_opts = AlgorithmOptions(; c_delta=0.1))
 ret = optimize(mop, tp.x0)
 xopt = opt_vars(ret)
 @test sum(xopt) ≈ 1 rtol=1e-4

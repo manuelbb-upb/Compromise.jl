@@ -17,12 +17,12 @@ function criticality_routine!(
     χ = step_vals.crit_ref[]
     θ = cached_theta(vals)
     stop_code = nothing
+    break_because_incompatible = false
     if θ < eps_theta && (χ < eps_crit && Δ > crit_M * χ )
-        @logmsg log_level "$(pad_str)ITERATION $(it_index): CRITICALITY ROUTINE."
+        @logmsg log_level "$(pad_str)ITERATION $(it_index): CRITICALITY ROUTINE (θ = $θ)."
         ## init
         Δj = Δ_init = Δ
         j=0
-        Δj = Δ_init
         
         stop_code=nothing
         while Δ > crit_M * χ
@@ -53,19 +53,30 @@ function criticality_routine!(
                     log_level, indent
                 ) indent
             end
+            
             if !compatibility_test(step_vals.n, algo_opts, Δj)
-                break
+                # make sure we have compatible steps after exiting the loop
+                universal_copy!(step_vals, crit_cache.step_vals)
+                break_because_incompatible = true
+                # do not exit just yet;
+                # before, we recompute the descent direction in case we have to do 
+                # backtracking after exiting the while loop
+            else
+                Δ = Δj
             end
+            
             @ignorebreak stop_code = do_descent_step!(
-                step_cache, step_vals, Δj, mop, mod, scaler, lin_cons, scaled_cons, vals,
+                step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals,
                 mod_vals; log_level, finalize=backtrack_in_crit_routine
             ) indent
-            
+
+            break_because_incompatible && break
+
+            ## read criticality value to local var
             χ = step_vals.crit_ref[]
-            Δ = Δj
            
-            @ignorebreak stop_code =  check_stopping_criterion(
-                stop_crits, CheckPreCritLoop(), 
+            @ignorebreak stop_code = check_stopping_criterion(
+                stop_crits, CheckPostCritLoop(), 
                 mop, mod, scaler, lin_cons, scaled_cons, vals, vals_tmp,
                 mod_vals, filter, step_vals, step_cache, crit_cache, trial_caches, 
                 iteration_status, iteration_scalars, stop_crits,
@@ -74,19 +85,27 @@ function criticality_routine!(
 
             j+=1
         end       
-        _Δ = Δ  # storred for logging only
-        Δ = min(max(_Δ, algo_opts.crit_B*χ), Δ_init)
-
-        # make sure we have compatible steps
-        universal_copy!(step_vals, crit_cache.step_vals)
-
-        if !backtrack_in_crit_routine
+        _Δ = Δ  # `_Δ` storred for logging only
+        Δ = min(max(_Δ, crit_B*χ), Δ_init)
+        
+        if !backtrack_in_crit_routine           
             @ignoraise finalize_step_vals!(
                 step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals; log_level) indent
         end
-        @logmsg log_level """
-            $(pad_str) Finished after $j criticality loop(s), 
-            $(pad_str) Δ=$_Δ > Mχ=$(crit_M * χ), now Δ=$Δ."""
+        @logmsg log_level """\n
+            $(pad_str) Finished after $j criticality loop(s),\
+            $(if break_because_incompatible
+                "\n$(pad_str) normal step would be incompatible,"
+            else
+                ""
+            end)
+            $(pad_str) Values: 
+            $(pad_str) _Δ    = $_Δ
+            $(pad_str) Mξ    = $(crit_M * χ)
+            $(pad_str)   χ   = $(step_vals.crit_ref[]), 
+            $(pad_str)  ‖d‖₂ = $(LA.norm(step_vals.d)), 
+            $(pad_str)  ‖s‖₂ = $(LA.norm(step_vals.s)),
+            $(pad_str)  Δ    = $(Δ)""" 
     end
     if isa(stop_code, AbstractStoppingCriterion)
         return stop_code 

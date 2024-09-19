@@ -1,7 +1,8 @@
 
 function initialize_structs( 
     MOP::AbstractMOP, ξ0::RVec, algo_opts::AlgorithmOptions,
-    user_callback :: AbstractStoppingCriterion = NoUserCallback(),
+    user_callback :: AbstractStoppingCriterion = NoUserCallback();
+    log_time::Bool=true
 )
 
     @assert !isempty(ξ0) "Starting point array `x0` is empty."
@@ -10,12 +11,14 @@ function initialize_structs(
     n_vars = length(ξ0)
     @assert dim_vars(MOP) == n_vars "Mismatch in number of variables."
 
-    ## INITIALIZATION (Iteration 0)
+    ## IT_INITIALIZATION (Iteration 0)
     stats = @timed begin
         mop = initialize(MOP)
         initialize_structs_from_mop(mop, ξ0, algo_opts, user_callback)
     end
-    @logmsg algo_opts.log_level "Initialization complete after $(stats.time) sec."
+    if log_time 
+        @logmsg algo_opts.log_level "Initialization complete after $(stats.time) sec."
+    end
     return stats.value
 end
 
@@ -85,10 +88,13 @@ function initialize_structs_from_mop(
     )
 
     ## finally, compose information about the 0-th iteration for next_iterations:
-    iteration_status = IterationStatus(;
-        iteration_type = INITIALIZATION,
-        radius_update_result = INITIAL_RADIUS,
+    iteration_status = IterationStatus{T}(;
+        iteration_classification = IT_INITIALIZATION,
+        rho = NaNT,
+        rho_classification = RHO_NAN,
+        radius_update_result = RADIUS_INITIAL,
     )
+
     @unpack delta_init = algo_opts
     iteration_scalars = IterationScalars{T}(;
         it_index = 0,

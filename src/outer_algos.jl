@@ -56,17 +56,35 @@ function optimize_with_algo(
     is_running = .!(flags_dominated)
 
     all_return_objects = Vector{Any}(undef, num_sites)
+    fill!(all_return_objects, missing)
 
+    ultimate_stop_crit = nothing
     for (i, ocache) in enumerate(all_optimizer_caches)
         flags_dominated[i] && continue
         if ocache isa AbstractStoppingCriterion
             is_running[i] = false
             ret = ReturnObject(copy(_ξ0[:, i]), nothing, ocache)
             all_return_objects[i] = ret
+            if is_ultimate_stop_crit(ocache)
+                ultimate_stop_crit = ocache
+                break
+            end
         end
     end
 
-    sort_by = opt_cache -> opt_cache.iteration_scalars.delta
+    if !isnothing(ultimate_stop_crit)
+        for i in eachindex(all_optimizer_caches)
+            ret = ReturnObject(copy(_ξ0[:, i]), nothing, ultimate_stop_crit)
+            !is_running[i] && continue
+            !ismissing(all_return_objects[i]) && continue
+            is_running[i] = false
+            all_return_objects[i] = ret
+        end
+    end
+
+    delta_func = opt_cache -> opt_cache.iteration_scalars.delta
+    sort_func = opt_cache -> [cached_theta(opt_cache.vals), -delta_func(opt_cache)]
+    crit_func = opt_cache -> opt_cache.step_vals.crit_ref[]
     I = collect(1:length(all_optimizer_caches))
     
     outer_it_index = 0
@@ -75,39 +93,100 @@ function optimize_with_algo(
     while any(is_running)
         outer_it_index += 1
         is_nd_tested = false
-        sortperm!(I, all_optimizer_caches; by = sort_by, rev = true)
-        for (i, ξ0_i) in enumerate(eachcol(_ξ0))
+        
+        if outer_opts.sort_by_delta
+            sortperm!(I, all_optimizer_caches; by = sort_func)
+        end
+       
+        ## determine largest radius and criticality of running solutions
+        Δ_largest = crit_largest = 0
+        for i in I
             if flags_dominated[i]
+                ## just to be sure that we don't waste time one dominated solutions
                 is_running[i] = false
             end
             !is_running[i] && continue
+            opt_cache_i = all_optimizer_caches[i]
+            opt_cache_i.iteration_scalars.it_index < 1 && continue
+            χ = crit_func(opt_cache_i)
+            Δ = delta_func(opt_cache_i) 
+            if χ > crit_largest
+                crit_largest = χ
+            end
+            if Δ > Δ_largest
+                Δ_largest = Δ
+            end                
+        end
+        
+        counter = 0
+        for i in I
+            if flags_dominated[i]
+                is_running[i] = false
+            end
+        
+            !is_running[i] && continue
+            opt_cache_i = all_optimizer_caches[i]
+            if (
+                #counter > dim_objectives(MOP) && 
+                Δ_largest > 0 && (delta_func(opt_cache_i) <= Δ_largest * outer_opts.delta_factor)
+                #!isinf(crit_largest) &&
+                #crit_func(opt_cache_i) < 0.05 * crit_largest
+            )
+                continue
+            end
+            counter += 1
             @logmsg log_level """\n
             #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!
             # COLUMN $(i).
             #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!"""
-            stop_code = do_inner_iteration!(all_optimizer_caches[i], algo_opts)
+            stop_code = do_inner_iteration!(opt_cache_i, algo_opts)
             if stop_code isa AbstractStoppingCriterion
-                is_running[i] = false
-
                 @logmsg log_level """\n
                     #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!
                     # FINISHED COLUMN $(i):
                     # $(stop_message(stop_code))
                     #!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!#!"""
             
-                ret = ReturnObject(ξ0_i, all_optimizer_caches[i], stop_code)
+                is_running[i] = false
+                ret = ReturnObject(_ξ0[:, i], all_optimizer_caches[i], stop_code)
                 all_return_objects[i] = ret
+                if is_ultimate_stop_crit(stop_code)
+                    ultimate_stop_crit = stop_code
+                    break
+                end
             end 
+        end
+        if !isnothing(ultimate_stop_crit)
+            @logmsg log_level "STOP STOP STOP STOP STOP"
+            for (i, irunning) in enumerate(is_running)
+                !irunning && continue
+                !ismissing(all_return_objects[i]) && continue
+                is_running[i] = false
+                ret = ReturnObject(_ξ0[:, i], all_optimizer_caches[i], ultimate_stop_crit)
+                all_return_objects[i] = ret
+            end
         end
         if outer_it_index % nd_offset == 0
             @logmsg log_level "NONDOMINANCE TESTING"
             flags_dominated = _flags_of_dominated_caches(flags_dominated, all_optimizer_caches)
+            for i = eachindex(all_optimizer_caches)
+                if flags_dominated[i]
+                    is_running[i] = false
+                end
+            end
             is_nd_tested = true
         end
     end
     if outer_opts.final_nondominance_testing && !is_nd_tested
         @logmsg log_level "NONDOMINANCE TESTING"
-        flags_dominated = _flags_of_dominated_caches(flags_dominated, all_optimizer_caches)
+        flags_dominated = _flags_of_dominated_caches(flags_dominated, all_optimizer_caches)        
+        #=
+        for i = eachindex(all_optimizer_caches)
+            if flags_dominated[i]
+                is_running[i] = false
+            end
+        end
+        =#
     end
 
     deleteat!(all_return_objects, flags_dominated)
@@ -126,6 +205,7 @@ function _flags_of_dominated_caches(flags_dominated, caches)
         # `opt_cache_i` is currently not flagged as dominated
         vals_i = opt_cache_i.vals
         fi = cached_fx(vals_i)
+        θi = cached_theta(vals_i)
         # check if it is dominated by any other cache
         for (j, opt_cache_j) in enumerate(caches)
             flags_dominated[i] && break
@@ -133,9 +213,9 @@ function _flags_of_dominated_caches(flags_dominated, caches)
             flags_dominated[j] && continue  # if j is dominated by l, and i is dominated by j, then i is dominated by l as well
                                             # l ≤ j & j ≤ i ⟹ l ≤ i
             vals_j = opt_cache_j.vals
-            fj = cached_fx(vals_j)
-            
-            flags_dominated[i] = is_dominated_by(fi, fj)
+            fj = cached_fx(vals_j)    
+            θj = cached_theta(vals_j)
+            flags_dominated[i] = is_dominated_by(fi, fj, θi, θj)
         end
     end
     return flags_dominated
@@ -157,6 +237,21 @@ function is_dominated_by(a, b)
         end
     end
     return is_dom
+end
+
+function is_dominated_by(a, b, α, β)
+    if β > α
+        return false
+    end
+    if all( b .<= a )
+        if β < α
+            return true
+        end
+        if any( b .< a )
+            return true
+        end
+    end
+    return false
 end
 
 function do_inner_iteration!(optimizer_caches, algo_opts)

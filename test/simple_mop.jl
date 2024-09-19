@@ -102,8 +102,6 @@ function test_simple_cache(@nospecialize(mop))
     @test cache.Ex isa Vector{F}
     @test cache.Ax_min_b isa Vector{F}
     @test cache.Ex_min_c isa Vector{F}
-    @test cache.theta_ref isa Base.RefValue{F}
-    @test cache.phi_ref isa Base.RefValue{F}
 
     @test isequal(C.cached_ξ(cache), cache.ξ)
     @test isequal(C.cached_x(cache), cache.x)

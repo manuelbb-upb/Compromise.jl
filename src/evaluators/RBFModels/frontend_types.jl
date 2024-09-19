@@ -42,7 +42,7 @@
     enforce_fully_linear :: Bool = true
 
     "Enlargement factor for trust region to look for affinely independent points in."
-    search_factor :: T = 2.0
+    search_factor :: T = 2 + 1e-6
     sampling_factor :: T = 1.0
     
     "Enlargement factor for maximum trust region to look for affinely independent points in."
@@ -53,7 +53,7 @@
     th_qr :: T = 1/(2*search_factor)
 
     "Threshold for accepting additional points based on the Cholesky factors."
-    th_cholesky :: T = 1e-7
+    th_cholesky :: T = 1e-9
 
     ## TODO `max_evals` (soft limit on maximum number of evaluations)
     @assert isnothing(poly_deg) || poly_deg in (0,1)
@@ -204,6 +204,7 @@ Base.@kwdef struct RBFTrainingBuffers{T<:Real}
     v2 :: Vector{T}
 end
 
+#=
 function Base.copyto!(dst::RBFTrainingBuffers, src::RBFTrainingBuffers)
   for fn in (
     :lb, :ub, :FX, :xZ, :fxZ, :db_index, :sorting_flags, :Φ, :Q, :R, :Qj, :Rj, #src :Π,
@@ -224,6 +225,7 @@ function Base.copyto!(dst::RBFTrainingBuffers, src::RBFTrainingBuffers)
     copyto!(dst.qr_ws_min_points, src.qr_ws_min_points)
   end
 end
+=#
 
 function Base.show(io::IO, buffers::RBFTrainingBuffers{T}) where T
     iscompact = get(io, :compact, false)

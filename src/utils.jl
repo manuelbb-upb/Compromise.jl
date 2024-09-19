@@ -107,9 +107,8 @@ function log_stop_code(crit, log_level)
     @logmsg log_level stop_message(crit)
 end
 
-
 function compatibility_test_rhs(c_delta, c_mu, mu, Δ)
-    return c_delta * min(Δ, c_mu + Δ^(1+mu))
+    return c_delta * min(Δ, c_mu * Δ^(1+mu))
 end
 
 function compatibility_test(n, c_delta, c_mu, mu, Δ)
@@ -183,8 +182,23 @@ function pretty_row_vec(
 	return repr_str
 end
 pretty_row_vec(x)=string(x)
+function universal_copy!(::Nothing, ::Nothing)
+	return nothing
+end
 
-universal_copy!(trgt, src)=nothing
+function universal_copy!(::Number, ::Number)
+	return nothing
+end
+
+function universal_copy!(trgt::TT, src::ST) where {TT,ST}
+	error("universal_copy! not defined for types $TT and $ST")
+end
+
+function universal_copy!(trgt::AbstractVector{T}, src::AbstractVector{F}) where{T, F}
+	empty!(trgt)
+	append!(trgt, src)
+	nothing
+end
 function universal_copy!(trgt::AbstractArray{T, N}, src::AbstractArray{F, N}) where{T, F, N}
 	copyto!(trgt, src)
 	return nothing

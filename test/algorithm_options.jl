@@ -12,12 +12,12 @@ import Compromise: SteepestDescentConfig
             rhs_factor
         )
     end
-    for descent_step_norm in (0, 1, 2, 3)
+    for descent_step_norm in (-1, 0, 3, -Inf)
         @test_throws AssertionError SteepestDescentConfig(;
             descent_step_norm
         )
     end
-    for normal_step_norm in (0, 1, 3)
+    for normal_step_norm in (-1, 0, 3, -Inf)
         @test_throws AssertionError SteepestDescentConfig(;
             normal_step_norm
         )
@@ -28,10 +28,11 @@ import Compromise: SteepestDescentConfig
         @test cfg.backtracking_factor == 1//2
         @test isapprox(cfg.rhs_factor, 1e-3; rtol=eps(Float16))
         @test cfg.normalize_gradients == false
-        @test cfg.strict_backtracking == true
-        @test cfg.descent_step_norm == Inf
-        @test cfg.normal_step_norm == 2
-        @test cfg.qp_opt == Compromise.DEFAULT_QP_OPTIMIZER
+        @test cfg.backtracking_mode == Val(:max)
+        @test cfg.descent_step_norm == 1
+        @test cfg.normal_step_norm == 1
+        @test cfg.qp_normal_cfg == Compromise.default_qp_normal_cfg()
+        @test cfg.qp_descent_cfg == Compromise.default_qp_descent_cfg()
     end
     
     cfg_default = SteepestDescentConfig()
@@ -56,7 +57,6 @@ import Compromise: SteepestDescentConfig
     test_cfg(cfg_64; float_type=Float64)
 end
 
-
 @testset "AlgorithmOptions" begin
     # TODO
     opts = AlgorithmOptions()
@@ -66,41 +66,43 @@ end
     @test isequal(opts, _opts)
     
     function test_opts(opts; float_type=Compromise.DEFAULT_FLOAT_TYPE)
+        atol = eps(float_type)
+        rtol = sqrt(atol)
         @test opts.float_type == float_type
         @test opts.step_config isa SteepestDescentConfig{float_type}
         @test opts.scaler_cfg == Val(:box)
         @test opts.require_fully_linear_models
         @test opts.max_iter == 500
-        @test opts.stop_delta_min.val ≈ eps(float_type)
+        @test isapprox(opts.stop_delta_min.val, eps(float_type); rtol)
         @test opts.stop_delta_min.is_default
         @test opts.stop_xtol_rel == -Inf
         @test opts.stop_xtol_abs == -Inf
         @test opts.stop_ftol_rel == -Inf
         @test opts.stop_ftol_abs == -Inf
         @test opts.stop_crit_tol_abs == -Inf
-        @test opts.stop_theta_tol_abs.val ≈ eps(float_type)
+        @test isapprox(opts.stop_theta_tol_abs.val, eps(float_type); rtol, atol)
         @test opts.stop_theta_tol_abs.is_default
-        @test opts.stop_max_crit_loops == 10
-        @test opts.eps_crit ≈ .01 rtol=eps(Float16)
-        @test opts.eps_theta ≈ .05 rtol=eps(Float16)
-        @test opts.crit_B ≈ 100 rtol=eps(Float16)
-        @test opts.crit_M ≈ 3*opts.crit_B rtol=eps(Float16)
-        @test opts.crit_alpha ≈ .1 rtol=eps(Float16)
-        @test opts.backtrack_in_crit_routine
-        @test opts.delta_init ≈ .5 rtol=eps(Float16)
-        @test opts.delta_max ≈ 2^5 * opts.delta_init rtol=eps(Float16)
-        @test opts.gamma_shrink_much ≈ .1 rtol=eps(Float16)
-        @test opts.gamma_shrink ≈ .5 rtol=eps(Float16)
-        @test opts.gamma_grow ≈ 2 rtol=eps(Float16)
-        @test opts.strict_acceptance_test
-        @test opts.nu_accept ≈ 1e-4 rtol=eps(Float16)
-        @test opts.nu_success ≈ .4 rtol=eps(Float16)
-        @test opts.c_delta ≈ .9 rtol=eps(Float16)
-        @test opts.c_mu ≈ 100 rtol=eps(Float16)
-        @test opts.mu ≈ .01 rtol=eps(Float16)
-        @test opts.kappa_theta ≈ 1e-4 rtol=eps(Float16)
-        @test opts.psi_theta ≈ 2 rtol=eps(Float16)
-#        @test opts.nl_opt == :GN_DIRECT_L_RAND
+        @test opts.stop_max_crit_loops == 100
+        @test isapprox(opts.eps_crit, 1e-4; rtol, atol)
+        @test isapprox(opts.eps_theta, 1e-6; rtol, atol) 
+        @test opts.crit_B == 1000
+        @test opts.crit_M == 3*opts.crit_B
+        @test isapprox(opts.crit_alpha, 0.1; rtol, atol)
+        @test !opts.backtrack_in_crit_routine
+        @test isapprox(opts.delta_init, .5; rtol, atol)
+        @test isapprox(opts.delta_max, 2^5 * opts.delta_init; rtol, atol)
+        @test isapprox(opts.gamma_shrink_much, .1; rtol, atol)
+        @test isapprox(opts.gamma_shrink, .5; rtol, atol)
+        @test isapprox(opts.gamma_grow, 2; rtol, atol)
+        @test opts.trial_mode == Val{:max_diff}()
+        @test opts.trial_update == Val{:classic}()
+        @test isapprox(opts.nu_accept, 1e-2; rtol, atol)
+        @test isapprox(opts.nu_success, 0.9; rtol, atol)
+        @test isapprox(opts.c_delta, 0.99; rtol, atol)
+        @test isapprox(opts.c_mu, 100; rtol, atol)
+        @test isapprox(opts.mu, 0.01; rtol, atol) 
+        @test isapprox(opts.kappa_theta, 1e-4; rtol, atol)
+        @test isapprox(opts.psi_theta, 2; rtol, atol)
     end
 
     opts16 = AlgorithmOptions(; float_type=Float16)

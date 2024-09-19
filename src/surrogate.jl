@@ -38,7 +38,7 @@ function update_models!(
     return nothing
 end
 
-function process_trial_point!(mod::AbstractMOPSurrogate, vals_trial, iteration_status)
+function process_trial_point!(mod::AbstractMOPSurrogate, vals_trial, was_accepted)
     nothing
 end
 

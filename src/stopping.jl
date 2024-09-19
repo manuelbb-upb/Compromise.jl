@@ -6,7 +6,7 @@ struct CheckPostCritLoop <: AbstractStopPoint end
 #struct CheckPostRestoration <: AbstractStopPoint end
 
 stop_message(crit::AbstractStoppingCriterion)=repr(crit)
-
+stop_crit_type(::critType) where {critType<:AbstractStoppingCriterion}=critType
 function check_stopping_criterion(
     crit::AbstractStoppingCriterion,
     stop_point::AbstractStopPoint,
@@ -19,7 +19,7 @@ function check_stopping_criterion(
 end
 
 # ## Maximum Number of Iterations
-Base.@kwdef struct MaxIterStopping <: AbstractStoppingCriterion
+Base.@kwdef struct MaxIterStopping <: AbstractUltimateStoppingCriterion
     num_max_iter :: Int = 500    
 end
 
@@ -278,7 +278,7 @@ end
 
 # ## Special
 # Return value in case of infeasibility:
-struct InfeasibleStopping <: AbstractStoppingCriterion end
+struct InfeasibleStopping <: AbstractUltimateStoppingCriterion end
 Base.show(io::IO, ::InfeasibleStopping)=print(io, "InfeasibleStopping()")
 function stop_message(crit::InfeasibleStopping)
     return "INFEASIBLE: Cannot find a feasible point."
@@ -312,6 +312,10 @@ function unwrap_stop_crit(wcrit::WrappedStoppingCriterion)
     return unwrap_stop_crit(wcrit.crit)
 end
 unwrap_stop_crit(crit)=crit
+
+function is_ultimate_stop_crit(crit)
+    return unwrap_stop_crit(crit) isa AbstractUltimateStoppingCriterion
+end
 
 # ## Container
 mutable struct DefaultStoppingCriteriaContainer{F, UC, DC<:Tuple} <: AbstractStoppingCriterion
