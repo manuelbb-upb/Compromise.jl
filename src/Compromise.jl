@@ -80,45 +80,16 @@ const CE = CompromiseEvaluators
 include("evaluators/NonlinearFunctions.jl")
 using .NonlinearFunctions
 import .NonlinearFunctions: NonlinearParametricFunction
-# Import the optional extension `ForwardDiffBackendExt`, if `ForwardDiff` is available:
-
-using Requires
-@static if !isdefined(Base, :get_extension)
-    function __init__()
-        @require ForwardDiff="f6369f11-7733-5829-9624-2563aa707210" begin
-            include("../ext/ForwardDiffBackendExt/ForwardDiffBackendExt.jl")
-            import .ForwardDiffBackendExt
-        end
-        @require ConcurrentUtils = "3df5f688-6c4c-4767-8685-17f5ad261477" begin
-            include("../ext/ConcurrentRWLockExt/ConcurrentRWLockExt.jl")
-            import .ConcurrentRWLockExt
-        end
-    end
-end
 
 # As of now, it is not easy to export stuff from extensions.
 # We have this Getter instead:
 function ForwardDiffBackend()
-    if !isdefined(Base, :get_extension)
-        if isdefined(@__MODULE__, :ForwardDiffBackendExt)
-            return ForwardDiffBackendExt.ForwardDiffBackend()
-        end
-        return nothing
-    else
-        m = Base.get_extension(@__MODULE__, :ForwardDiffBackendExt)
-        return isnothing(m) ? m : m.ForwardDiffBackend()
-    end
+    m = Base.get_extension(@__MODULE__, :ForwardDiffBackendExt)
+    return isnothing(m) ? m : m.ForwardDiffBackend()
 end
 function ConcurrentRWLock()
-    if !isdefined(Base, :get_extension)
-        if isdefined(@__MODULE__, :ConcurrentRWLockExt)
-            return ConcurrentRWLockExt.ConcurrentRWLock()
-        end
-        return nothing
-    else
-        m = Base.get_extension(@__MODULE__, :ConcurrentRWLockExt)
-        return isnothing(m) ? m : m.ConcurrentRWLock()
-    end
+    m = Base.get_extension(@__MODULE__, :ConcurrentRWLockExt)
+    return isnothing(m) ? m : m.ConcurrentRWLock()
 end
 export ForwardDiffBackend, ConcurrentRWLock
 
