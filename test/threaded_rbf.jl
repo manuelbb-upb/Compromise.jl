@@ -44,7 +44,7 @@ objf_counter, o! = make_objf()
 add_objectives!(mop, o!, cfg; dim_out=2, func_iip=true, max_func_calls=50)
 r = Compromise.optimize_with_algo(mop, opts, ξ0);
 
-@test_broken Compromise.CE.read_counter(objf_counter) <= 50
+@test Compromise.CE.read_counter(objf_counter) <= 50
 
 rbf_db = Compromise.RBFModels.init_rbf_database(
     2, 2, nothing, nothing, Float64, Compromise.init_rw_lock(CU.ReadWriteLock)
@@ -69,6 +69,6 @@ objf_counter, o! = make_objf()
 add_objectives!(mop, o!, cfg; dim_out=2, func_iip=true, max_func_calls=10)
 r = Any[]
 for ξi = eachcol(ξ0)
-    push!(r, optimize(mop, ξi))
+    push!(r, optimize(mop, ξi; algo_opts = AlgorithmOptions(; log_level = Logging.Debug)))
 end
 @test Compromise.CE.read_counter(objf_counter) <= 10 * 10
