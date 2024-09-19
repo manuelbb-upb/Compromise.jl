@@ -21,8 +21,18 @@ constraints are violated.
 I don't really keep up a consistent versioning scheme.
 But the changes in this section have been significant enough to warrant some comments.
 
+#### Version 0.3
+I did not exactly keep track of all the changes, but some types and default 
+settings have changed, so a new breaking version is warranted.
+We have set-based algorithms now, but they are drafts only and mostly undocumented.
+Originally, it was `optimize_set`, but I tested `optimize_many` the most.
+Try `optimize_many` at your own risk.
+
+#### Version 0.2.0
+This was an intermediate version that has been superseded fast.
+
 #### Version 0.1.0
-This release is breaking, because the the RBF database is no longer thread-safe by default.
+This release is breaking, because the RBF database is no longer thread-safe by default.
 Instead, `ConcurrentUtils` is a weak dependency and no longer mandatory.
 To use a thread-safe RBF database, either configure your problem functions
 with `:rbfLocked`, use an `RBFConfig` with
