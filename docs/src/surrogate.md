@@ -10,6 +10,7 @@ as for the original MOP:
 
 ````julia
 float_type(::AbstractMOPSurrogate)::Type{<:AbstractFloat}=DEFAULT_FLOAT_TYPE
+stop_type(::AbstractMOPSurrogate) = Any
 dim_vars(::AbstractMOPSurrogate)::Int=-1
 dim_objectives(::AbstractMOPSurrogate)::Int=-1            # mandatory
 dim_nl_eq_constraints(::AbstractMOPSurrogate)::Int=0     # optional
@@ -29,7 +30,7 @@ The model does not yet have to be trained.
 
 ````julia
 init_models(
-    mop::AbstractMOP, n_vars, scaler;
+    mop::AbstractMOP, scaler;
     delta_max::Union{Number,AbstractVector{<:Number}},
     require_fully_linear::Bool=true,
 )::AbstractMOPSurrogate=nothing
@@ -39,40 +40,17 @@ It is trained with the update method `update_models!`.
 
 !!! note
     This method should always return `nothing`, **unless** you want to stop the algorithm.
-    Every other return value stops the algoritm and  `GenericStopping(ret_val)` is returned
-    as the stop code.
-    The constructor of `GenericStopping` logs the `ret_val`, so you could return a string
-    explaining the reason for stopping.
 
 ````julia
 function update_models!(
-    mod::AbstractMOPSurrogate, Δ, mop, scaler, vals, scaled_cons, algo_opts;
-    indent::Int
+    mod::AbstractMOPSurrogate, Δ, scaler, vals, scaled_cons;
+    log_level::LogLevel, indent::Int
 )
     return nothing
 end
 
-function process_trial_point!(mod::AbstractMOPSurrogate, vals_trial, update_results)
+function process_trial_point!(mod::AbstractMOPSurrogate, vals_trial, was_accepted)
     nothing
-end
-````
-
-If a model is radius-dependent,
-we also need a function to copy the parameters from a source model to a target model:
-
-````julia
-universal_copy(mod::AbstractMOPSurrogate)=mod
-universal_copy!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)=mod_trgt
-````
-
-These internal helpers are derived:
-
-````julia
-function universal_copy_model(mod::AbstractMOPSurrogate)
-    depends_on_radius(mod) ? universal_copy(mod) : mod
-end
-function universal_copy_model!(mod_trgt::AbstractMOPSurrogate, mod_src::AbstractMOPSurrogate)
-    depends_on_radius(mod_trgt) ? universal_copy!(mod_trgt, mod_src) : mod_trgt
 end
 ````
 
@@ -82,8 +60,7 @@ end
     Methods are in-place, return values are ignored, except for `AbstractStoppingCriterion`.
 
 Evaluation of nonlinear objective models requires the following method.
-`x` will be from the scaled domain, but if a model does not support scaling,
-then internally the `IdentityScaler()` is used:
+`x` will be from the scaled domain.
 
 ````julia
 function eval_objectives!(y::RVec, mod::M, x::RVec) where {M<:AbstractMOPSurrogate}
@@ -105,43 +82,16 @@ end
 As before, we use shorter function names in the algorithm.
 
 ````julia
-function objectives!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+function objectives!(y::RVecOrNothing, mop::AbstractMOPSurrogate, x::RVec)
     eval_objectives!(y, mop, x)
 end
-function nl_eq_constraints!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+function nl_eq_constraints!(y::RVecOrNothing, mop::AbstractMOPSurrogate, x::RVec)
     dim_nl_eq_constraints(mop) <= 0 && return nothing
     eval_nl_eq_constraints!(y, mop, x)
 end
-function nl_ineq_constraints!(y::RVec, mop::AbstractMOPSurrogate, x::RVec)
+function nl_ineq_constraints!(y::RVecOrNothing, mop::AbstractMOPSurrogate, x::RVec)
     dim_nl_ineq_constraints(mop) <= 0 && return nothing
     eval_nl_ineq_constraints!(y, mop, x)
-end
-````
-
-## Pre-Allocation
-The preallocation functions look the same as for `AbstractMOP`:
-
-````julia
-for (dim_func, func_suffix) in (
-    (:dim_objectives, :objectives_vector),
-    (:dim_nl_eq_constraints, :nl_eq_constraints_vector),
-    (:dim_nl_ineq_constraints, :nl_ineq_constraints_vector),
-)
-    func_name = Symbol("prealloc_", func_suffix)
-    yoink_name = Symbol("yoink_", func_suffix)
-    @eval begin
-        function $(func_name)(mop::AbstractMOPSurrogate)
-            dim = $(dim_func)(mop)
-            T = float_type(mop)
-            return Vector{T}(undef, dim)
-        end
-
-        function $(yoink_name)(mop::AbstractMOPSurrogate)
-            y = $(func_name)(mop) :: RVec
-            @assert eltype(y) == float_type(mop) "Vector eltype does not match problem float type."
-            return y
-        end
-    end
 end
 ````
 
@@ -169,12 +119,14 @@ end
 Here, the names of the wrapper functions start with “diff“.
 
 ````julia
-diff_objectives!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)=grads_objectives!(Dy, mod, x)
-function diff_nl_eq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+function diff_objectives!(Dy::RMatOrNothing, mod::AbstractMOPSurrogate, x::RVec)
+    return grads_objectives!(Dy, mod, x)
+end
+function diff_nl_eq_constraints!(Dy::RMatOrNothing, mod::AbstractMOPSurrogate, x::RVec)
     dim_nl_eq_constraints(mod) <= 0 && return nothing
     return grads_nl_eq_constraints!(Dy, mod, x)
 end
-function diff_nl_ineq_constraints!(Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+function diff_nl_ineq_constraints!(Dy::RMatOrNothing, mod::AbstractMOPSurrogate, x::RVec)
     dim_nl_ineq_constraints(mod) <= 0 && return nothing
     return grads_nl_ineq_constraints!(Dy, mod, x)
 end
@@ -203,14 +155,14 @@ end
 Wrappers for use in the algorithm:
 
 ````julia
-function vals_diff_objectives!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+function vals_diff_objectives!(y::RVecOrNothing, Dy::RMatOrNothing, mod::AbstractMOPSurrogate, x::RVec)
     eval_and_grads_objectives!(y, Dy, mod, x)
 end
-function vals_diff_nl_eq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+function vals_diff_nl_eq_constraints!(y::RVecOrNothing, Dy::RMatOrNothing, mod::AbstractMOPSurrogate, x::RVec)
     dim_nl_eq_constraints(mod) <= 0 && return nothing
     eval_and_grads_nl_eq_constraints!(y, Dy, mod, x)
 end
-function vals_diff_nl_ineq_constraints!(y::RVec, Dy::RMat, mod::AbstractMOPSurrogate, x::RVec)
+function vals_diff_nl_ineq_constraints!(y::RVecOrNothing, Dy::RMatOrNothing, mod::AbstractMOPSurrogate, x::RVec)
     dim_nl_ineq_constraints(mod) <= 0 && return nothing
     eval_and_grads_nl_ineq_constraints!(y, Dy, mod, x)
 end

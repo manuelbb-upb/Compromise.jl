@@ -31,6 +31,9 @@ abstract type AbstractNonlinearOperatorNoParams <: AbstractNonlinearOperator end
 operator_has_name(::AbstractNonlinearOperator)::Bool=false
 operator_name(::AbstractNonlinearOperator)=error("No name.")
 
+operator_dim_in(::AbstractNonlinearOperator)=-1
+operator_dim_out(::AbstractNonlinearOperator)=-1
+
 operator_chunk_size(::AbstractNonlinearOperator)::Integer=1
 operator_has_params(::AbstractNonlinearOperator)::Bool=false
 operator_can_partial(::AbstractNonlinearOperator)::Bool=false
@@ -53,34 +56,29 @@ end
 ## Call Counting
 
 ````julia
-import ..Compromise: AbstractStoppingCriterion, stop_message, @ignoraise
+import ..Compromise: AbstractUltimateStoppingCriterion, stop_message, @ignoraise
 
 Base.@kwdef mutable struct FuncCallCounter
-    val :: Int = 0
-    lock :: ReentrantLock = ReentrantLock()
+    val :: Threads.Atomic{Int} = Threads.Atomic{Int}(0)
 end
 
 function read_counter(fcc::FuncCallCounter)
-    lock(fcc.lock) do
-        fcc.val
-    end
+    fcc.val[]
 end
 
 function set_counter!(fcc::FuncCallCounter, v::Int)
-    lock(fcc.lock) do
-        fcc.val = v
-    end
+    Threads.atomic_xchg!(fcc.val, v)
     return v
 end
 
 function inc_counter!(fcc::FuncCallCounter)
-    return set_counter!(fcc, read_counter(fcc) + 1)
+    return Threads.atomic_add!(fcc.val, 1) + 1
 end
 
 func_call_counter(op::AbstractNonlinearOperator, ::Val)=nothing
 max_num_calls(op::AbstractNonlinearOperator, ::Val)::Real=Inf
 
-struct BudgetExhausted <: AbstractStoppingCriterion
+struct BudgetExhausted <: AbstractUltimateStoppingCriterion
     ni :: Int
     mi :: Int
     order :: Int
@@ -97,16 +95,14 @@ end
 request_func_calls(::Nothing, op::AbstractNonlinearOperator, v::Val, N::Integer)=Inf
 function request_func_calls(fcc::FuncCallCounter, op::AbstractNonlinearOperator, v::Val{i}, N::Integer) where i
     mfc = max_num_calls(op, v)
-    lock(fcc.lock) do
-        cfc = fcc.val
-        rem = min(mfc - cfc, N)
-        #show cfc, mfc, N, rem
-        if rem <= 0
-            return BudgetExhausted(cfc, mfc, i)
-        end
-        fcc.val += rem
-        return rem
+
+    cfc = read_counter(fcc)
+    rem = min(mfc - cfc, N)
+    if rem <= 0
+        return BudgetExhausted(cfc, mfc, i)
     end
+    set_counter!(fcc, cfc + rem)
+    return rem
 end
 ````
 
@@ -474,52 +470,30 @@ objects, such as databases, by reference so as to avoid a large memory-overhead.
 Moreover, we only need copies for radius-dependent models!
 You can ignore those methods otherwise.
 
+````julia
+copy_model(mod::AbstractSurrogateModel)=deepcopy(mod)
+copy_model(::Nothing)=nothing
+````
+
 A surrogate is initialized from its configuration and the operator it is meant to model:
 
 ````julia
 """
     init_surrogate(
-        model_config, nonlin_op, dim_in, dim_out, params, T
+        model_config, nonlin_op, params, T
     )
 
 Return a model subtyping `AbstractSurrogateModel`, as defined by
 `model_config::AbstractSurrogateModelConfig`, for the nonlinear operator `nonlin_op`.
-The operator (and model) has input dimension `dim_in` and output dimension `dim_out`.
 `params` is the current parameter object for `nonlin_op` and is cached.
 `T` is a subtype of `AbstractFloat` to indicate float_type of cache arrays.
 """
 function init_surrogate(
-    ::AbstractSurrogateModelConfig, op, dim_in, dim_out, params, T;
+    ::AbstractSurrogateModelConfig, op, params, T;
     require_fully_linear::Bool=true,
     delta_max::Union{Number, AbstractVector{<:Number}}=Inf,
 )::AbstractSurrogateModel
     return nothing
-end
-````
-
-A function to return a copy of a model. Should be implemented if
-`depends_on_radius` returns `true`.
-Note, that the returned object does not have to be an “independent” copy, we allow
-for shared objects (like mutable database arrays or something of that sort)...
-
-````julia
-universal_copy(mod::AbstractSurrogateModel)=mod
-````
-
-A function to copy parameters between source and target models, like `Base.copy!` or
-`Base.copyto!`. Relevant mostly for implicit trainable parameters.
-
-````julia
-universal_copy!(mod_trgt::AbstractSurrogateModel, mod_src::AbstractSurrogateModel)=mod_trgt
-
-function universal_copy_model(mod)
-    depends_on_radius(mod) && return universal_copy(mod)
-    return mod
-end
-
-function universal_copy_model!(mod_trgt, mod_src)
-    depends_on_radius(mod_trgt) && return universal_copy!(mod_trgt, mod_src)
-    return mod_trgt
 end
 ````
 
@@ -529,19 +503,20 @@ Because parameters are implicit, updates are in-place operations:
 """
     update!(surrogate_model, nonlinear_operator, Δ, x, fx, lb, ub)
 
-Update the model on a trust region of size `Δ` in a box with lower left corner `lb`
+Update the model on a trust region of size `Δ` in a global box with lower left corner `lb`
 and upper right corner `ub` (in the scaled variable domain)
 `x` is a sub-vector of the current iterate conforming to the inputs of `nonlinear_operator`
 in the scaled domain. `fx` are the outputs of `nonlinear_operator` at `x`.
 """
 function update!(
-    surr::AbstractSurrogateModel, op, Δ, x, fx, lb, ub; log_level, indent, kwargs...
+    surr::AbstractSurrogateModel, op, Δ, x, fx, global_lb, global_ub;
+    log_level, indent, kwargs...
 )
     return nothing
 end
 
 function process_trial_point!(
-    surr::AbstractSurrogateModel, xtrial, fxtrial, is_next::Bool
+    surr::AbstractSurrogateModel, xtrial, fxtrial, is_next
 )
     return nothing
 end
@@ -567,6 +542,9 @@ operator_has_name(op::AbstractNonlinearOperatorWrapper)=operator_has_name(wrappe
 operator_name(op::AbstractNonlinearOperatorWrapper)=operator_name(wrapped_operator(op))
 func_call_counter(op::AbstractNonlinearOperatorWrapper, v::Val)=func_call_counter(wrapped_operator(op), v)
 max_num_calls(op::AbstractNonlinearOperatorWrapper, v::Val)=max_num_calls(wrapped_operator(op), v)
+
+operator_dim_in(op::AbstractNonlinearOperatorWrapper)=operator_dim_in(wrapped_operator(op))
+operator_dim_out(op::AbstractNonlinearOperatorWrapper)=operator_dim_out(wrapped_operator(op))
 
 preprocess_inputs(op::AbstractNonlinearOperator, x::RVec) = x
 preprocess_inputs(op::AbstractNonlinearOperator, x::RMat) = x

@@ -25,8 +25,30 @@ constraints are violated.
 I don't really keep up a consistent versioning scheme.
 But the changes in this section have been significant enough to warrant some comments.
 
+#### Version 0.3
+I did not exactly keep track of all the changes, but some types and default
+settings have changed, so a new breaking version is warranted.
+We have set-based algorithms now, but they are drafts only and mostly undocumented.
+Originally, it was `optimize_set`, but I tested `optimize_many` the most.
+Try `optimize_many` at your own risk.
+
+#### Version 0.2.0
+This was an intermediate version that has been superseded fast.
+
+#### Version 0.2.0
+* We import and re-export `@set` and `@reset` from Accessors.jl.
+* `AlgorithmOptions` is no immutable and type-stable.
+  `@set algo_opts.float_type` will trigger cnoversion and setting of type-dependent defaults.
+* Likewise, `RBFConfig` is no longer mutable and has concrete types.
+* `TypedMOP` supports `@set` and `@reset` for `objectives`, `nl_eq_constraints` and
+  `nl_eq_constraints`.
+* The `AbstractNonlinearOperator` interface now requires `CompromiseEvaluators.operator_dim_in`
+  and `CompromiseEvaluators.operator_dim_out`.
+* The `ReturnObject` now references the whole cache (basically a NamedTuple of internal structs.)
+* `SimpleMOP` reset call counters by default.
+
 #### Version 0.1.0
-This release is breaking, because the the RBF database is no longer thread-safe by default.
+This release is breaking, because the RBF database is no longer thread-safe by default.
 Instead, `ConcurrentUtils` is a weak dependency and no longer mandatory.
 To use a thread-safe RBF database, either configure your problem functions
 with `:rbfLocked`, use an `RBFConfig` with
@@ -310,7 +332,8 @@ You can pass `max_func_calls` as a keyword argument to `add_objectives!` and sim
 Likewise, `max_grad_calls` restricts the number of gradient calls,
 `max_hess_calls` limits Hessian computations.
 
-For historic reasons, the count is kept between runs.
+~~For historic reasons, the count is kept between runs.~~
+The count is now reset between runs by default.
 To reset the count between runs (sequential or parallel), indicate it when setting up
 the MOP.
 
