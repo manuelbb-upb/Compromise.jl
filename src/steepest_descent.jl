@@ -253,7 +253,7 @@ function compute_steepest_descent_step!(
     return nothing
 end
 
-function finalize_step_vals!(
+function _finalize_step_vals!(
     step_cache::SteepestDescentCache, step_vals,
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
     log_level

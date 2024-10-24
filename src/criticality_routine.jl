@@ -88,7 +88,7 @@ function criticality_routine!(
         _Δ = Δ  # `_Δ` storred for logging only
         Δ = min(max(_Δ, crit_B*χ), Δ_init)
         
-        if !backtrack_in_crit_routine           
+        if !backtrack_in_crit_routine
             @ignoraise finalize_step_vals!(
                 step_cache, step_vals, Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals; log_level) indent
         end
@@ -100,12 +100,13 @@ function criticality_routine!(
                 ""
             end)
             $(pad_str) Values: 
-            $(pad_str) _Δ    = $_Δ
-            $(pad_str) Mξ    = $(crit_M * χ)
+            $(pad_str)  _Δ   = $_Δ
+            $(pad_str)  Mχ   = $(crit_M * χ)
+            $(pad_str)  Bχ   = $(crit_B * χ)
             $(pad_str)   χ   = $(step_vals.crit_ref[]), 
             $(pad_str)  ‖d‖₂ = $(LA.norm(step_vals.d)), 
             $(pad_str)  ‖s‖₂ = $(LA.norm(step_vals.s)),
-            $(pad_str)  Δ    = $(Δ)""" 
+            $(pad_str)   Δ   = $(Δ)""" 
     end
     if isa(stop_code, AbstractStoppingCriterion)
         return stop_code 

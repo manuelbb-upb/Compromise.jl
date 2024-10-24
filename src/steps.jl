@@ -53,12 +53,33 @@ function do_normal_step!(
     nothing
 end
 
-function finalize_step_vals!(
+function _finalize_step_vals!(
     step_cache::AbstractStepCache, step_vals,
     Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
     log_level
 )
     ## find stepsize and scale `step_vals.d`
+    return nothing
+end
+
+function finalize_step_vals!(
+    step_cache::AbstractStepCache, step_vals,
+    Δ, mop, mod, scaler, lin_cons, scaled_cons, vals, mod_vals;
+    log_level
+)
+    @ignoraise _finalize_step_vals!(
+        step_cache, step_vals, Δ, mop, mod, scaler, lin_cons,
+        scaled_cons, vals, mod_vals; log_level
+    )
+
+    @. step_vals.s = step_vals.n + step_vals.d
+    @. step_vals.xs = step_vals.xn + step_vals.d
+
+    project_into_box!(step_vals.xs, scaled_cons.lb, scaled_cons.ub)
+    step_vals.s .= step_vals.xs .- cached_x(vals)
+    step_vals.d .= step_vals.s .- step_vals.n
+
+    @ignoraise objectives!(step_vals.fxs, mod, step_vals.xn)
     return nothing
 end
 
@@ -72,20 +93,10 @@ function do_descent_step!(
         scaled_cons, vals, mod_vals; log_level)
     
     if finalize
-        @ignoraise finalize_step_vals!(
+        return finalize_step_vals!(
             step_cache, step_vals, Δ, mop, mod, scaler, lin_cons,
             scaled_cons, vals, mod_vals; log_level
         )
-    
-        @. step_vals.s = step_vals.n + step_vals.d
-        @. step_vals.xs = step_vals.xn + step_vals.d
-
-        project_into_box!(step_vals.xs, scaled_cons.lb, scaled_cons.ub)
-        step_vals.s .= step_vals.xs .- cached_x(vals)
-        step_vals.d .= step_vals.s .- step_vals.n
-
-        @ignoraise objectives!(step_vals.fxs, mod, step_vals.xn)
-
     end
     return nothing
 end
