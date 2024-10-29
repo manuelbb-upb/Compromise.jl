@@ -8,19 +8,20 @@ abstract type AbstractJuMPModelConfig end
 init_jump_model(::AbstractJuMPModelConfig, vals, delta)=nothing
 
 function OSQPOptimizerConfig(args...; kwargs...)
-    highs_ext = Base.get_extension(@__MODULE__, :OSQPStepsExt)
-    if isnothing(highs_ext)
+    osqp_ext = Base.get_extension(@__MODULE__, :OSQPStepsExt)
+    if isnothing(osqp_ext)
         @warn "Could not load OSQP extension."
         return nothing
     end
-    return highs_ext.OSQPOptimizerConfig(args...; kwargs...)
+    return osqp_ext.OSQPOptimizerConfig(args...; kwargs...)
 end
 
-Base.@kwdef struct HiGHSOptimizerConfig <: AbstractJuMPModelConfig
+Base.@kwdef struct HiGHSOptimizerConfig{T} <: AbstractJuMPModelConfig
     silent :: Bool = true
     ## restricting the number of threads might be necessary for thread-safety in case
     ## of parallel solver runs
     num_threads :: Union{Nothing, Int} = 1
+    highs_options :: T = nothing
 end
 @batteries HiGHSOptimizerConfig selfconstructor=false
 
@@ -43,7 +44,21 @@ function init_jump_model(highs_jump_cfg::HiGHSOptimizerConfig, vals, delta)
 
     num_vars = dim_vars(vals)
     JuMP.set_attribute(opt, "time_limit", max(10, Float64(2*num_vars)))
+
+    θ = cached_theta(vals)
+    if θ > 0 && θ < 1e-5
+        θexponent = floor(log10(θ))
+        highs_tol = max(1e-10, 10^float(θexponent - 1))
+        JuMP.set_attribute(opt, "primal_feasibility_tolerance", highs_tol)
+        JuMP.set_attribute(opt, "dual_feasibility_tolerance", highs_tol)
+    end
     
+    if !isnothing(highs_jump_cfg.highs_options)
+        for (attr, val) in pairs(highs_jump_cfg.highs_options)
+            JuMP.set_attribute(opt, attr, val)
+        end
+    end
+
     return opt
 end
 
@@ -92,7 +107,7 @@ function SteepestDescentConfig(
     if !isa(backtracking_mode, Union{Val{:all},Val{:any},Val{:max}})
         backtracking_mode = Val(:max)
     end
-    return SteepestDescentConfig{float_type, qp_normal_cfgType, qp_normal_cfgType}(
+    return SteepestDescentConfig{float_type, qp_normal_cfgType, qp_descent_cfgType}(
         float_type, 
         backtracking_factor,
         rhs_factor,
