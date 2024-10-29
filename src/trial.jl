@@ -142,23 +142,27 @@ function _trial_analysis(
     ## Subsec. 17.4.2
     eps_k = eps(eltype(fx)) * 10
     max_fx = maximum(fx)
-    del_k = eps_k * max_fx
+    del_k = eps_k * max(1, abs(max_fx))
 
     max_fxs = maximum(fxs)
     max_fxs_mod = maximum(fxs_mod)
     objf_decrease = maximum(fx) - max_fxs - del_k
     model_decrease = maximum(fx_mod) - max_fxs_mod
     is_f_step = θx <= 0 ? true : model_decrease >= f_step_test_rhs
-    model_decrease -= del_k
-    rho = if (
-        max_fxs == max_fxs_mod || 
-        (
-            abs(objf_decrease) < eps_k && abs(model_decrease) < eps_k
-        )
-    )   
-        rho_fallback
+    rho = if model_decrease <= 0
+        0
     else
-        objf_decrease / model_decrease
+        model_decrease -= del_k
+        if (
+            max_fxs == max_fxs_mod || 
+            (
+                abs(objf_decrease) < eps_k && abs(model_decrease) < eps_k
+            )
+        )   
+            rho_fallback
+        else
+            objf_decrease / model_decrease
+        end
     end
     return rho, is_f_step
 end
@@ -196,7 +200,7 @@ function __trial_analysis(
     ## following suggestions from “Trust Region Methods” by Conn et. al.,
     ## Subsec. 17.4.2
     eps_k = eps(eltype(fx)) * 10
-    del_k = eps_k * mapreduce(abs, max, fx)
+    del_k = eps_k * max(1, mapreduce(abs, max, fx))
     
     rho = rho0
     _i = 0
@@ -272,7 +276,7 @@ function _update_radius(
             end
             delta_new = max(
                 gamma_factor * delta,
-                len_s
+                min(len_s, delta)
             )
             radius_update = RADIUS_SHRINK
         elseif rho_classification == RHO_SUCCESS
@@ -296,9 +300,9 @@ function _update_radius(
 
     if isnothing(radius_update)
         if rho >= 0
-            delta_new = len_s * gamma_shrink
+            delta_new = min(len_s, delta) * gamma_shrink
         else
-            delta_new = len_s * gamma_shrink_much
+            delta_new = min(len_s, delta) * gamma_shrink_much
         end
         ## safe-guard against zero steps
         delta_new = max(delta_new, delta * gamma_shrink_much / 10) 
