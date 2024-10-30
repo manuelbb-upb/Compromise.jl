@@ -138,30 +138,41 @@ function _trial_analysis(
     f_step_test_rhs, θx;
     rho_fallback = 1
 )
-    ## following suggestions from “Trust Region Methods” by Conn et. al.,
+    ## loosely following suggestions from “Trust Region Methods” by Conn et. al.,
     ## Subsec. 17.4.2
-    eps_k = eps(eltype(fx)) * 10
-    max_fx = maximum(fx)
-    del_k = eps_k * max(1, abs(max_fx))
 
+    max_fx = maximum(fx)
+    max_fx_mod = maximum(fx_mod)
     max_fxs = maximum(fxs)
     max_fxs_mod = maximum(fxs_mod)
-    objf_decrease = maximum(fx) - max_fxs - del_k
-    model_decrease = maximum(fx_mod) - max_fxs_mod
-    is_f_step = θx <= 0 ? true : model_decrease >= f_step_test_rhs
-    rho = if model_decrease <= 0
-        0
+
+    tol = eps(eltype(fx)) * 2
+    del_k = tol * max(1, abs(max_fx))
+
+    rho = nothing
+    if max_fxs_mod > max_fx_mod
+        model_decrease = rho = 0
     else
-        model_decrease -= del_k
+        model_decrease = max_fx_mod - max_fxs_mod + del_k
+    end
+
+    if max_fxs > max_fx
+        objf_decrease = rho = 0
+    else
+        objf_decrease = max_fx - max_fxs + del_k
+    end
+    
+    is_f_step = θx <= 0 ? true : model_decrease >= f_step_test_rhs
+
+    if isnothing(rho)
+        _rho = objf_decrease / model_decrease
         if (
-            max_fxs == max_fxs_mod || 
-            (
-                abs(objf_decrease) < eps_k && abs(model_decrease) < eps_k
-            )
+            max_fxs == max_fxs_mod || (abs(objf_decrease) < tol && abs(max_fx) > tol)
         )   
-            rho_fallback
+            #rho = max(_rho, rho_fallback)
+            rho = rho_fallback
         else
-            objf_decrease / model_decrease
+            rho = _rho
         end
     end
     return rho, is_f_step
@@ -199,27 +210,29 @@ function __trial_analysis(
 )
     ## following suggestions from “Trust Region Methods” by Conn et. al.,
     ## Subsec. 17.4.2
-    eps_k = eps(eltype(fx)) * 10
-    del_k = eps_k * max(1, mapreduce(abs, max, fx))
+    tol = eps(eltype(fx)) * 2
+    del_k = tol * max(1, mapreduce(abs, max, fx))
     
     rho = rho0
     _i = 0
     for i = eachindex(diff_fx)
+        rho_i = nothing
         diff_mod = diff_fx_mod[i]
-        diff_mod <= 0 && continue
-        _i = i
-        diff_mod -= del_k
-        diff_mod <= 0 && continue
-        diff_func = diff_fx[i] - del_k
-        rho_i = if (
-            fxs[i] == fxs_mod[i] ||
-            (
-                abs(diff_mod) < del_k && abs(diff_func) < del_k
-            )
-        )
-            rho_fallback
-        else
-            diff_func / diff_mod
+        if diff_mod <= 0
+            rho_i = 0
+        end
+        diff_func = diff_fx[i]
+        if diff_func <= 0
+            rho_i = 0
+        end
+        diff_mod += del_k
+        diff_func += del_k
+        if isnothing(rho_i)
+            if ( fxs[i] == fxs_mod[i] || ( abs(diff_mod) < del_k && abs(fx[i]) > del_k ) )
+                rho_i = rho_fallback
+            else
+                rho_i = diff_func / diff_mod
+            end
         end
         if comp_op(rho_i , rho)
             _i = i
@@ -228,8 +241,8 @@ function __trial_analysis(
     end
     
     is_f_step = θx <= 0
-    if !is_f_step &&_i > 0
-        is_f_step = diff_fx_mod[_i] >= f_step_test_rhs
+    if !is_f_step && _i > 0
+        is_f_step = diff_fx_mod[_i] + del_k >= f_step_test_rhs
     end
 
     if isinf(rho) || isnan(rho)
@@ -274,17 +287,15 @@ function _update_radius(
                 rho_frac = (rho - nu_accept) / (nu_success - nu_accept)
                 gamma_factor += rho_frac * (1 - gamma_shrink)
             end
-            delta_new = max(
-                gamma_factor * delta,
-                min(len_s, delta)
-            )
+            delta_new = gamma_factor * min(len_s, delta)
+            
             radius_update = RADIUS_SHRINK
         elseif rho_classification == RHO_SUCCESS
             delta_new = min(
                 delta_max,
                 max(
                     gamma_grow * len_s,
-                    (1 + (1 - gamma_grow)/2) * delta
+                    (1 + (1 - gamma_grow)/10) * delta
                 )
             )
             if delta_new > delta
@@ -305,7 +316,7 @@ function _update_radius(
             delta_new = min(len_s, delta) * gamma_shrink_much
         end
         ## safe-guard against zero steps
-        delta_new = max(delta_new, delta * gamma_shrink_much / 10) 
+        delta_new = max(delta_new, delta * gamma_shrink_much / 1000) 
         radius_update = RADIUS_SHRINK
     end
 
