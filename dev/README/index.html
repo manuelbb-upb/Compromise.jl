@@ -35,12 +35,12 @@ end</code></pre><pre class="documenter-example-output"><code class="nohighlight 
 x0   = [-2.00e+00, 5.00e-01]
 x*   = [2.00e+00, 9.92e-01]
 f(x*)= [7.06e-05, 3.97e+00]
-code = MinimumRadiusStopping(2.220446049250313e-16)</code></pre><p><code>ret</code> is the return object. You can query it using functions like <code>opt_vars</code> etc. Final argument vector:</p><pre><code class="language-julia hljs">opt_vars(ret)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{Float64}:
- 1.9999999203478478
- 0.9915961870532211</code></pre><p>Final value vector:</p><pre><code class="language-julia hljs">opt_objectives(ret)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{Float64}:
- 7.062407205079386e-5
- 3.9664553722849347</code></pre><p>Final constraint vector:</p><pre><code class="language-julia hljs">opt_nl_ineq_constraints(ret)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">1-element Vector{Float64}:
- -3.983262679569884</code></pre><h3 id="More-RBF-Options"><a class="docs-heading-anchor" href="#More-RBF-Options">More RBF Options</a><a id="More-RBF-Options-1"></a><a class="docs-heading-anchor-permalink" href="#More-RBF-Options" title="Permalink"></a></h3><p>Instead of passing <code>:rbf</code>, you can also pass an <code>RBFConfig</code>. To use the Gaussian kernel:</p><pre><code class="language-julia hljs">cfg = RBFConfig(; kernel=GaussianKernel())</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">RBFConfig{Float64, GaussianKernel{Int64}, Nothing, Nothing, Nothing}
+code = Compromise.RBFModels.RBFConstructionImpossible()</code></pre><p><code>ret</code> is the return object. You can query it using functions like <code>opt_vars</code> etc. Final argument vector:</p><pre><code class="language-julia hljs">opt_vars(ret)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{Float64}:
+ 1.9999999664068777
+ 0.9915961871734978</code></pre><p>Final value vector:</p><pre><code class="language-julia hljs">opt_objectives(ret)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">2-element Vector{Float64}:
+ 7.062407002401063e-5
+ 3.966455372764016</code></pre><p>Final constraint vector:</p><pre><code class="language-julia hljs">opt_nl_ineq_constraints(ret)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">1-element Vector{Float64}:
+ -3.983262864044531</code></pre><h3 id="More-RBF-Options"><a class="docs-heading-anchor" href="#More-RBF-Options">More RBF Options</a><a id="More-RBF-Options-1"></a><a class="docs-heading-anchor-permalink" href="#More-RBF-Options" title="Permalink"></a></h3><p>Instead of passing <code>:rbf</code>, you can also pass an <code>RBFConfig</code>. To use the Gaussian kernel:</p><pre><code class="language-julia hljs">cfg = RBFConfig(; kernel=GaussianKernel())</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">RBFConfig{Float64, GaussianKernel{Int64}, Nothing, Nothing, Nothing}
   kernel: GaussianKernel{Int64}
   poly_deg: Int64 1
   shape_parameter_function: Nothing nothing
@@ -106,8 +106,8 @@ end
 add_objectives!(
     mop, counted_objf, cfg; dim_out=2, func_iip=false,
 )</code></pre><p>First run:</p><pre><code class="language-julia hljs">ret = optimize(mop, [-2.0, 0.5])
-objf_counter[]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">75</code></pre><p>Second run:</p><pre><code class="language-julia hljs">ret = optimize(mop, [-2.0, 0.0])
-objf_counter[]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">140</code></pre><h5 id="Parallelism"><a class="docs-heading-anchor" href="#Parallelism">Parallelism</a><a id="Parallelism-1"></a><a class="docs-heading-anchor-permalink" href="#Parallelism" title="Permalink"></a></h5><p>The RBF update algorithm has a lock to access the database in a safe way (?) when multiple optimization runs are done concurrently. There even is an “algorithm” for this:</p><pre><code class="language- hljs">using ConcurrentUtils
+objf_counter[]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">65</code></pre><p>Second run:</p><pre><code class="language-julia hljs">ret = optimize(mop, [-2.0, 0.0])
+objf_counter[]</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">129</code></pre><h5 id="Parallelism"><a class="docs-heading-anchor" href="#Parallelism">Parallelism</a><a id="Parallelism-1"></a><a class="docs-heading-anchor-permalink" href="#Parallelism" title="Permalink"></a></h5><p>The RBF update algorithm has a lock to access the database in a safe way (?) when multiple optimization runs are done concurrently. There even is an “algorithm” for this:</p><pre><code class="language- hljs">using ConcurrentUtils
 mop = MutableMOP(; num_vars=2)
 add_objectives!(
     mop, counted_objf, :rbfLocked; dim_out=2, func_iip=false,
@@ -127,14 +127,14 @@ add_objectives!(
 )
 ret1 = optimize(mop, [-2, .5])</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">ReturnObject
 x0   = [-2.00e+00, 5.00e-01]
-x*   = [-1.74e-03, 5.00e-01]
-f(x*)= [4.26e+00, 6.26e+00]
+x*   = [1.98e+00, 5.00e-01]
+f(x*)= [2.51e-01, 2.25e+00]
 code = Compromise.CompromiseEvaluators.BudgetExhausted(10, 10, 0)</code></pre><p>Now, there is no budget left for a second run:</p><pre><code class="language-julia hljs">ret2 = optimize(mop, [-2, -.5])
 ismissing(opt_vars(ret2))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">true</code></pre><p>Here is a remedy:</p><pre><code class="language-julia hljs">mop.reset_call_counters=true
 ret1 = optimize(mop, [-2, .5])</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">ReturnObject
 x0   = [-2.00e+00, 5.00e-01]
-x*   = [-1.74e-03, 5.00e-01]
-f(x*)= [4.26e+00, 6.26e+00]
+x*   = [1.98e+00, 5.00e-01]
+f(x*)= [2.51e-01, 2.25e+00]
 code = Compromise.CompromiseEvaluators.BudgetExhausted(10, 10, 0)</code></pre><p>Now, there <strong>is</strong> budget left for a second run:</p><pre><code class="language-julia hljs">ret2 = optimize(mop, [-2, -.5])
 !ismissing(opt_vars(ret2))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">true</code></pre><h3 id="Automatic-Differentiation"><a class="docs-heading-anchor" href="#Automatic-Differentiation">Automatic Differentiation</a><a id="Automatic-Differentiation-1"></a><a class="docs-heading-anchor-permalink" href="#Automatic-Differentiation" title="Permalink"></a></h3><p>There is an optional <code>ForwardDiff</code> extension. To use a derivative-based model without specifying the gradients by-hand, first load <code>ForwardDiff</code>.</p><pre><code class="language-julia hljs">using ForwardDiff</code></pre><p>Now, <code>ForwardDiffBackend</code> should be available:</p><pre><code class="language-julia hljs">diff_backend = ForwardDiffBackend()</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">ForwardDiffBackendExt.ForwardDiffBackend()</code></pre><p>Set up the problem:</p><pre><code class="language-julia hljs">mop = MutableMOP(2)
 add_objectives!(mop, objective_function, :exact;
@@ -142,7 +142,7 @@ add_objectives!(mop, objective_function, :exact;
 )
 
 optimize(mop, -5 .+ 10 .* rand(2))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">ReturnObject
-x0   = [4.15e+00, -3.62e+00]
-x*   = [3.65e+00, -3.12e+00]
-f(x*)= [1.97e+01, 7.21e+00]
-code = MinimumRadiusStopping(2.220446049250313e-16)</code></pre><hr/><p><em>This page was generated using <a href="https://github.com/fredrikekre/Literate.jl">Literate.jl</a>.</em></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.7.0 on <span class="colophon-date" title="Tuesday 29 October 2024 19:49">Tuesday 29 October 2024</span>. Using Julia version 1.9.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+x0   = [-4.60e+00, -1.18e-01]
+x*   = [-3.60e+00, -1.18e-01]
+f(x*)= [3.26e+01, 3.21e+01]
+code = MinimumRadiusStopping(2.220446049250313e-16)</code></pre><hr/><p><em>This page was generated using <a href="https://github.com/fredrikekre/Literate.jl">Literate.jl</a>.</em></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.7.0 on <span class="colophon-date" title="Wednesday 30 October 2024 13:03">Wednesday 30 October 2024</span>. Using Julia version 1.9.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
